@@ -56,22 +56,25 @@ class Director:
         target_broll_ratio = Config.TARGET_BROLL_RATIO  # 0.60
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        target_shots = max(2, int(math.ceil(target_broll_seconds / 3.0)))
-
+        target_shots = max(3, int(math.ceil(target_broll_seconds / 2.0)))
+ 
         director_prompt = f"""You are the Master AI Video Director for ultra-high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
 
 MANDATORY DIRECTING OBJECTIVES:
-1. EXACT ~60% B-ROLL TIMELINE COVERAGE (CRITICAL USER MANDATE):
+1. HIGH-VELOCITY ~60% B-ROLL TIMELINE COVERAGE (CRITICAL USER MANDATE):
    - Total Video Duration: {video_duration:.2f} seconds.
    - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (MUST BE ~60% of video).
    - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds (approximately 40% of video).
-   - Target Number of B-roll Shots: Generate EXACTLY {target_shots} shots (typically 2.8s to 3.8s each).
+   - FAST-MOVING B-ROLL & SNAPPY PACING:
+     • TikTok/Reels/Shorts attention spans demand rapid visual stimulation!
+     • Generate EXACTLY {target_shots} rapid, snappy cuts (1.5s to 2.4s each, fast-moving B-roll).
+     • Streamer / creator reaction meme cutaways (Speed, CaseOh, Jynxzi) MUST be extra fast and punchy (1.4s to 2.0s at 1.25x+ speed).
+     • NEVER let any cutaway drag out longer than 2.5 seconds!
    - RHYTHMIC TIMELINE DISTRIBUTION:
-     • Keep the speaker on screen (A-roll) for the first 1.0s to 1.8s opening hook.
-     • Cut to engaging B-roll for 2.8s to 3.8s.
-     • Cut back to speaker face for 0.8s to 1.5s for narrative connection or punchlines.
-     • Distribute shots from the beginning all the way through the end of the video!
-     • Cumulative B-roll duration MUST equal approximately {target_broll_seconds:.1f} seconds (~60% of total video)!
+     • Keep speaker on screen for the first 0.8s to 1.5s opening hook.
+     • Cut to fast-moving B-roll for 1.5s to 2.4s.
+     • Cut back to speaker face for 0.6s to 1.2s for quick connection or punchlines.
+     • Distribute shots evenly across the entire duration targeting ~{target_broll_seconds:.1f}s total B-roll.
 
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - The visuals MUST directly match and amplify the EXACT topic and words being spoken at each timestamp!
@@ -195,11 +198,15 @@ Return ONLY a valid JSON object matching this schema:
                 if style not in ("stockpile", "collage", "meme"):
                     style = "stockpile"
 
-                duration = min(max_dur, max(2.2, float(shot.get("duration", 3.2))))
+                # Fast-paced short-form duration: 1.4s to 2.4s (snappy cuts)
+                max_clip = min(2.5, max_dur)
+                duration = min(max_clip, max(1.4, float(shot.get("duration", 2.0))))
+                if style == "meme":
+                    duration = min(2.0, max(1.3, duration))
                 end = min(video_duration, start + duration)
                 duration = round(end - start, 2)
 
-                if duration < 1.5:
+                if duration < 1.0:
                     continue
 
                 # Extract and clean micro_prompts (3-5 rapid cuts)
@@ -364,23 +371,23 @@ Return ONLY a valid JSON object matching this schema:
         """Deterministic fallback edit plan ensuring ~60% B-roll coverage and contextual keywords."""
         shots = []
         target_broll_dur = video_duration * Config.TARGET_BROLL_RATIO
-        shot_dur = 3.0
-        num_shots = max(2, int(round(target_broll_dur / shot_dur)))
+        shot_dur = 2.0  # Fast-moving cuts every 2.0 seconds
+        num_shots = max(3, int(round(target_broll_dur / shot_dur)))
 
         # Distribute shots across available segments
         step = max(1, len(segments) // (num_shots + 1))
         chosen_indices = [min(len(segments) - 1, (i + 1) * step) for i in range(num_shots)]
         chosen_indices = sorted(list(set(chosen_indices)))
 
-        last_end = 1.0  # leave 1.0s speaker hook
+        last_end = 0.8  # leave 0.8s speaker hook
 
         for idx in chosen_indices:
             seg = segments[idx]
-            start = max(last_end + 0.5, seg["start"])
-            if start >= video_duration - 1.5:
+            start = max(last_end + 0.4, seg["start"])
+            if start >= video_duration - 1.2:
                 break
 
-            dur = min(3.8, max(2.5, seg.get("duration", 3.0)))
+            dur = min(2.4, max(1.4, seg.get("duration", 2.0)))
             end = min(video_duration, start + dur)
             dur = round(end - start, 2)
             seg_text = seg.get("text", "").lower()

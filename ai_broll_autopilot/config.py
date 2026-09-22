@@ -39,8 +39,10 @@ class Config:
 
     # B-Roll Target Ratio & Duration Constraints
     TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))  # 60% of total video duration
-    MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "4"))
+    MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "3"))
     STOCKPILE_START_OFFSET_SECONDS: float = float(os.getenv("STOCKPILE_START_OFFSET_SECONDS", "6.0"))
+    BROLL_SPEED_MULTIPLIER: float = float(os.getenv("BROLL_SPEED_MULTIPLIER", "1.25"))  # 1.25x high-velocity playback
+    STREAMER_SPEED_MULTIPLIER: float = float(os.getenv("STREAMER_SPEED_MULTIPLIER", "1.30"))  # 1.30x snappy reaction pace
     RAPID_FIRE_MONTAGE_ENABLED: bool = True
     TARGET_MICRO_CLIPS_PER_SHOT: int = 4  # 3 to 5 rapid cuts per cutaway
     MIN_MICRO_CLIP_DURATION: float = 0.4

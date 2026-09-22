@@ -424,7 +424,7 @@ class MemeEngine:
                 "reason": f"Punchline SFX for {t_key} meme"
             }
 
-        # 5. Render 1080x1920 MP4 with subtle Ken Burns motion
+        # 5. Render 1080x1920 MP4 with high-velocity dynamic punch-in zoom motion (1.25x+ energy)
         video_out = work_dir / f"{sid}_{t_key}.mp4"
         cmd = [
             "ffmpeg", "-y",
@@ -432,12 +432,16 @@ class MemeEngine:
             "-i", str(img_out)
         ]
 
+        # Fast punch-in zoom (1.0x -> 1.18x over duration) to simulate intense streamer reaction motion
+        v_filter = (
+            f"scale=eval=frame:w='1080*(1+0.18*t/{dur:.2f})':h='1920*(1+0.18*t/{dur:.2f})',"
+            f"crop=1080:1920,setsar=1,fps=30"
+        )
+
         if sfx_info and os.path.exists(sfx_info["path"]):
             cmd.extend(["-i", str(sfx_info["path"])])
-            # Scale to 1080:1920 with padding, and pad audio to duration
             filter_str = (
-                f"[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
-                f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v];"
+                f"[0:v]{v_filter}[v];"
                 f"[1:a]apad[a]"
             )
             cmd.extend([
@@ -446,12 +450,8 @@ class MemeEngine:
                 "-map", "[a]"
             ])
         else:
-            filter_str = (
-                f"scale=1080:1920:force_original_aspect_ratio=decrease,"
-                f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30"
-            )
             cmd.extend([
-                "-vf", filter_str,
+                "-vf", v_filter,
                 "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
                 "-shortest"
             ])
@@ -473,5 +473,6 @@ class MemeEngine:
         shot["asset_path"] = str(video_out)
         shot["style"] = "meme"
         shot["status"] = "matched"
+        shot["speed"] = Config.STREAMER_SPEED_MULTIPLIER
         logger.info(f"MemeEngine generated 9:16 cutaway video: {video_out.name} ({dur:.2f}s, {video_out.stat().st_size / 1024:.1f} KB)")
         return shot

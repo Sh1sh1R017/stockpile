@@ -59,17 +59,26 @@ class TimelineEngine:
 
             trans = shot.get("transition", {})
             type_in = trans.get("type_in", "dissolve")
-            dur_in = min(0.35, trans.get("duration_in", 0.3))
-            type_out = trans.get("type_out", "dissolve")
-            dur_out = min(0.35, trans.get("duration_out", 0.3))
+            from ai_broll_autopilot.config import Config
+            is_streamer_or_meme = (
+                shot.get("style") == "meme" or
+                any(k in str(shot.get("meme_template", "")).lower() for k in ("speed", "caseoh", "jynx", "homeless", "pornstar", "shave", "doctor", "chad", "harold")) or
+                any(k in str(shot.get("search_prompt", "")).lower() for k in ("speed", "caseoh", "jynx", "streamer"))
+            )
+            speed = float(shot.get("speed") or (Config.STREAMER_SPEED_MULTIPLIER if is_streamer_or_meme else Config.BROLL_SPEED_MULTIPLIER))
 
-            # Apply transition effects
+            # Snappy fast-paced transitions (0.18s max)
+            dur_in = min(0.20, trans.get("duration_in", 0.18))
+            dur_out = min(0.20, trans.get("duration_out", 0.18))
+
+            # Apply transition effects with high-velocity speed acceleration
             if type_in == "slide_left":
                 # Whip slide in from right
                 filters.append(
-                    f"{broll_stream}scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
                     f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
-                    f"setpts=PTS-STARTPTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(1-(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
                 filters.append(
@@ -78,9 +87,10 @@ class TimelineEngine:
             elif type_in == "slide_right":
                 # Whip slide in from left
                 filters.append(
-                    f"{broll_stream}scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
                     f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
-                    f"setpts=PTS-STARTPTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(-1+(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
                 filters.append(
@@ -89,24 +99,26 @@ class TimelineEngine:
             elif type_in == "cut":
                 # Direct hard cut
                 filters.append(
-                    f"{broll_stream}scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
                     f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
-                    f"setpts=PTS-STARTPTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 filters.append(
                     f"[{current_layer}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
                 )
             else:
-                # Default: Smooth crossfade alpha dissolve (in and out)
-                shot_dur = max(0.5, end_t - start_t)
+                # Default: Smooth crossfade alpha dissolve (in and out) with speedup
+                shot_dur = max(0.4, end_t - start_t)
                 fade_out_st = max(0.0, shot_dur - dur_out)
                 filters.append(
-                    f"{broll_stream}scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
                     f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
                     f"format=yuva420p,"
                     f"fade=t=in:st=0:d={dur_in:.2f}:alpha=1,"
                     f"fade=t=out:st={fade_out_st:.2f}:d={dur_out:.2f}:alpha=1,"
-                    f"setpts=PTS-STARTPTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 filters.append(
                     f"[{current_layer}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"

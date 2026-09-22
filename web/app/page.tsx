@@ -96,6 +96,7 @@ interface ShotDetail {
   start_time: number;
   end_time: number;
   duration?: number;
+  speed?: number;
   dialogue_quote?: string;
   emotional_core?: string;
   visceral_human_metaphor?: string;
@@ -205,7 +206,7 @@ export default function StudioDashboard() {
   // Playhead Cutaway Inserter States
   const [showInsertCutawayModal, setShowInsertCutawayModal] = useState<boolean>(false);
   const [insertCutawayTime, setInsertCutawayTime] = useState<number>(0);
-  const [insertCutawayDur, setInsertCutawayDur] = useState<number>(2.5);
+  const [insertCutawayDur, setInsertCutawayDur] = useState<number>(1.8);
   const [insertCutawayStyle, setInsertCutawayStyle] = useState<"stockpile" | "meme">("stockpile");
   const [insertCutawayPrompt, setInsertCutawayPrompt] = useState<string>("focused professional");
   const [insertCutawayMemeTemplate, setInsertCutawayMemeTemplate] = useState<string>("stepped_in_shit");
@@ -446,7 +447,7 @@ export default function StudioDashboard() {
             template_key: selectedTemplateKey,
             captions: memeCaptions,
             sfx_file: selectedSfxFile,
-            duration: 2.8
+            duration: 2.0
           }),
         });
         if (res.ok) {
@@ -467,7 +468,7 @@ export default function StudioDashboard() {
             template_key: selectedTemplateKey,
             captions: memeCaptions,
             sfx_file: selectedSfxFile,
-            duration: memeTargetShot.duration || 2.8
+            duration: memeTargetShot.duration ? Math.min(2.0, memeTargetShot.duration) : 1.8
           }),
         });
 
@@ -1938,6 +1939,9 @@ export default function StudioDashboard() {
                         </h4>
                         <span className="text-[10px] text-zinc-500 font-mono">
                           ({((shot.end_time - shot.start_time) || 2.5).toFixed(1)}s duration)
+                        </span>
+                        <span className="text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                          ⚡ {shot.speed ? `${shot.speed}x` : (shot.style === "meme" ? "1.30x" : "1.25x")}
                         </span>
                         {shot.style === "meme" && (
                           <span className="text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
