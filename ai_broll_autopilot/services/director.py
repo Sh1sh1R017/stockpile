@@ -186,7 +186,7 @@ Return ONLY a valid JSON object matching this schema:
                     break
 
                 style = shot.get("style", "stockpile").lower()
-                if style not in ("stockpile", "collage"):
+                if style not in ("stockpile", "collage", "meme"):
                     style = "stockpile"
 
                 duration = min(max_dur, max(2.2, float(shot.get("duration", 3.2))))
@@ -217,7 +217,7 @@ Return ONLY a valid JSON object matching this schema:
                         f"{base_prompt} detail",
                     ]
 
-                clean_shots.append({
+                shot_entry = {
                     "shot_id": shot.get("shot_id", f"broll_{len(clean_shots)+1}"),
                     "start_time": round(start, 2),
                     "end_time": round(end, 2),
@@ -230,8 +230,34 @@ Return ONLY a valid JSON object matching this schema:
                     "search_prompt": base_prompt,
                     "overlay_type": "cutaway",
                     "narrative_reason": shot.get("narrative_reason", "Narrative reinforcement"),
-                })
+                }
+                if style == "meme":
+                    shot_entry["meme_template"] = shot.get("meme_template", "stepped_in_shit")
+                    shot_entry["meme_captions"] = shot.get("meme_captions", {})
+
+                clean_shots.append(shot_entry)
                 last_end = end
+
+            # Ensure at least 1 shot is a meme cutaway for viral retention and meme pack utilization
+            has_meme = any(s.get("style") == "meme" for s in clean_shots)
+            if not has_meme and clean_shots:
+                target_idx = 1 if len(clean_shots) >= 2 else 0
+                target_shot = clean_shots[target_idx]
+                target_shot["style"] = "meme"
+                diag = target_shot.get("dialogue_quote", "").strip()
+                diag_lower = diag.lower()
+                if any(w in diag_lower for w in ["person", "meet", "talk", "real", "truth", "good", "better", "shake", "dinner"]):
+                    target_shot["meme_template"] = "drake"
+                    target_shot["meme_captions"] = {
+                        "top_text": "15-minute Zoom interview",
+                        "bottom_text": diag[:45] if diag else "Meet in person & have dinner"
+                    }
+                else:
+                    target_shot["meme_template"] = "stepped_in_shit"
+                    target_shot["meme_captions"] = {
+                        "shoe_text": diag[:45] if diag else "Bad Habit / Excuse"
+                    }
+                logger.info(f"Auto-injected meme cutaway on [{target_shot['shot_id']}] ({target_shot['meme_template']}) for viral retention.")
 
             total_broll_time = sum(s["duration"] for s in clean_shots)
             coverage_pct = round((total_broll_time / video_duration) * 100, 1) if video_duration > 0 else 0
@@ -355,12 +381,16 @@ Return ONLY a valid JSON object matching this schema:
                 f"{search_prompt} workflow",
             ]
 
-            shots.append({
+            # In heuristic plan, designate the 2nd shot as a viral meme cutaway
+            is_meme = (len(shots) == 1)
+            shot_style = "meme" if is_meme else "stockpile"
+
+            shot_data = {
                 "shot_id": f"broll_{len(shots)+1}",
                 "start_time": round(start, 2),
                 "end_time": round(end, 2),
                 "duration": dur,
-                "style": "stockpile",
+                "style": shot_style,
                 "dialogue_quote": seg.get("text", ""),
                 "emotional_core": emotional_core,
                 "visceral_human_metaphor": f"Visualizing {search_prompt}",
@@ -368,7 +398,12 @@ Return ONLY a valid JSON object matching this schema:
                 "search_prompt": search_prompt,
                 "overlay_type": "cutaway",
                 "narrative_reason": f"Contextual illustration of: {seg_text[:40]}",
-            })
+            }
+            if is_meme:
+                shot_data["meme_template"] = "stepped_in_shit"
+                shot_data["meme_captions"] = {"shoe_text": seg.get("text", "")[:45] or "Bad habits & excuses"}
+
+            shots.append(shot_data)
             last_end = end
 
         total_broll = sum(s["duration"] for s in shots)
