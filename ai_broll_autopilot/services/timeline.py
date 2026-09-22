@@ -17,9 +17,14 @@ class TimelineEngine:
     def build_filtergraph(
         self,
         shots: List[Dict[str, Any]],
-        audio_sfx_list: List[Dict[str, Any]] = None
+        audio_sfx_list: List[Dict[str, Any]] = None,
+        ass_subtitles_path: str = None,
+        bgm_stream_idx: int = None,
+        bgm_volume: float = 0.15,
+        ducking_enabled: bool = True
     ) -> Tuple[str, str, str]:
-        """Construct FFmpeg complex filtergraph for compositing B-roll video transitions and audio mixing.
+        """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
+        kinetic subtitles, and multi-track audio mixing with BGM auto-ducking.
 
         Returns:
             (filtergraph_string, final_video_layer_name, final_audio_layer_name)
@@ -40,8 +45,6 @@ class TimelineEngine:
         # -------------------------------------------------------------
         # 2. B-Roll Video Overlays with Dynamic Transitions
         # -------------------------------------------------------------
-        # In FFmpeg cmd, input 0 is base video.
-        # B-roll videos will be inputs 1 .. len(shots).
         for idx, shot in enumerate(shots, start=1):
             if not shot.get("asset_path"):
                 continue
@@ -112,20 +115,26 @@ class TimelineEngine:
             current_layer = next_layer
 
         # -------------------------------------------------------------
-        # 3. Multi-Track Audio Mixing (Dialogue + SFX + Stingers)
+        # 3. Kinetic Subtitle Burn-In (Overlayed on top of all video)
+        # -------------------------------------------------------------
+        if ass_subtitles_path:
+            import os
+            from pathlib import Path
+            if os.path.exists(ass_subtitles_path):
+                clean_ass = str(Path(ass_subtitles_path).resolve()).replace('\\', '/').replace(':', '\\:')
+                filters.append(f"[{current_layer}]subtitles='{clean_ass}'[subbed_v]")
+                current_layer = "subbed_v"
+
+        # -------------------------------------------------------------
+        # 4. Multi-Track Audio Mixing (Dialogue + SFX + BGM Ducking)
         # -------------------------------------------------------------
         final_audio_layer = "final_a"
+        mix_streams = ["[base_a]"]
+        filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[base_a]")
 
-        if not audio_sfx_list:
-            # No additional SFX: pass base audio
-            filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo[final_a]")
-        else:
-            # Inputs offset: 0 is base video, 1..len(shots) are B-rolls
-            # Audio SFX inputs start at 1 + len(shots)
+        # 4a. Transition stingers & Foley SFX
+        if audio_sfx_list:
             audio_inputs_start = 1 + len(shots)
-            mix_streams = ["[base_a]"]
-            filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[base_a]")
-
             for a_idx, sfx_item in enumerate(audio_sfx_list):
                 stream_in = f"[{audio_inputs_start + a_idx}:a]"
                 stream_out = f"sfx_{a_idx}"
@@ -139,10 +148,34 @@ class TimelineEngine:
                 )
                 mix_streams.append(f"[{stream_out}]")
 
-            # Mix all streams together
-            total_audio_inputs = len(mix_streams)
+        # 4b. Background Music (BGM) with Auto-Ducking
+        if bgm_stream_idx is not None:
+            bgm_in = f"[{bgm_stream_idx}:a]"
+            vol_val = max(0.02, min(0.60, bgm_volume))
+            if ducking_enabled:
+                # Dynamic sidechain compression: ducks BGM volume when speaker talks
+                filters.append(
+                    f"{bgm_in}aformat=sample_rates=48000:channel_layouts=stereo,"
+                    f"volume={vol_val:.2f}[bgm_pre]"
+                )
+                filters.append(
+                    f"[bgm_pre][base_a]sidechaincompress=threshold=0.07:ratio=5:attack=40:release=350[bgm_ducked]"
+                )
+                mix_streams.append("[bgm_ducked]")
+            else:
+                filters.append(
+                    f"{bgm_in}aformat=sample_rates=48000:channel_layouts=stereo,"
+                    f"volume={vol_val:.2f}[bgm_ducked]"
+                )
+                mix_streams.append("[bgm_ducked]")
+
+        # Final audio mix
+        total_audio_inputs = len(mix_streams)
+        if total_audio_inputs > 1:
             filters.append(
                 f"{''.join(mix_streams)}amix=inputs={total_audio_inputs}:duration=first:dropout_transition=0:normalize=0[final_a]"
             )
+        else:
+            final_audio_layer = "base_a"
 
         return ";".join(filters), current_layer, final_audio_layer

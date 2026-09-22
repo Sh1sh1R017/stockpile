@@ -85,6 +85,35 @@ class ShotMemeRequest(BaseModel):
     duration: Optional[float] = Field(None, description="Target duration in seconds")
 
 
+class ShotTrimRequest(BaseModel):
+    start_time: float = Field(..., description="New shot start timestamp in seconds")
+    end_time: float = Field(..., description="New shot end timestamp in seconds")
+    duration: Optional[float] = Field(None, description="Optional explicit duration")
+
+
+class ShotInsertRequest(BaseModel):
+    start_time: float = Field(..., description="Timestamp to insert cutaway at")
+    duration: float = Field(2.5, description="Duration of cutaway in seconds")
+    style: str = Field("stockpile", description="Cutaway style: stockpile or meme")
+    dialogue_quote: Optional[str] = Field("", description="Spoken dialogue context")
+    search_prompt: Optional[str] = Field("focused business professional", description="Stock search query")
+    meme_template: Optional[str] = Field("stepped_in_shit", description="Meme template if style is meme")
+
+
+class StockSwapRequest(BaseModel):
+    download_url: Optional[str] = Field(None, description="Pexels candidate MP4 download URL")
+    prompt: Optional[str] = Field(None, description="Updated search prompt description")
+
+
+class JobSettingsRequest(BaseModel):
+    subtitles_enabled: Optional[bool] = Field(None, description="Toggle kinetic subtitles on/off")
+    subtitle_style: Optional[str] = Field(None, description="Subtitle style: hormozi, beast, clean")
+    subtitle_position: Optional[str] = Field(None, description="Subtitle position: bottom, center, top")
+    bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
+    bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
+    bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Start background queue processor on API server boot."""
@@ -888,9 +917,256 @@ async def update_shot_to_meme(job_id: str, shot_id: str, req: ShotMemeRequest):
     }
 
 
+# =========================================================================
+# Editor Refinement Endpoints: Stock Search, Swap, Trim, Insert, BGM & Subs
+# =========================================================================
+
+@app.get("/api/stock/search")
+async def search_stock_footage(query: str, per_page: int = 6, orientation: str = "portrait"):
+    """Search Pexels API for vertical stock videos to swap in the editor."""
+    if not query.strip():
+        return []
+    return await pexels_service.search_candidates(query=query.strip(), per_page=per_page, orientation=orientation)
+
+
+@app.post("/api/jobs/{job_id}/shots/{shot_id}/swap-stock")
+async def swap_shot_stock_footage(job_id: str, shot_id: str, req: StockSwapRequest):
+    """Replace an existing shot's video asset with a chosen Pexels candidate or prompt."""
+    job = db.get_job(job_id)
+    if not job or not job.edit_plan or "shots" not in job.edit_plan:
+        raise HTTPException(status_code=404, detail="Job or edit plan not found")
+
+    target_shot = next((s for s in job.edit_plan["shots"] if s.get("shot_id") == shot_id), None)
+    if not target_shot:
+        raise HTTPException(status_code=404, detail=f"Shot '{shot_id}' not found")
+
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    out_file = work_dir / f"{shot_id}_pexels_swap.mp4"
+    target_dur = float(target_shot.get("duration") or (target_shot.get("end_time", 3.0) - target_shot.get("start_time", 0.0)))
+
+    new_asset = None
+    if req.download_url:
+        new_asset = await pexels_service.download_candidate(req.download_url, out_file, duration=target_dur)
+    elif req.prompt:
+        new_asset = await pexels_service.search_and_download(req.prompt, out_file, duration=target_dur, orientation="portrait")
+
+    if not new_asset or not Path(new_asset).exists():
+        raise HTTPException(status_code=500, detail="Failed to acquire selected stock footage")
+
+    target_shot["asset_path"] = str(Path(new_asset).resolve())
+    target_shot["style"] = "stockpile"
+    target_shot["search_prompt"] = req.prompt or target_shot.get("search_prompt", "stock video")
+    target_shot["status"] = "matched"
+    db.save_job(job)
+
+    sc = dict(target_shot)
+    sc["video_url"] = f"/api/jobs/{job.job_id}/broll/{shot_id}"
+    sc["thumbnail_url"] = f"/api/jobs/{job.job_id}/broll/{shot_id}/thumb"
+    return {"status": "success", "shot": sc}
+
+
+@app.post("/api/jobs/{job_id}/shots/{shot_id}/upload-custom")
+async def upload_custom_shot_clip(job_id: str, shot_id: str, file: UploadFile = File(...)):
+    """Upload a custom video file from local disk to replace a shot's B-roll footage."""
+    job = db.get_job(job_id)
+    if not job or not job.edit_plan or "shots" not in job.edit_plan:
+        raise HTTPException(status_code=404, detail="Job or edit plan not found")
+
+    target_shot = next((s for s in job.edit_plan["shots"] if s.get("shot_id") == shot_id), None)
+    if not target_shot:
+        raise HTTPException(status_code=404, detail=f"Shot '{shot_id}' not found")
+
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    raw_custom = work_dir / f"raw_custom_{shot_id}_{file.filename}"
+    out_file = work_dir / f"{shot_id}_custom.mp4"
+
+    with open(raw_custom, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    target_dur = float(target_shot.get("duration") or (target_shot.get("end_time", 3.0) - target_shot.get("start_time", 0.0)))
+    cmd = [
+        "ffmpeg", "-y",
+        "-stream_loop", "-1",
+        "-i", str(raw_custom),
+        "-t", f"{target_dur:.2f}",
+        "-vf", f"scale={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={Config.TARGET_FPS}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", str(Config.VIDEO_CRF),
+        "-pix_fmt", "yuv420p", "-an", "-v", "warning",
+        str(out_file)
+    ]
+    proc = await asyncio.create_subprocess_exec(*cmd)
+    await proc.wait()
+    raw_custom.unlink(missing_ok=True)
+
+    if not out_file.exists():
+        raise HTTPException(status_code=500, detail="Failed to format uploaded custom video clip")
+
+    target_shot["asset_path"] = str(out_file.resolve())
+    target_shot["style"] = "custom_upload"
+    target_shot["search_prompt"] = file.filename
+    target_shot["status"] = "matched"
+    db.save_job(job)
+
+    sc = dict(target_shot)
+    sc["video_url"] = f"/api/jobs/{job.job_id}/broll/{shot_id}"
+    sc["thumbnail_url"] = f"/api/jobs/{job.job_id}/broll/{shot_id}/thumb"
+    return {"status": "success", "shot": sc}
+
+
+@app.patch("/api/jobs/{job_id}/shots/{shot_id}")
+async def trim_shot_timeline(job_id: str, shot_id: str, req: ShotTrimRequest):
+    """Trim and adjust the start and end boundary timestamps of a shot."""
+    job = db.get_job(job_id)
+    if not job or not job.edit_plan or "shots" not in job.edit_plan:
+        raise HTTPException(status_code=404, detail="Job or edit plan not found")
+
+    target_shot = next((s for s in job.edit_plan["shots"] if s.get("shot_id") == shot_id), None)
+    if not target_shot:
+        raise HTTPException(status_code=404, detail=f"Shot '{shot_id}' not found")
+
+    st = round(max(0.0, float(req.start_time)), 2)
+    et = round(float(req.end_time), 2)
+    if et <= st + 0.3:
+        raise HTTPException(status_code=400, detail="End time must be at least 0.3s after start time")
+
+    target_shot["start_time"] = st
+    target_shot["end_time"] = et
+    target_shot["duration"] = round(et - st, 2)
+
+    # Re-sort shots by start time
+    job.edit_plan["shots"].sort(key=lambda s: float(s.get("start_time", 0.0)))
+    db.save_job(job)
+
+    return {"status": "success", "shot": target_shot, "shots": job.edit_plan["shots"]}
+
+
+@app.post("/api/jobs/{job_id}/shots")
+async def insert_new_cutaway_shot(job_id: str, req: ShotInsertRequest):
+    """Insert a new B-roll or Meme cutaway shot at the specified timeline timestamp."""
+    job = db.get_job(job_id)
+    if not job or not job.edit_plan:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if "shots" not in job.edit_plan:
+        job.edit_plan["shots"] = []
+
+    st = round(max(0.0, float(req.start_time)), 2)
+    dur = round(max(1.0, min(10.0, float(req.duration))), 2)
+    et = round(st + dur, 2)
+    new_id = f"cutaway_{int(asyncio.get_event_loop().time() * 1000) % 100000}"
+
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    new_shot = {
+        "shot_id": new_id,
+        "start_time": st,
+        "end_time": et,
+        "duration": dur,
+        "style": req.style,
+        "dialogue_quote": req.dialogue_quote or "",
+        "search_prompt": req.search_prompt or "focused professional",
+        "emotional_core": "Added Highlight",
+        "visceral_human_metaphor": "Manual timeline insertion",
+        "overlay_type": "cutaway",
+        "status": "pending"
+    }
+
+    if req.style == "meme":
+        from ai_broll_autopilot.services.meme_engine import MemeEngine
+        m_engine = MemeEngine()
+        new_shot["meme_template"] = req.meme_template or "stepped_in_shit"
+        new_shot["meme_captions"] = {"caption": req.dialogue_quote or "Point of emphasis"}
+        new_shot = m_engine.create_meme_broll(new_shot, work_dir, duration=dur)
+    else:
+        # Search and download standard Pexels footage
+        p_out = work_dir / f"{new_id}_pexels.mp4"
+        asset = await pexels_service.search_and_download(new_shot["search_prompt"], p_out, duration=dur, orientation="portrait")
+        if asset and Path(asset).exists():
+            new_shot["asset_path"] = str(Path(asset).resolve())
+            new_shot["status"] = "matched"
+
+    job.edit_plan["shots"].append(new_shot)
+    job.edit_plan["shots"].sort(key=lambda s: float(s.get("start_time", 0.0)))
+    db.save_job(job)
+
+    sc = dict(new_shot)
+    sc["video_url"] = f"/api/jobs/{job.job_id}/broll/{new_id}"
+    sc["thumbnail_url"] = f"/api/jobs/{job.job_id}/broll/{new_id}/thumb"
+    return {"status": "success", "shot": sc, "shots": job.edit_plan["shots"]}
+
+
+@app.delete("/api/jobs/{job_id}/shots/{shot_id}")
+async def delete_cutaway_shot(job_id: str, shot_id: str):
+    """Delete a specific cutaway shot from the job edit plan."""
+    job = db.get_job(job_id)
+    if not job or not job.edit_plan or "shots" not in job.edit_plan:
+        raise HTTPException(status_code=404, detail="Job or edit plan not found")
+
+    initial_len = len(job.edit_plan["shots"])
+    job.edit_plan["shots"] = [s for s in job.edit_plan["shots"] if s.get("shot_id") != shot_id]
+
+    if len(job.edit_plan["shots"]) == initial_len:
+        raise HTTPException(status_code=404, detail=f"Shot '{shot_id}' not found")
+
+    db.save_job(job)
+    return {"status": "deleted", "shot_id": shot_id, "remaining_count": len(job.edit_plan["shots"])}
+
+
+@app.get("/api/bgm/tracks")
+async def get_bgm_tracks():
+    """List all available royalty-free background music tracks."""
+    from ai_broll_autopilot.services.bgm_engine import BGMEngine
+    engine = BGMEngine()
+    return engine.list_tracks()
+
+
+@app.get("/api/bgm/{track_id}/audio")
+async def get_bgm_track_audio(track_id: str):
+    """Stream audio preview for a specific background music track."""
+    from ai_broll_autopilot.services.bgm_engine import BGMEngine
+    engine = BGMEngine()
+    p = engine.get_track_path(track_id)
+    if not p or not p.exists():
+        raise HTTPException(status_code=404, detail=f"BGM track '{track_id}' not found")
+    media_type = "audio/mpeg" if p.suffix.lower() == ".mp3" else "audio/wav"
+    return FileResponse(path=str(p), media_type=media_type, filename=p.name)
+
+
+@app.post("/api/jobs/{job_id}/settings")
+async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
+    """Update subtitle formatting and background music settings for a job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.edit_plan:
+        job.edit_plan = {"shots": []}
+
+    settings = job.edit_plan.get("render_settings", {})
+    if req.subtitles_enabled is not None:
+        settings["subtitles_enabled"] = req.subtitles_enabled
+    if req.subtitle_style is not None:
+        settings["subtitle_style"] = req.subtitle_style
+    if req.subtitle_position is not None:
+        settings["subtitle_position"] = req.subtitle_position
+    if req.bgm_track_id is not None:
+        settings["bgm_track_id"] = req.bgm_track_id if req.bgm_track_id != "none" else None
+    if req.bgm_volume is not None:
+        settings["bgm_volume"] = req.bgm_volume
+    if req.bgm_ducking is not None:
+        settings["bgm_ducking"] = req.bgm_ducking
+
+    job.edit_plan["render_settings"] = settings
+    db.save_job(job)
+    return {"status": "success", "render_settings": settings}
+
+
 @app.post("/api/jobs/{job_id}/rerender")
 async def rerender_job_video(job_id: str):
-    """Re-render the master composite video for a job using the updated edit plan."""
+    """Re-render the master composite video with updated shots, kinetic subtitles, and BGM auto-ducking."""
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -900,8 +1176,13 @@ async def rerender_job_video(job_id: str):
 
     from ai_broll_autopilot.services.renderer import Renderer
     from ai_broll_autopilot.services.transition_engine import TransitionEngine
+    from ai_broll_autopilot.services.subtitle_engine import SubtitleEngine
+    from ai_broll_autopilot.services.bgm_engine import BGMEngine
+
     renderer = Renderer()
     trans_engine = TransitionEngine()
+    sub_engine = SubtitleEngine()
+    bgm_engine = BGMEngine()
 
     work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -911,7 +1192,45 @@ async def rerender_job_video(job_id: str):
     shots = await trans_engine.plan_transitions(job.edit_plan["shots"])
     job.edit_plan["shots"] = shots
 
-    out_path = await renderer.render(job.source_file, job.edit_plan, str(rendered_video))
+    settings = job.edit_plan.get("render_settings", {})
+    sub_enabled = settings.get("subtitles_enabled", True)
+    sub_style = settings.get("subtitle_style", "hormozi")
+    sub_pos = settings.get("subtitle_position", "bottom")
+
+    ass_path = None
+    if sub_enabled and job.transcript_segments:
+        try:
+            ass_dest = work_dir / "subtitles_kinetic.ass"
+            sub_engine.generate_ass_file(
+                segments=job.transcript_segments,
+                output_path=ass_dest,
+                style_preset=sub_style,
+                position=sub_pos
+            )
+            if ass_dest.exists():
+                ass_path = str(ass_dest.resolve())
+        except Exception as se:
+            logger.warning(f"Could not generate kinetic subtitles: {se}")
+
+    # Resolve BGM track
+    bgm_track_id = settings.get("bgm_track_id")
+    bgm_path = None
+    bgm_vol = float(settings.get("bgm_volume", 0.15))
+    ducking = bool(settings.get("bgm_ducking", True))
+    if bgm_track_id:
+        p = bgm_engine.get_track_path(bgm_track_id)
+        if p and p.exists():
+            bgm_path = str(p.resolve())
+
+    out_path = await renderer.render(
+        base_video=job.source_file,
+        edit_plan=job.edit_plan,
+        output_path=str(rendered_video),
+        ass_subtitles_path=ass_path,
+        bgm_path=bgm_path,
+        bgm_volume=bgm_vol,
+        ducking_enabled=ducking
+    )
 
     # Also update final output video if exists
     if job.output_video_path:
@@ -924,7 +1243,9 @@ async def rerender_job_video(job_id: str):
         "status": "success",
         "job_id": job_id,
         "video_url": f"/api/jobs/{job_id}/video",
-        "file_size": Path(out_path).stat().st_size
+        "file_size": Path(out_path).stat().st_size,
+        "subtitles_burned": bool(ass_path),
+        "bgm_applied": bool(bgm_path)
     }
 
 

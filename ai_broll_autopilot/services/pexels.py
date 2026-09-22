@@ -201,5 +201,132 @@ class PexelsService:
             logger.error(f"Error fetching Pexels video for '{query}': {e}")
             return None
 
+    async def search_candidates(
+        self,
+        query: str,
+        per_page: int = 6,
+        orientation: str = "portrait"
+    ) -> List[Dict[str, Any]]:
+        """Search Pexels API and return candidate video metadata with previews."""
+        if not self.is_available():
+            return []
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._search_candidates_sync,
+            query,
+            per_page,
+            orientation
+        )
+
+    def _search_candidates_sync(
+        self,
+        query: str,
+        per_page: int = 6,
+        orientation: str = "portrait"
+    ) -> List[Dict[str, Any]]:
+        try:
+            import re
+            clean_q = re.sub(r"[^\w\s]", " ", query).strip()
+            if not clean_q:
+                return []
+
+            headers = {
+                "Authorization": self.api_key,
+                "User-Agent": "Mozilla/5.0"
+            }
+            encoded = urllib.parse.quote(clean_q)
+            url = f"https://api.pexels.com/videos/search?query={encoded}&orientation={orientation}&per_page={per_page}&size=medium"
+            req = urllib.request.Request(url, headers=headers)
+
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                videos = data.get("videos", [])
+
+            results = []
+            for v in videos:
+                vid_id = v.get("id")
+                image = v.get("image")
+                duration = v.get("duration", 0)
+                video_files = v.get("video_files", [])
+
+                # Find best vertical MP4
+                mp4s = [vf for vf in video_files if vf.get("file_type") == "video/mp4" and vf.get("link")]
+                chosen_link = None
+                if mp4s:
+                    mp4s.sort(key=lambda vf: (1 if (vf.get("width", 0) > 1440 or vf.get("height", 0) > 2560) else 0, abs(vf.get("width", 0) - Config.TARGET_WIDTH)))
+                    chosen_link = mp4s[0].get("link")
+
+                results.append({
+                    "id": vid_id,
+                    "thumbnail": image,
+                    "duration": duration,
+                    "width": v.get("width"),
+                    "height": v.get("height"),
+                    "url": v.get("url"),
+                    "download_url": chosen_link,
+                })
+
+            return results
+        except Exception as e:
+            logger.error(f"Error searching Pexels candidates for '{query}': {e}")
+            return []
+
+    async def download_candidate(
+        self,
+        download_url: str,
+        output_path: Path,
+        duration: float = 3.0
+    ) -> Optional[str]:
+        """Download and format a specific chosen Pexels video stream."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._download_candidate_sync,
+            download_url,
+            output_path,
+            duration
+        )
+
+    def _download_candidate_sync(
+        self,
+        download_url: str,
+        output_path: Path,
+        duration: float
+    ) -> Optional[str]:
+        try:
+            import subprocess
+            temp_raw = output_path.parent / f"raw_{output_path.name}"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            req = urllib.request.Request(download_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp, open(temp_raw, "wb") as out_f:
+                out_f.write(resp.read())
+
+            target_dur = max(2.5, min(10.0, duration))
+            cmd = [
+                "ffmpeg", "-y",
+                "-stream_loop", "-1",
+                "-i", str(temp_raw),
+                "-t", f"{target_dur:.2f}",
+                "-vf", f"scale={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={Config.TARGET_FPS}",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-threads", "0",
+                "-crf", str(Config.VIDEO_CRF),
+                "-pix_fmt", "yuv420p",
+                "-an",
+                "-v", "warning",
+                str(output_path)
+            ]
+            subprocess.run(cmd, check=True)
+            temp_raw.unlink(missing_ok=True)
+            if output_path.exists() and output_path.stat().st_size > 0:
+                return str(output_path.resolve())
+            return None
+        except Exception as e:
+            logger.error(f"Failed to download specific Pexels candidate: {e}")
+            return None
+
 
 pexels_service = PexelsService()

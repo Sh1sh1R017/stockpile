@@ -31,9 +31,35 @@ import {
   FileCode,
   Archive,
   Volume2,
-  Search
+  VolumeX,
+  Search,
+  Music,
+  Pause,
+  Scissors,
+  Type
 } from "lucide-react";
 import { formatDuration, getStatusColor } from "../lib/utils";
+
+interface BGMTrackOption {
+  id: string;
+  name: string;
+  filename: string;
+  genre: string;
+  default_volume: number;
+  description?: string;
+  available: boolean;
+  preview_url: string;
+}
+
+interface StockVideoCandidate {
+  id: number;
+  thumbnail: string;
+  duration: number;
+  width: number;
+  height: number;
+  url: string;
+  download_url: string;
+}
 
 interface MemeTemplateOption {
   key: string;
@@ -111,6 +137,14 @@ interface JobDetail extends JobSummary {
     summary: string;
     total_duration?: number;
     broll_shot_count?: number;
+    render_settings?: {
+      subtitles_enabled?: boolean;
+      subtitle_style?: string;
+      subtitle_position?: string;
+      bgm_track_id?: string;
+      bgm_volume?: number;
+      bgm_ducking?: boolean;
+    };
     shots: ShotDetail[];
   };
 }
@@ -155,7 +189,42 @@ export default function StudioDashboard() {
   const [standaloneMemeResult, setStandaloneMemeResult] = useState<{ video_url?: string; image_url?: string; shot_id?: string } | null>(null);
   const [isStandaloneMode, setIsStandaloneMode] = useState(false);
 
+  // Subtitles & BGM Engine States
+  const [bgmTracks, setBgmTracks] = useState<BGMTrackOption[]>([]);
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
+  const [subtitleStyle, setSubtitleStyle] = useState<string>("hormozi");
+  const [subtitlePosition, setSubtitlePosition] = useState<string>("bottom");
+  const [selectedBgmId, setSelectedBgmId] = useState<string>("chill_lofi");
+  const [bgmVolume, setBgmVolume] = useState<number>(0.16);
+  const [bgmDucking, setBgmDucking] = useState<boolean>(true);
+  const [playingBgmPreview, setPlayingBgmPreview] = useState<string | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Playhead Cutaway Inserter States
+  const [showInsertCutawayModal, setShowInsertCutawayModal] = useState<boolean>(false);
+  const [insertCutawayTime, setInsertCutawayTime] = useState<number>(0);
+  const [insertCutawayDur, setInsertCutawayDur] = useState<number>(2.5);
+  const [insertCutawayStyle, setInsertCutawayStyle] = useState<"stockpile" | "meme">("stockpile");
+  const [insertCutawayPrompt, setInsertCutawayPrompt] = useState<string>("focused professional");
+  const [insertCutawayMemeTemplate, setInsertCutawayMemeTemplate] = useState<string>("stepped_in_shit");
+  const [isInsertingCutaway, setIsInsertingCutaway] = useState<boolean>(false);
+
+  // In-Card B-Roll Swapper States
+  const [showSwapModal, setShowSwapModal] = useState<boolean>(false);
+  const [swapTargetShot, setSwapTargetShot] = useState<ShotDetail | null>(null);
+  const [swapSearchQuery, setSwapSearchQuery] = useState<string>("");
+  const [stockCandidates, setStockCandidates] = useState<StockVideoCandidate[]>([]);
+  const [isSearchingStock, setIsSearchingStock] = useState<boolean>(false);
+  const [isSwappingStock, setIsSwappingStock] = useState<boolean>(false);
+  const [swapTab, setSwapTab] = useState<"search" | "upload">("search");
+  const [isUploadingCustom, setIsUploadingCustom] = useState<boolean>(false);
+
+  // Shot Trimming State
+  const [isTrimming, setIsTrimming] = useState<Record<string, boolean>>({});
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const customVideoInputRef = useRef<HTMLInputElement>(null);
   const masterVideoRef = useRef<HTMLVideoElement>(null);
   const selectedJobIdRef = useRef<string | null>(null);
 
@@ -163,17 +232,27 @@ export default function StudioDashboard() {
     selectedJobIdRef.current = selectedJobId;
   }, [selectedJobId]);
 
+  useEffect(() => {
+    return () => {
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.pause();
+        bgmAudioRef.current = null;
+      }
+    };
+  }, []);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Fetch Meme templates and SFX catalog
-  const fetchMemeResources = async () => {
+  // Fetch Meme templates, SFX catalog, and BGM tracks
+  const fetchResources = async () => {
     try {
-      const [tRes, sfxRes] = await Promise.all([
+      const [tRes, sfxRes, bgmRes] = await Promise.all([
         fetch("/api/memes/templates?limit=120"),
-        fetch("/api/sfx-catalog")
+        fetch("/api/sfx-catalog"),
+        fetch("/api/bgm/tracks")
       ]);
       if (tRes.ok) {
         const tData = await tRes.json();
@@ -183,13 +262,17 @@ export default function StudioDashboard() {
         const sfxData = await sfxRes.json();
         setSfxCatalog(sfxData);
       }
+      if (bgmRes.ok) {
+        const bgmData = await bgmRes.json();
+        setBgmTracks(bgmData);
+      }
     } catch (e) {
-      console.error("Failed to load meme resources:", e);
+      console.error("Failed to load studio resources:", e);
     }
   };
 
   useEffect(() => {
-    fetchMemeResources();
+    fetchResources();
   }, []);
 
   const openMemeCustomizerForShot = (shot: ShotDetail) => {
@@ -332,9 +415,24 @@ export default function StudioDashboard() {
   const handleRerenderMaster = async () => {
     if (!selectedJobId) return;
     setIsRerenderingMaster(true);
-    showToast("Re-rendering master video with updated meme cutaways (FFmpeg)...");
+    showToast("Saving settings & burning kinetic subtitles + ducked BGM (FFmpeg)...");
 
     try {
+      // 1. Sync latest render settings to backend
+      await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subtitles_enabled: subtitlesEnabled,
+          subtitle_style: subtitleStyle,
+          subtitle_position: subtitlePosition,
+          bgm_track_id: selectedBgmId === "none" ? null : selectedBgmId,
+          bgm_volume: bgmVolume,
+          bgm_ducking: bgmDucking,
+        }),
+      });
+
+      // 2. Trigger re-render
       const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/rerender`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -342,7 +440,7 @@ export default function StudioDashboard() {
       });
 
       if (res.ok) {
-        showToast("Master video re-rendered successfully!");
+        showToast("Master video re-rendered with viral subtitles & BGM ducking!");
         if (masterVideoRef.current) {
           masterVideoRef.current.load();
         }
@@ -355,6 +453,271 @@ export default function StudioDashboard() {
       alert("Error re-rendering: " + err);
     } finally {
       setIsRerenderingMaster(false);
+    }
+  };
+
+  const handleUpdateSettings = async (partial: {
+    subtitles_enabled?: boolean;
+    subtitle_style?: string;
+    subtitle_position?: string;
+    bgm_track_id?: string | null;
+    bgm_volume?: number;
+    bgm_ducking?: boolean;
+  }) => {
+    if (!selectedJobId) return;
+    setIsSavingSettings(true);
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(partial),
+      });
+      if (res.ok) {
+        showToast("Settings updated! Click Re-render to burn in.");
+      }
+    } catch (e) {
+      console.error("Error saving settings:", e);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const toggleBgmPreview = (trackId: string) => {
+    if (playingBgmPreview === trackId) {
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.pause();
+      }
+      setPlayingBgmPreview(null);
+    } else {
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.pause();
+      }
+      const audio = new Audio(`/api/bgm/${encodeURIComponent(trackId)}/audio`);
+      audio.volume = Math.min(1.0, bgmVolume * 2.5);
+      audio.play().catch((e) => console.error("BGM audio play error:", e));
+      audio.onended = () => setPlayingBgmPreview(null);
+      bgmAudioRef.current = audio;
+      setPlayingBgmPreview(trackId);
+    }
+  };
+
+  const handleTrimShot = async (shotId: string, newStart: number, newEnd: number) => {
+    if (!selectedJobId) return;
+    const clampedStart = Math.max(0, Math.round(newStart * 10) / 10);
+    const clampedEnd = Math.max(clampedStart + 0.3, Math.round(newEnd * 10) / 10);
+
+    setIsTrimming((prev) => ({ ...prev, [shotId]: true }));
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(selectedJobId)}/shots/${encodeURIComponent(shotId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start_time: clampedStart,
+            end_time: clampedEnd,
+          }),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Trimmed Cutaway: ${clampedStart}s → ${clampedEnd}s`);
+        if (selectedJob && selectedJob.edit_plan) {
+          setSelectedJob({
+            ...selectedJob,
+            edit_plan: {
+              ...selectedJob.edit_plan,
+              shots: data.shots,
+            },
+          });
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Trim failed: ${err.detail || "Invalid timestamp"}`);
+      }
+    } catch (err) {
+      console.error("Error trimming shot:", err);
+    } finally {
+      setIsTrimming((prev) => ({ ...prev, [shotId]: false }));
+    }
+  };
+
+  const handleDeleteShot = async (shotId: string) => {
+    if (!selectedJobId) return;
+    if (!confirm(`Are you sure you want to remove Cutaway ${shotId}?`)) return;
+
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(selectedJobId)}/shots/${encodeURIComponent(shotId)}`,
+        { method: "DELETE" }
+      );
+      if (res.ok) {
+        showToast(`Removed Cutaway ${shotId}`);
+        if (selectedJob && selectedJob.edit_plan) {
+          setSelectedJob({
+            ...selectedJob,
+            edit_plan: {
+              ...selectedJob.edit_plan,
+              shots: selectedJob.edit_plan.shots.filter((s) => s.shot_id !== shotId),
+            },
+          });
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to delete cutaway: ${err.detail || "Server error"}`);
+      }
+    } catch (err) {
+      alert("Error deleting cutaway: " + err);
+    }
+  };
+
+  const openInsertCutawayAtCurrentTime = () => {
+    setInsertCutawayTime(Math.round(currentTime * 10) / 10);
+    setInsertCutawayDur(2.5);
+    setInsertCutawayStyle("stockpile");
+    setInsertCutawayPrompt("focused professional working");
+    setInsertCutawayMemeTemplate("stepped_in_shit");
+    setShowInsertCutawayModal(true);
+  };
+
+  const handleConfirmInsertCutaway = async () => {
+    if (!selectedJobId) return;
+    setIsInsertingCutaway(true);
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/shots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_time: insertCutawayTime,
+          duration: insertCutawayDur,
+          style: insertCutawayStyle,
+          search_prompt: insertCutawayPrompt,
+          meme_template: insertCutawayMemeTemplate,
+          dialogue_quote: insertCutawayPrompt,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`✨ Added new ${insertCutawayStyle === "meme" ? "Meme" : "Stock"} Cutaway at ${insertCutawayTime.toFixed(1)}s!`);
+        setShowInsertCutawayModal(false);
+        if (selectedJob && selectedJob.edit_plan) {
+          setSelectedJob({
+            ...selectedJob,
+            edit_plan: {
+              ...selectedJob.edit_plan,
+              shots: data.shots,
+            },
+          });
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to insert cutaway: ${err.detail || "Server error"}`);
+      }
+    } catch (err) {
+      alert("Error inserting cutaway: " + err);
+    } finally {
+      setIsInsertingCutaway(false);
+    }
+  };
+
+  const openSwapModalForShot = (shot: ShotDetail) => {
+    setSwapTargetShot(shot);
+    setSwapTab("search");
+    const initQuery = shot.asset_title || shot.dialogue_quote || "focused professional";
+    setSwapSearchQuery(initQuery);
+    setShowSwapModal(true);
+    handleSearchStock(initQuery);
+  };
+
+  const handleSearchStock = async (query: string) => {
+    if (!query.trim()) return;
+    setIsSearchingStock(true);
+    try {
+      const res = await fetch(`/api/stock/search?query=${encodeURIComponent(query.trim())}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStockCandidates(data);
+      }
+    } catch (e) {
+      console.error("Failed to search stock footage:", e);
+    } finally {
+      setIsSearchingStock(false);
+    }
+  };
+
+  const handleSelectStockCandidate = async (cand: StockVideoCandidate) => {
+    if (!selectedJobId || !swapTargetShot) return;
+    setIsSwappingStock(true);
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(selectedJobId)}/shots/${encodeURIComponent(swapTargetShot.shot_id)}/swap-stock`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            download_url: cand.download_url,
+            prompt: swapSearchQuery,
+          }),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Replaced footage for Cutaway ${swapTargetShot.shot_id}!`);
+        setShowSwapModal(false);
+        if (selectedJob && selectedJob.edit_plan) {
+          const updated = selectedJob.edit_plan.shots.map((s) =>
+            s.shot_id === swapTargetShot.shot_id ? { ...s, ...data.shot } : s
+          );
+          setSelectedJob({
+            ...selectedJob,
+            edit_plan: { ...selectedJob.edit_plan, shots: updated },
+          });
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to swap stock footage: ${err.detail || "Server error"}`);
+      }
+    } catch (err) {
+      alert("Error swapping footage: " + err);
+    } finally {
+      setIsSwappingStock(false);
+    }
+  };
+
+  const handleCustomVideoUpload = async (file: File) => {
+    if (!selectedJobId || !swapTargetShot) return;
+    setIsUploadingCustom(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(selectedJobId)}/shots/${encodeURIComponent(swapTargetShot.shot_id)}/upload-custom`,
+        {
+          method: "POST",
+          body: fd,
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Custom clip applied to Cutaway ${swapTargetShot.shot_id}!`);
+        setShowSwapModal(false);
+        if (selectedJob && selectedJob.edit_plan) {
+          const updated = selectedJob.edit_plan.shots.map((s) =>
+            s.shot_id === swapTargetShot.shot_id ? { ...s, ...data.shot } : s
+          );
+          setSelectedJob({
+            ...selectedJob,
+            edit_plan: { ...selectedJob.edit_plan, shots: updated },
+          });
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Custom clip upload failed: ${err.detail || "Server error"}`);
+      }
+    } catch (err) {
+      alert("Error uploading custom footage: " + err);
+    } finally {
+      setIsUploadingCustom(false);
     }
   };
 
@@ -439,6 +802,15 @@ export default function StudioDashboard() {
           const detail = await res.json();
           setSelectedJob(detail);
           setFeedbackSubmitted(false);
+          if (detail.edit_plan?.render_settings) {
+            const rs = detail.edit_plan.render_settings;
+            if (rs.subtitles_enabled !== undefined) setSubtitlesEnabled(rs.subtitles_enabled);
+            if (rs.subtitle_style) setSubtitleStyle(rs.subtitle_style);
+            if (rs.subtitle_position) setSubtitlePosition(rs.subtitle_position);
+            if (rs.bgm_track_id !== undefined) setSelectedBgmId(rs.bgm_track_id || "none");
+            if (rs.bgm_volume !== undefined) setBgmVolume(rs.bgm_volume);
+            if (rs.bgm_ducking !== undefined) setBgmDucking(rs.bgm_ducking);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch job detail:", err);
@@ -989,7 +1361,228 @@ export default function StudioDashboard() {
 
       {/* VIEW 3: COMPLETED SINGLE-CLIP STUDIO */}
       {!showUploadMode && !isProcessing && selectedJob && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="space-y-6">
+          {/* CLIPPER REFINEMENT TOOLBAR: Viral Kinetic Subtitles & Auto-Ducking BGM */}
+          <div className="bg-gradient-to-r from-zinc-900 via-zinc-900/90 to-zinc-900 border border-indigo-500/30 rounded-3xl p-5 shadow-2xl space-y-4 backdrop-blur-md">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>Clipper Video Studio</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                      Viral Ready
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Alex Hormozi kinetic word-highlights • Royalty-Free BGM library • Voice sidechain auto-ducking
+                  </p>
+                </div>
+              </div>
+
+              {/* Re-render Master Button */}
+              <button
+                onClick={handleRerenderMaster}
+                disabled={isRerenderingMaster}
+                className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 text-black text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02]"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRerenderingMaster ? "animate-spin" : ""}`} />
+                <span>{isRerenderingMaster ? "Burning Subtitles & BGM..." : "⚡ Re-render Master Edit"}</span>
+              </button>
+            </div>
+
+            {/* Settings Grid: Subtitles (Left) + BGM Engine (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* 1. Viral Kinetic Subtitles Panel */}
+              <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Type className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                      Viral Kinetic Subtitles
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs">
+                    <span className="text-[11px] text-zinc-400">{subtitlesEnabled ? "Enabled" : "Off"}</span>
+                    <input
+                      type="checkbox"
+                      checked={subtitlesEnabled}
+                      onChange={(e) => {
+                        setSubtitlesEnabled(e.target.checked);
+                        handleUpdateSettings({ subtitles_enabled: e.target.checked });
+                      }}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {subtitlesEnabled && (
+                  <div className="space-y-3 pt-1">
+                    {/* Style Presets */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Highlight Style</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { key: "hormozi", name: "🟡 Hormozi", desc: "Yellow Punch" },
+                          { key: "mrbeast", name: "🟢 MrBeast", desc: "Neon Green" },
+                          { key: "clean", name: "⚪ Clean", desc: "White Minimal" },
+                        ].map((preset) => (
+                          <button
+                            key={preset.key}
+                            onClick={() => {
+                              setSubtitleStyle(preset.key);
+                              handleUpdateSettings({ subtitle_style: preset.key });
+                            }}
+                            className={`p-2 rounded-xl text-left border transition-all ${
+                              subtitleStyle === preset.key
+                                ? "bg-amber-500/15 border-amber-500/50 text-white shadow-sm"
+                                : "bg-zinc-900/80 hover:bg-zinc-800/80 text-zinc-400 border-zinc-800"
+                            }`}
+                          >
+                            <div className="text-xs font-bold">{preset.name}</div>
+                            <div className="text-[10px] text-zinc-500">{preset.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Position Picker */}
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[11px] text-zinc-400">Subtitle Position:</span>
+                      <div className="flex items-center gap-1.5 bg-zinc-900 p-1 rounded-xl border border-zinc-800">
+                        <button
+                          onClick={() => {
+                            setSubtitlePosition("bottom");
+                            handleUpdateSettings({ subtitle_position: "bottom" });
+                          }}
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all ${
+                            subtitlePosition === "bottom"
+                              ? "bg-amber-500 text-black shadow-sm"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Bottom
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSubtitlePosition("center");
+                            handleUpdateSettings({ subtitle_position: "center" });
+                          }}
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all ${
+                            subtitlePosition === "center"
+                              ? "bg-amber-500 text-black shadow-sm"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Center
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Background Music & Auto-Ducking Panel */}
+              <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Music className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                      Background Music & Auto-Ducking
+                    </span>
+                  </div>
+                  {/* Auto-Ducking Badge Toggle */}
+                  <button
+                    onClick={() => {
+                      const next = !bgmDucking;
+                      setBgmDucking(next);
+                      handleUpdateSettings({ bgm_ducking: next });
+                    }}
+                    className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 ${
+                      bgmDucking
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm"
+                        : "bg-zinc-800 text-zinc-500 border-zinc-700"
+                    }`}
+                    title="Sidechain compress BGM volume during speech"
+                  >
+                    <Zap className={`w-3 h-3 ${bgmDucking ? "text-emerald-400" : "text-zinc-500"}`} />
+                    <span>{bgmDucking ? "⚡ Auto-Duck: Active" : "Auto-Duck: Off"}</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  {/* Track Selector & Live Preview Button */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Curated Track</label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedBgmId}
+                        onChange={(e) => {
+                          setSelectedBgmId(e.target.value);
+                          handleUpdateSettings({ bgm_track_id: e.target.value });
+                        }}
+                        className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="none">None (No Background Music)</option>
+                        {bgmTracks.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            🎵 {t.name} ({t.genre})
+                          </option>
+                        ))}
+                      </select>
+
+                      {selectedBgmId !== "none" && (
+                        <button
+                          onClick={() => toggleBgmPreview(selectedBgmId)}
+                          className="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shrink-0"
+                          title="Preview track audio"
+                        >
+                          {playingBgmPreview === selectedBgmId ? (
+                            <>
+                              <Pause className="w-3.5 h-3.5 text-indigo-300" />
+                              <span>Stop</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3.5 h-3.5 text-indigo-300" />
+                              <span>Preview</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Volume Slider */}
+                  {selectedBgmId !== "none" && (
+                    <div className="flex items-center justify-between gap-4 pt-1">
+                      <span className="text-[11px] text-zinc-400 shrink-0">BGM Level:</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0.02"
+                          max="0.40"
+                          step="0.01"
+                          value={bgmVolume}
+                          onChange={(e) => setBgmVolume(parseFloat(e.target.value))}
+                          onMouseUp={() => handleUpdateSettings({ bgm_volume: bgmVolume })}
+                          onTouchEnd={() => handleUpdateSettings({ bgm_volume: bgmVolume })}
+                          className="w-full accent-indigo-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                        />
+                        <span className="text-xs font-mono font-bold text-zinc-200 w-10 text-right">
+                          {Math.round(bgmVolume * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* LEFT COLUMN: Master 9:16 Vertical Video Player & Timeline (5 cols) */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-zinc-900/80 border border-zinc-800/90 rounded-3xl p-5 shadow-2xl space-y-4">
@@ -1062,6 +1655,21 @@ export default function StudioDashboard() {
                   <p className="text-[10px] text-zinc-500 text-center">
                     💡 Click "Cut 1" or "Cut 2" to jump the master player directly to the B-roll!
                   </p>
+
+                  {/* Playhead Cutaway Inserter Button */}
+                  <div className="pt-2">
+                    <button
+                      onClick={openInsertCutawayAtCurrentTime}
+                      className="w-full bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all hover:scale-[1.01]"
+                      title="Split and insert a B-roll or Meme cutaway at the exact current playhead timestamp"
+                    >
+                      <Scissors className="w-3.5 h-3.5 text-indigo-200" />
+                      <span>+ Add Cutaway at {currentTime.toFixed(1)}s</span>
+                    </button>
+                    <p className="text-[10px] text-zinc-500 text-center mt-1">
+                      Scrub player to any second & click to insert stock footage or meme
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -1167,6 +1775,16 @@ export default function StudioDashboard() {
                         )}
                       </div>
                       <div className="flex items-center gap-2">
+                        {/* Swap Footage Button */}
+                        <button
+                          onClick={() => openSwapModalForShot(shot)}
+                          className="text-[11px] font-semibold text-cyan-300 hover:text-white bg-cyan-500/15 hover:bg-cyan-600/30 border border-cyan-500/40 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all shadow-sm"
+                          title="Swap footage with high-quality Pexels stock video or custom upload"
+                        >
+                          <RefreshCw className="w-3 h-3 text-cyan-400" />
+                          <span>Swap Footage</span>
+                        </button>
+
                         {/* Convert to Meme / Edit Meme Button */}
                         <button
                           onClick={() => openMemeCustomizerForShot(shot)}
@@ -1182,8 +1800,76 @@ export default function StudioDashboard() {
                           className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all"
                         >
                           <Play className="w-3 h-3 fill-amber-400" />
-                          Jump in Master Player
+                          Jump
                         </button>
+
+                        {/* Delete Cutaway Button */}
+                        <button
+                          onClick={() => handleDeleteShot(shot.shot_id)}
+                          className="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 p-1.5 rounded-lg transition-colors"
+                          title="Delete this cutaway shot"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Precision Timeline Boundary Controls */}
+                    <div className="bg-zinc-950/80 border border-zinc-800/90 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                        <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">Trim Boundaries:</span>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
+                        {/* Start Time Nudge */}
+                        <div className="flex items-center gap-1 bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-800">
+                          <span className="text-[10px] text-zinc-400 font-sans uppercase mr-1">Start:</span>
+                          <button
+                            disabled={isTrimming[shot.shot_id] || shot.start_time <= 0}
+                            onClick={() => handleTrimShot(shot.shot_id, shot.start_time - 0.1, shot.end_time)}
+                            className="text-[10px] bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-zinc-300 px-1.5 py-0.5 rounded transition-colors"
+                            title="Nudge start back 0.1s"
+                          >
+                            -0.1s
+                          </button>
+                          <span className="text-zinc-100 font-bold px-1">{shot.start_time.toFixed(1)}s</span>
+                          <button
+                            disabled={isTrimming[shot.shot_id] || shot.start_time >= shot.end_time - 0.3}
+                            onClick={() => handleTrimShot(shot.shot_id, shot.start_time + 0.1, shot.end_time)}
+                            className="text-[10px] bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-zinc-300 px-1.5 py-0.5 rounded transition-colors"
+                            title="Nudge start forward 0.1s"
+                          >
+                            +0.1s
+                          </button>
+                        </div>
+
+                        {/* End Time Nudge */}
+                        <div className="flex items-center gap-1 bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-800">
+                          <span className="text-[10px] text-zinc-400 font-sans uppercase mr-1">End:</span>
+                          <button
+                            disabled={isTrimming[shot.shot_id] || shot.end_time <= shot.start_time + 0.3}
+                            onClick={() => handleTrimShot(shot.shot_id, shot.start_time, shot.end_time - 0.1)}
+                            className="text-[10px] bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-zinc-300 px-1.5 py-0.5 rounded transition-colors"
+                            title="Nudge end back 0.1s"
+                          >
+                            -0.1s
+                          </button>
+                          <span className="text-zinc-100 font-bold px-1">{shot.end_time.toFixed(1)}s</span>
+                          <button
+                            disabled={isTrimming[shot.shot_id]}
+                            onClick={() => handleTrimShot(shot.shot_id, shot.start_time, shot.end_time + 0.1)}
+                            className="text-[10px] bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 text-zinc-300 px-1.5 py-0.5 rounded transition-colors"
+                            title="Nudge end forward 0.1s"
+                          >
+                            +0.1s
+                          </button>
+                        </div>
+
+                        {/* Duration Display */}
+                        <span className="text-[10px] text-zinc-400 font-sans">
+                          Duration: <strong className="text-zinc-200">{((shot.end_time - shot.start_time) || 2.5).toFixed(1)}s</strong>
+                        </span>
                       </div>
                     </div>
 
@@ -1400,6 +2086,7 @@ export default function StudioDashboard() {
             </div>
           </div>
         </div>
+      </div>
       )}
 
       {/* MEME STUDIO & CUSTOMIZER MODAL */}
@@ -1725,6 +2412,360 @@ export default function StudioDashboard() {
                   </span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IN-CARD B-ROLL SWAPPER MODAL */}
+      {showSwapModal && swapTargetShot && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/70">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-600/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shadow-inner">
+                  <RefreshCw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Swap Footage: Cutaway {swapTargetShot.shot_id}
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Replace existing footage with 4K royalty-free Pexels video or upload your own file.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSwapModal(false)}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tab Selector: Pexels Search vs Custom Upload */}
+            <div className="px-6 pt-4 pb-2 border-b border-zinc-800/80 flex items-center gap-3 bg-zinc-950/40">
+              <button
+                onClick={() => setSwapTab("search")}
+                className={`text-xs font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
+                  swapTab === "search"
+                    ? "bg-cyan-600 text-white shadow-md shadow-cyan-600/20"
+                    : "text-zinc-400 hover:text-zinc-200 bg-zinc-900/60"
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                Pexels Stock Search
+              </button>
+              <button
+                onClick={() => setSwapTab("upload")}
+                className={`text-xs font-semibold px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
+                  swapTab === "upload"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                    : "text-zinc-400 hover:text-zinc-200 bg-zinc-900/60"
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Upload Custom Video
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {swapTab === "search" ? (
+                <div className="space-y-4">
+                  {/* Search Query Input */}
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={swapSearchQuery}
+                        onChange={(e) => setSwapSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSearchStock(swapSearchQuery);
+                        }}
+                        placeholder="Search visual topic (e.g. luxury watch, coding laptop, handshake)..."
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                    <button
+                      onClick={() => handleSearchStock(swapSearchQuery)}
+                      disabled={isSearchingStock}
+                      className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+                    >
+                      <Search className={`w-3.5 h-3.5 ${isSearchingStock ? "animate-spin" : ""}`} />
+                      <span>{isSearchingStock ? "Searching..." : "Search"}</span>
+                    </button>
+                  </div>
+
+                  {/* Quick Pill Suggestions */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {["luxury watch", "focus typing laptop", "business handshake", "cash counting money", "frustrated stress", "confident smile", "city drone aerial"].map((pill) => (
+                      <button
+                        key={pill}
+                        onClick={() => {
+                          setSwapSearchQuery(pill);
+                          handleSearchStock(pill);
+                        }}
+                        className="text-[10px] bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700/60 px-2.5 py-1 rounded-lg transition-colors"
+                      >
+                        {pill}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Candidate Results Grid */}
+                  <div className="space-y-2 pt-2">
+                    <div className="flex items-center justify-between text-xs text-zinc-400">
+                      <span>Available Clips ({stockCandidates.length})</span>
+                      <span className="text-[10px] text-zinc-500">9:16 Vertical HD • 0 Watermarks</span>
+                    </div>
+
+                    {isSearchingStock ? (
+                      <div className="p-12 text-center text-xs text-zinc-400 space-y-2">
+                        <Clock className="w-6 h-6 animate-spin text-cyan-400 mx-auto" />
+                        <p>Querying Pexels HD video catalog...</p>
+                      </div>
+                    ) : stockCandidates.length > 0 ? (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[380px] overflow-y-auto pr-1">
+                        {stockCandidates.map((cand) => (
+                          <div
+                            key={cand.id}
+                            className="bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 hover:border-cyan-500/60 transition-all flex flex-col group"
+                          >
+                            <div className="relative aspect-[9/16] max-h-[180px] overflow-hidden bg-black flex items-center justify-center">
+                              <img
+                                src={cand.thumbnail}
+                                alt="Candidate"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                loading="lazy"
+                              />
+                              <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[10px] text-zinc-200 px-1.5 py-0.5 rounded font-mono">
+                                {cand.duration}s
+                              </span>
+                            </div>
+
+                            <div className="p-2.5 space-y-2 flex-1 flex flex-col justify-between">
+                              <div className="text-[11px] text-zinc-300 truncate font-medium">
+                                Clip #{cand.id}
+                              </div>
+                              <button
+                                disabled={isSwappingStock}
+                                onClick={() => handleSelectStockCandidate(cand)}
+                                className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-[11px] font-bold py-1.5 rounded-lg flex items-center justify-center gap-1 transition-colors shadow-sm"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>{isSwappingStock ? "Downloading..." : "Use This Clip"}</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center border border-dashed border-zinc-800 rounded-2xl text-xs text-zinc-500">
+                        Search any topic above to preview available footage.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Custom File Upload Tab */
+                <div className="space-y-4 py-4">
+                  <div
+                    onClick={() => customVideoInputRef.current?.click()}
+                    className="border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10 rounded-2xl p-10 text-center cursor-pointer transition-all"
+                  >
+                    <input
+                      type="file"
+                      ref={customVideoInputRef}
+                      accept="video/mp4,video/quicktime,video/x-matroska"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) handleCustomVideoUpload(e.target.files[0]);
+                      }}
+                    />
+                    <Upload className="w-10 h-10 text-indigo-400 mx-auto mb-3" />
+                    <h4 className="text-sm font-bold text-zinc-100">Upload custom video for this shot</h4>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      Supports MP4, MOV. Will be automatically formatted to 1080x1920 9:16 vertical.
+                    </p>
+                    {isUploadingCustom && (
+                      <p className="text-xs text-indigo-400 mt-3 animate-pulse">
+                        Uploading and formatting video clip with FFmpeg...
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
+              <span className="text-[11px] text-zinc-500 font-mono">
+                Duration: {((swapTargetShot.end_time - swapTargetShot.start_time) || 2.5).toFixed(1)}s
+              </span>
+              <button
+                onClick={() => setShowSwapModal(false)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold px-4 py-2 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INSERT CUTAWAY AT PLAYHEAD MODAL */}
+      {showInsertCutawayModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/70">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-violet-600/20 border border-violet-500/30 text-violet-400 flex items-center justify-center shadow-inner">
+                  <Scissors className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Insert Cutaway at {insertCutawayTime.toFixed(1)}s
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    Split dialogue and insert visual B-roll or meme at current playhead.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowInsertCutawayModal(false)}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {/* Timing Controls */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Start Time (s)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={insertCutawayTime}
+                    onChange={(e) => setInsertCutawayTime(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Duration (s)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="1.0"
+                    max="10.0"
+                    value={insertCutawayDur}
+                    onChange={(e) => setInsertCutawayDur(parseFloat(e.target.value) || 2.5)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Cutaway Type: Stock Footage vs Meme */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Cutaway Style</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setInsertCutawayStyle("stockpile")}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      insertCutawayStyle === "stockpile"
+                        ? "bg-indigo-600/20 border-indigo-500 text-white shadow-sm"
+                        : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <div className="text-xs font-bold">🎬 Stock Footage</div>
+                    <div className="text-[10px] text-zinc-500">Pexels 4K vertical B-roll</div>
+                  </button>
+
+                  <button
+                    onClick={() => setInsertCutawayStyle("meme")}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      insertCutawayStyle === "meme"
+                        ? "bg-fuchsia-600/20 border-fuchsia-500 text-white shadow-sm"
+                        : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <div className="text-xs font-bold">🎭 Meme Cutaway</div>
+                    <div className="text-[10px] text-zinc-500">Editorial meme + punchline SFX</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Search prompt / meme fields */}
+              {insertCutawayStyle === "stockpile" ? (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                    Visual Search Prompt
+                  </label>
+                  <input
+                    type="text"
+                    value={insertCutawayPrompt}
+                    onChange={(e) => setInsertCutawayPrompt(e.target.value)}
+                    placeholder="e.g. luxury watches, money finance, laptop coding..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                      Meme Template
+                    </label>
+                    <select
+                      value={insertCutawayMemeTemplate}
+                      onChange={(e) => setInsertCutawayMemeTemplate(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-fuchsia-500"
+                    >
+                      <option value="stepped_in_shit">👞 Stepped in Shit</option>
+                      <option value="drake">🙅‍♂️ Drake Yes/No</option>
+                      <option value="clown">🤡 Clown Makeup</option>
+                      <option value="same_picture">🏢 Corporate Needs You</option>
+                      <option value="batman_slap">👋 Batman Slap</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                      Caption / Point of Emphasis
+                    </label>
+                    <input
+                      type="text"
+                      value={insertCutawayPrompt}
+                      onChange={(e) => setInsertCutawayPrompt(e.target.value)}
+                      placeholder="Point of humor or emphasis..."
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-fuchsia-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
+              <button
+                onClick={() => setShowInsertCutawayModal(false)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold px-4 py-2 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={isInsertingCutaway}
+                onClick={handleConfirmInsertCutaway}
+                className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 text-white text-xs font-bold px-5 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02]"
+              >
+                <Scissors className={`w-3.5 h-3.5 ${isInsertingCutaway ? "animate-spin" : ""}`} />
+                <span>{isInsertingCutaway ? "Inserting Cutaway..." : "Insert Cutaway"}</span>
+              </button>
             </div>
           </div>
         </div>

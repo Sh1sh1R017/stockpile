@@ -1,4 +1,4 @@
-﻿"""Audio transcription service providing timestamped segments and SRT using OpenAI Whisper."""
+"""Audio transcription service providing timestamped segments and SRT using OpenAI Whisper."""
 
 import asyncio
 import logging
@@ -82,6 +82,7 @@ class Transcriber:
         res = self.model.transcribe(
             audio_path,
             task="transcribe",
+            word_timestamps=True,
             fp16=False,
             verbose=False,
         )
@@ -99,12 +100,23 @@ class Transcriber:
             if not text:
                 continue
 
+            words = []
+            for w in seg.get("words", []):
+                w_text = w.get("word", "").strip()
+                if w_text:
+                    words.append({
+                        "word": w_text,
+                        "start": round(float(w.get("start", start)), 2),
+                        "end": round(float(w.get("end", end)), 2),
+                    })
+
             clean_segments.append({
                 "id": idx,
                 "start": start,
                 "end": end,
                 "duration": round(end - start, 2),
                 "text": text,
+                "words": words,
             })
 
             srt_lines.append(f"{idx}\n{format_timestamp_srt(start)} --> {format_timestamp_srt(end)}\n{text}\n")

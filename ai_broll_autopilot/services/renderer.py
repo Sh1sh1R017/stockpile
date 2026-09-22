@@ -22,8 +22,18 @@ class Renderer:
             target_fps=Config.TARGET_FPS
         )
 
-    async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str) -> str:
-        """Render the composite video with B-roll cutaway overlays, dynamic transitions, and mixed audio SFX."""
+    async def render(
+        self,
+        base_video: str,
+        edit_plan: Dict[str, Any],
+        output_path: str,
+        ass_subtitles_path: str = None,
+        bgm_path: str = None,
+        bgm_volume: float = 0.15,
+        ducking_enabled: bool = True
+    ) -> str:
+        """Render the composite video with B-roll cutaway overlays, dynamic transitions,
+        kinetic subtitles, and mixed audio SFX with ducked background music."""
         base_p = Path(base_video)
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -59,8 +69,8 @@ class Renderer:
                 })
 
         logger.info(
-            f"Rendering timeline: base={base_p.name} with {len(shots)} B-roll cutaway overlays "
-            f"and {len(audio_sfx_list)} audio SFX tracks"
+            f"Rendering timeline: base={base_p.name} with {len(shots)} B-roll cutaway overlays, "
+            f"{len(audio_sfx_list)} audio SFX tracks, subtitles={bool(ass_subtitles_path)}, BGM={bool(bgm_path)}"
         )
 
         # Build FFmpeg command inputs
@@ -75,8 +85,21 @@ class Renderer:
         for sfx in audio_sfx_list:
             cmd.extend(["-i", str(sfx["path"])])
 
+        # Optional BGM input stream (looped)
+        bgm_stream_idx = None
+        if bgm_path and os.path.exists(bgm_path):
+            bgm_stream_idx = 1 + len(shots) + len(audio_sfx_list)
+            cmd.extend(["-stream_loop", "-1", "-i", str(bgm_path)])
+
         # Build complex filtergraph
-        filtergraph, final_video, final_audio = self.timeline.build_filtergraph(shots, audio_sfx_list)
+        filtergraph, final_video, final_audio = self.timeline.build_filtergraph(
+            shots=shots,
+            audio_sfx_list=audio_sfx_list,
+            ass_subtitles_path=ass_subtitles_path,
+            bgm_stream_idx=bgm_stream_idx,
+            bgm_volume=bgm_volume,
+            ducking_enabled=ducking_enabled
+        )
 
         cmd.extend([
             "-filter_complex", filtergraph,
