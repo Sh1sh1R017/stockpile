@@ -61,13 +61,21 @@ class Matcher:
         asset_path = None
 
         # 0. Check if shot is designated as a meme cutaway or references viral creator/meme archetypes
-        creator_terms = ("ishowspeed", "speed shock", "caseoh", "jynxzi", "jynxi", "johnny sins", "the_trusted_doctor", "gigachad", "harold meme")
+        creator_terms = (
+            "ishowspeed", "speed shock", "caseoh", "jynxzi", "jynxi", "johnny sins",
+            "the_trusted_doctor", "gigachad", "harold meme", "homeless", "moms kinda homeless",
+            "pornstar", "personal porn star", "did you shave", "kiaraakitty"
+        )
         is_creator_prompt = any(k in (prompt or "").lower() for k in creator_terms)
         if style == "meme" or is_creator_prompt:
             try:
                 if is_creator_prompt and not shot.get("meme_template"):
                     p_lower = (prompt or "").lower()
-                    if "speed" in p_lower:
+                    if "homeless" in p_lower or "mom" in p_lower:
+                        shot["meme_template"] = "moms_kinda_homeless"
+                    elif "pornstar" in p_lower or "shave" in p_lower or "kiara" in p_lower:
+                        shot["meme_template"] = "not_your_personal_pornstar"
+                    elif "speed" in p_lower:
                         shot["meme_template"] = "ishowspeed_shock"
                     elif "caseoh" in p_lower:
                         shot["meme_template"] = "caseoh_rage"

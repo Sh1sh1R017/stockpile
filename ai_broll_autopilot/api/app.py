@@ -697,6 +697,24 @@ async def list_meme_templates(q: Optional[str] = None, limit: int = 80):
             ]
         },
         {
+            "key": "moms_kinda_homeless",
+            "name": "🥺 My Mom's Kinda Homeless (Speed Fortnite)",
+            "category": "Viral Streamers & Creators",
+            "description": "Desperate Fortnite kid pleading 'My mom is kinda homeless' while streamer struggles not to laugh",
+            "fields": [
+                {"name": "caption", "label": "Desperate Plea Caption (Optional)", "placeholder": "BRO PLEASE I NEED THIS..."}
+            ]
+        },
+        {
+            "key": "not_your_personal_pornstar",
+            "name": "🤬 Not Your Personal Pornstar! (Public Meltdown)",
+            "category": "Viral Streamers & Creators",
+            "description": "Unhinged street screaming after chat asked 'did you shave?' - guaranteed comment section meltdown bait",
+            "fields": [
+                {"name": "caption", "label": "Rage Caption (Optional)", "placeholder": "SHUT THE F*** UP!"}
+            ]
+        },
+        {
             "key": "the_trusted_doctor",
             "name": "The Trusted Specialist (IYKYK)",
             "category": "IYKYK Pop-Culture Troll",

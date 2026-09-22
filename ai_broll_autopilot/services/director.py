@@ -99,6 +99,8 @@ MANDATORY DIRECTING OBJECTIVES:
    - Whenever dialogue expresses intense emotion, shock, rage, disbelief, satire, or contrasted opinions, use "style": "meme"!
    - VIRAL CREATOR ARCHETYPES:
      • "ishowspeed_shock": Darren Watkins Jr (IShowSpeed) wide-eyed screaming shock & hype. Use for: intense hype, mind-blowing claims, screaming/shouting moments, crazy excitement, wild statements!
+     • "moms_kinda_homeless": Desperate kid begging in Fortnite ("Please I need this my mom is kinda homeless") while streamer struggles not to laugh. Use for: desperate excuses, begging, financial struggles, absurd guilt trips.
+     • "not_your_personal_pornstar": Unhinged IRL streamer shouting in public ("SHUT THE F*** UP! I AM NOT YOUR PERSONAL PORN STAR!" after chat asked 'did you shave?'). Use for: unhinged boundary violations, creepy comments, crazy outbursts, borderline cancelable moments, supreme comment section bait!
      • "caseoh_rage": CaseOh furious headset mic rage & screaming. Use for: outrage, frustrating fails, bad takes, calling someone out, getting roasted, heavy mistakes!
      • "jynxzi_freakout": Jynxzi controller-slam & disbelief scream. Use for: hilarious shock, absurdity, 'bro what' moments, clutch fails, gaming!
      • "the_trusted_doctor": Johnny Sins specialist/doctor cutaway. Use whenever an expert, specialist, doctor, or seasoned professional is mentioned (comment section magnet)!
@@ -255,6 +257,12 @@ Return ONLY a valid JSON object matching this schema:
                 if any(w in diag_lower for w in ["speed", "crazy", "insane", "screaming", "shouting", "hype", "unbelievable", "huge", "bark", "omg"]):
                     target_shot["meme_template"] = "ishowspeed_shock"
                     target_shot["meme_captions"] = {"caption": diag[:45] if diag else "IShowSpeed Moment"}
+                elif any(w in diag_lower for w in ["homeless", "mom", "plead", "beg", "desperate", "need this", "struggle", "pity"]):
+                    target_shot["meme_template"] = "moms_kinda_homeless"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "My Mom Is Kinda Homeless"}
+                elif any(w in diag_lower for w in ["shave", "pornstar", "porn star", "creep", "boundary", "shut up", "inappropriate", "cancel"]):
+                    target_shot["meme_template"] = "not_your_personal_pornstar"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "I Am Not Your Personal Pornstar"}
                 elif any(w in diag_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy", "terrible", "worst"]):
                     target_shot["meme_template"] = "caseoh_rage"
                     target_shot["meme_captions"] = {"caption": diag[:45] if diag else "CaseOh Rage"}
@@ -428,6 +436,12 @@ Return ONLY a valid JSON object matching this schema:
                 if any(w in seg_lower for w in ["speed", "crazy", "insane", "screaming", "shouting", "hype", "bark", "omg", "huge"]):
                     shot_data["meme_template"] = "ishowspeed_shock"
                     shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "IShowSpeed Moment"}
+                elif any(w in seg_lower for w in ["homeless", "mom", "plead", "beg", "desperate", "need this", "struggle", "pity"]):
+                    shot_data["meme_template"] = "moms_kinda_homeless"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "My Mom Is Kinda Homeless"}
+                elif any(w in seg_lower for w in ["shave", "pornstar", "porn star", "creep", "boundary", "shut up", "inappropriate", "cancel"]):
+                    shot_data["meme_template"] = "not_your_personal_pornstar"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "I Am Not Your Personal Pornstar"}
                 elif any(w in seg_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy"]):
                     shot_data["meme_template"] = "caseoh_rage"
                     shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "CaseOh Rage"}

@@ -94,6 +94,17 @@ class MemeEngine:
         aliases = {
             "the_trusted_doctor": ["the_trusted_doctor", "the trusted doctor", "doctor", "specialist", "johnny sins", "johnny", "sins", "hospital doctor", "experienced doctor", "trust me im a doctor"],
             "ishowspeed_shock": ["ishowspeed_shock", "ishowspeed", "speed", "darren watkins", "speed shock", "speed screaming", "barking", "speed reaction", "crazy streamer", "speed freakout"],
+            "moms_kinda_homeless": [
+                "moms_kinda_homeless", "mom kinda homeless", "moms kinda homeless", "my mom is kinda homeless",
+                "mom is kinda homeless", "please speed i need this", "i need this", "homeless mom", "fortnite kid",
+                "acey daddy", "desperate kid", "struggling not to laugh"
+            ],
+            "not_your_personal_pornstar": [
+                "not_your_personal_pornstar", "not your personal pornstar", "not your personal porn star",
+                "did you shave", "did you shave your", "did you shave your pussy", "shave your pussy",
+                "shut the fuck up i am not your personal porn star", "shut the fuck up", "kiaraakitty",
+                "streamer public rage", "streamer raging in public", "unhinged streamer"
+            ],
             "caseoh_rage": ["caseoh_rage", "caseoh", "case oh", "caseoh rage", "caseoh screaming", "ban him", "mic scream", "heavy rage", "caseoh reaction"],
             "jynxzi_freakout": ["jynxzi_freakout", "jynxzi", "jynxi", "jynxz", "controller slam", "jynxzi screaming", "good aim", "jynxzi freakout", "r6 streamer", "jynxzi reaction"],
             "gigachad": ["gigachad", "giga chad", "chad", "megachad", "absolute chad", "sigma"],
@@ -172,8 +183,8 @@ class MemeEngine:
         elif "same_picture" in template_key.lower() or "difference" in template_key.lower():
             self._render_same_picture(im, captions)
 
-        # 5. VIRAL STREAMER MEMES: IShowSpeed, CaseOh, Jynxzi (Rich reaction visuals)
-        elif any(k in template_key.lower() for k in ("ishowspeed", "speed", "caseoh", "jynxzi", "jynxi")):
+        # 5. VIRAL STREAMER & CREATOR MEMES: IShowSpeed, CaseOh, Jynxzi, Mom's Kinda Homeless, KiaraaKitty (Rich reaction visuals)
+        elif any(k in template_key.lower() for k in ("ishowspeed", "speed", "caseoh", "jynxzi", "jynxi", "homeless", "pornstar", "shave")):
             # Only render top card banner if explicitly requested or custom caption is non-empty and show_banner is set
             custom_cap = captions.get("caption") or captions.get("text") or captions.get("custom_text")
             if custom_cap and custom_cap.strip() and captions.get("show_banner", False):
@@ -333,6 +344,8 @@ class MemeEngine:
             "gta_ah_shit": "60_sad_violin.mp3",
             "the_trusted_doctor": "81_vine_boom.mp3",
             "ishowspeed_shock": "81_vine_boom.mp3",
+            "moms_kinda_homeless": "60_sad_violin.mp3",
+            "not_your_personal_pornstar": "01_bonk_impact.mp3",
             "caseoh_rage": "01_bonk_impact.mp3",
             "jynxzi_freakout": "03_metal_pipe.mp3",
             "gigachad": "03_metal_pipe.mp3",
