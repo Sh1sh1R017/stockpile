@@ -36,7 +36,8 @@ import {
   Music,
   Pause,
   Scissors,
-  Type
+  Type,
+  Tv
 } from "lucide-react";
 import { formatDuration, getStatusColor } from "../lib/utils";
 
@@ -223,6 +224,18 @@ export default function StudioDashboard() {
   // Shot Trimming State
   const [isTrimming, setIsTrimming] = useState<Record<string, boolean>>({});
 
+  // SDR2HDR Upscaler & HDR10 States
+  const [showHdrModal, setShowHdrModal] = useState<boolean>(false);
+  const [hdrScale, setHdrScale] = useState<number>(1.0);
+  const [hdrTone, setHdrTone] = useState<string>("vivid");
+  const [hdrFastMode, setHdrFastMode] = useState<boolean>(true);
+  const [isUpscalingHdr, setIsUpscalingHdr] = useState<boolean>(false);
+  const [hdrProgress, setHdrProgress] = useState<number>(0);
+  const [hdrFps, setHdrFps] = useState<number>(0);
+  const [viewingHdrVideo, setViewingHdrVideo] = useState<boolean>(false);
+  const [hdrAvailable, setHdrAvailable] = useState<boolean>(false);
+  const [hdrMeta, setHdrMeta] = useState<any>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customVideoInputRef = useRef<HTMLInputElement>(null);
   const masterVideoRef = useRef<HTMLVideoElement>(null);
@@ -274,6 +287,73 @@ export default function StudioDashboard() {
   useEffect(() => {
     fetchResources();
   }, []);
+
+  const checkHdrStatus = async () => {
+    if (!selectedJobId) return;
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/hdr-status`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "completed") {
+          setHdrAvailable(true);
+          setIsUpscalingHdr(false);
+          setHdrProgress(100);
+          setHdrMeta(data.metadata || null);
+        } else if (data.status === "converting") {
+          setIsUpscalingHdr(true);
+          setHdrProgress(data.progress || 0);
+          setHdrFps(data.fps || 0);
+        } else if (data.status === "error") {
+          setIsUpscalingHdr(false);
+        } else {
+          setIsUpscalingHdr(false);
+        }
+      }
+    } catch (e) {
+      console.error("Error checking HDR status:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedJobId) {
+      checkHdrStatus();
+      setViewingHdrVideo(false);
+    }
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    if (!isUpscalingHdr) return;
+    const interval = setInterval(checkHdrStatus, 2000);
+    return () => clearInterval(interval);
+  }, [isUpscalingHdr, selectedJobId]);
+
+  const handleStartHdrUpscale = async () => {
+    if (!selectedJobId) return;
+    setIsUpscalingHdr(true);
+    setHdrProgress(0);
+    showToast(`⚡ Starting SDR2HDR conversion (${hdrScale}x, tone=${hdrTone})...`);
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/upscale-hdr`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          output_scale: hdrScale,
+          tone: hdrTone,
+          fast_mode: hdrFastMode,
+        }),
+      });
+      if (res.ok) {
+        setShowHdrModal(false);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`SDR2HDR failed: ${err.detail || "Server error"}`);
+        setIsUpscalingHdr(false);
+      }
+    } catch (e) {
+      alert("Error triggering SDR2HDR: " + e);
+      setIsUpscalingHdr(false);
+    }
+  };
 
   const openMemeCustomizerForShot = (shot: ShotDetail) => {
     setMemeTargetShot(shot);
@@ -438,6 +518,9 @@ export default function StudioDashboard() {
           bgm_track_id: selectedBgmId === "none" ? null : selectedBgmId,
           bgm_volume: bgmVolume,
           bgm_ducking: bgmDucking,
+          hdr_upscale_enabled: hdrAvailable,
+          hdr_output_scale: hdrScale,
+          hdr_tone: hdrTone,
         }),
       });
 
@@ -1391,15 +1474,39 @@ export default function StudioDashboard() {
                 </div>
               </div>
 
-              {/* Re-render Master Button */}
-              <button
-                onClick={handleRerenderMaster}
-                disabled={isRerenderingMaster}
-                className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 text-black text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02]"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRerenderingMaster ? "animate-spin" : ""}`} />
-                <span>{isRerenderingMaster ? "Burning Subtitles & BGM..." : "⚡ Re-render Master Edit"}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* SDR2HDR Upscale & HDR10 Button */}
+                <button
+                  onClick={() => setShowHdrModal(true)}
+                  className={`border text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg transition-all hover:scale-[1.02] ${
+                    hdrAvailable
+                      ? "bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 text-white border-pink-400 shadow-pink-600/30"
+                      : isUpscalingHdr
+                      ? "bg-purple-900/60 text-purple-200 border-purple-500 animate-pulse"
+                      : "bg-zinc-800/90 hover:bg-zinc-700 text-zinc-100 border-zinc-700 shadow-zinc-900/50"
+                  }`}
+                  title="Upscale to 4K / Convert to 10-bit Rec.2020 HDR10 with AI"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isUpscalingHdr ? "animate-spin text-pink-300" : "text-amber-300"}`} />
+                  <span>
+                    {isUpscalingHdr
+                      ? `⚡ SDR2HDR: ${hdrProgress.toFixed(0)}%`
+                      : hdrAvailable
+                      ? "✨ HDR10 Active (Options)"
+                      : "⚡ SDR2HDR Upscale"}
+                  </span>
+                </button>
+
+                {/* Re-render Master Button */}
+                <button
+                  onClick={handleRerenderMaster}
+                  disabled={isRerenderingMaster}
+                  className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 text-black text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all hover:scale-[1.02]"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRerenderingMaster ? "animate-spin" : ""}`} />
+                  <span>{isRerenderingMaster ? "Burning Subtitles & BGM..." : "⚡ Re-render Master Edit"}</span>
+                </button>
+              </div>
             </div>
 
             {/* Settings Grid: Subtitles (Left) + BGM Engine (Right) */}
@@ -1607,15 +1714,70 @@ export default function StudioDashboard() {
               </div>
 
               {/* Master 9:16 Video Player */}
-              <div className="bg-black rounded-2xl overflow-hidden border border-zinc-800 flex justify-center py-2 shadow-2xl relative">
+              <div className="bg-black rounded-2xl overflow-hidden border border-zinc-800 flex flex-col items-center py-2 shadow-2xl relative">
+                {/* SDR vs HDR10 Stream Switcher */}
+                {hdrAvailable && (
+                  <div className="flex items-center gap-1.5 mb-2 z-10">
+                    <button
+                      onClick={() => setViewingHdrVideo(false)}
+                      className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all ${
+                        !viewingHdrVideo
+                          ? "bg-zinc-700 text-white border-zinc-500 shadow-sm"
+                          : "bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-zinc-200"
+                      }`}
+                    >
+                      SDR Standard
+                    </button>
+                    <button
+                      onClick={() => setViewingHdrVideo(true)}
+                      className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all flex items-center gap-1.5 ${
+                        viewingHdrVideo
+                          ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white border-pink-400 shadow-md shadow-pink-600/30"
+                          : "bg-zinc-900/90 text-pink-400 border-zinc-800 hover:text-pink-300"
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-300" />
+                      <span>✨ HDR10 Upscaled (10-bit PQ)</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* In-progress HDR conversion indicator */}
+                {isUpscalingHdr && (
+                  <div className="w-11/12 bg-purple-950/80 border border-purple-500/40 rounded-xl p-2.5 mb-2 text-center space-y-1.5 shadow-lg">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-purple-200">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 animate-spin text-pink-400" />
+                        AI SDR2HDR Upscaling in progress...
+                      </span>
+                      <span className="font-mono text-pink-300 font-bold">{hdrProgress.toFixed(0)}%</span>
+                    </div>
+                    <div className="w-full bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-purple-500 to-pink-500 h-1.5 transition-all duration-300"
+                        style={{ width: `${hdrProgress}%` }}
+                      />
+                    </div>
+                    {hdrFps > 0 && (
+                      <div className="text-[9px] text-purple-400 font-mono text-right">
+                        Speed: {hdrFps.toFixed(1)} fps • 10-bit Rec.2020 SMPTE 2084
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <video
                   ref={masterVideoRef}
-                  key={selectedJob.job_id}
+                  key={`${selectedJob.job_id}_${viewingHdrVideo ? "hdr" : "sdr"}`}
                   controls
                   playsInline
                   onTimeUpdate={handleTimeUpdate}
                   className="max-h-[500px] w-auto rounded-xl shadow-lg aspect-[9/16]"
-                  src={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video`}
+                  src={
+                    viewingHdrVideo
+                      ? `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/hdr-video`
+                      : `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video`
+                  }
                 >
                   Your browser does not support the video tag.
                 </video>
@@ -2780,6 +2942,163 @@ export default function StudioDashboard() {
               >
                 <Scissors className={`w-3.5 h-3.5 ${isInsertingCutaway ? "animate-spin" : ""}`} />
                 <span>{isInsertingCutaway ? "Inserting Cutaway..." : "Insert Cutaway"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SDR2HDR UPSCALER & HDR10 MODAL */}
+      {showHdrModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-purple-500/40 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-600 text-white flex items-center justify-center shadow-lg shadow-purple-600/30">
+                  <Tv className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>⚡ SDR2HDR Upscaler & HDR10</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider bg-pink-500/20 text-pink-300 border border-pink-500/40 px-2 py-0.5 rounded-full">
+                      10-bit Rec.2020
+                    </span>
+                  </h3>
+                  <p className="text-xs text-zinc-400">
+                    AI Inverse Tone Mapping (ITM) + Super-Resolution Lanczos Upscaling
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowHdrModal(false)}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {/* Output Resolution & Super-Resolution Scale */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                  Target Resolution & Upscaling
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { scale: 1.0, label: "1080x1920", sub: "1.0x Native HDR10" },
+                    { scale: 1.5, label: "1620x2880", sub: "1.5x QHD+ Ultra" },
+                    { scale: 2.0, label: "2160x3840", sub: "2.0x 4K UHD" },
+                  ].map((item) => (
+                    <button
+                      key={item.scale}
+                      type="button"
+                      onClick={() => setHdrScale(item.scale)}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        hdrScale === item.scale
+                          ? "bg-purple-600/20 border-purple-500 text-white shadow-sm"
+                          : "bg-zinc-950/70 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{item.label}</div>
+                      <div className="text-[10px] text-zinc-500">{item.sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tone Mapping Style */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  Brightness & Dynamic Range Anchoring
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHdrTone("vivid")}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      hdrTone === "vivid"
+                        ? "bg-amber-500/20 border-amber-500 text-white shadow-sm"
+                        : "bg-zinc-950/70 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                    }`}
+                  >
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>🔥 Vivid (Viral Pop)</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-400 mt-1">
+                      Maps whites to peak nits. Maximum pop on OLED smartphone screens (TikTok / Reels / Shorts).
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHdrTone("reference")}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      hdrTone === "reference"
+                        ? "bg-indigo-500/20 border-indigo-500 text-white shadow-sm"
+                        : "bg-zinc-950/70 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                    }`}
+                  >
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>🎬 Reference (BT.2408)</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-400 mt-1">
+                      Standard broadcast anchoring (203 nit diffuse white) with specular headroom.
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Fast Mode Toggle */}
+              <div className="bg-zinc-950/60 border border-zinc-800/80 rounded-2xl p-3 flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-zinc-200">Fast AI Mode</div>
+                  <div className="text-[10px] text-zinc-500">
+                    Optimized spatial masks & fast HEVC 10-bit encoding
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={hdrFastMode}
+                  onChange={(e) => setHdrFastMode(e.target.checked)}
+                  className="w-4 h-4 accent-purple-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Status / Live Progress if running */}
+              {isUpscalingHdr && (
+                <div className="space-y-1.5 bg-purple-950/40 border border-purple-500/30 rounded-2xl p-3">
+                  <div className="flex justify-between text-xs font-semibold text-purple-200">
+                    <span>Upscaling & Tone Mapping...</span>
+                    <span className="font-mono text-pink-300 font-bold">{hdrProgress.toFixed(0)}%</span>
+                  </div>
+                  <div className="w-full bg-zinc-950 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 transition-all duration-300"
+                      style={{ width: `${hdrProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
+              <button
+                onClick={() => setShowHdrModal(false)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold px-4 py-2 rounded-xl transition-colors"
+              >
+                Close
+              </button>
+              <button
+                disabled={isUpscalingHdr}
+                onClick={handleStartHdrUpscale}
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02]"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${isUpscalingHdr ? "animate-spin" : ""}`} />
+                <span>{isUpscalingHdr ? `Upscaling (${hdrProgress.toFixed(0)}%)...` : "⚡ Start SDR2HDR Upscale"}</span>
               </button>
             </div>
           </div>

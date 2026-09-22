@@ -58,6 +58,15 @@ class Config:
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
 
+    # SDR2HDR & Upscaling Engine
+    HDR_ENABLED: bool = False
+    HDR_DEFAULT_SCALE: float = 1.0  # 1.0 (Native HDR10), 1.5 (2K QHD), 2.0 (4K UHD)
+    HDR_DEFAULT_TONE: str = "vivid"  # "vivid" (punchy viral pop) or "reference" (BT.2408)
+    HDR_DEFAULT_STYLE: str = "natural"  # "natural", "cinematic", "night"
+    HDR_FAST_MODE: bool = True
+    HDR_PROCESSING_SCALE: float = 0.6  # Optimal balance of speed and color fidelity
+    HDR_MODEL_PATH: Path = PROJECT_ROOT / "models" / "enhancement_model_reuse_v1.pt"
+
     # Google Drive
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")

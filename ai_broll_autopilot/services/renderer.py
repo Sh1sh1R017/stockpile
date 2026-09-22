@@ -30,10 +30,14 @@ class Renderer:
         ass_subtitles_path: str = None,
         bgm_path: str = None,
         bgm_volume: float = 0.15,
-        ducking_enabled: bool = True
+        ducking_enabled: bool = True,
+        upscale_hdr: bool = False,
+        hdr_scale: float = 1.0,
+        hdr_tone: str = "vivid"
     ) -> str:
         """Render the composite video with B-roll cutaway overlays, dynamic transitions,
-        kinetic subtitles, and mixed audio SFX with ducked background music."""
+        kinetic subtitles, and mixed audio SFX with ducked background music.
+        Optionally upscales and converts the final master to HDR10 via sdr2hdr."""
         base_p = Path(base_video)
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +129,27 @@ class Renderer:
             raise RuntimeError(f"FFmpeg rendering failed: output file not created at {out_p}")
 
         logger.info(f"Render completed successfully: {out_p.name} ({out_p.stat().st_size / 1024 / 1024:.2f} MB)")
+
+        if upscale_hdr:
+            hdr_out_p = out_p.with_name(f"{out_p.stem}_hdr10.mp4")
+            try:
+                from ai_broll_autopilot.services.sdr2hdr_service import SDR2HDREngine
+                engine = SDR2HDREngine()
+                logger.info(f"Executing SDR2HDR upscale & HDR10 pass for {out_p.name} -> {hdr_out_p.name} (scale={hdr_scale}x)...")
+                await engine.convert_and_upscale_async(
+                    input_path=str(out_p),
+                    output_path=str(hdr_out_p),
+                    output_scale=hdr_scale,
+                    tone=hdr_tone,
+                    fast_mode=Config.HDR_FAST_MODE,
+                    processing_scale=Config.HDR_PROCESSING_SCALE
+                )
+                if hdr_out_p.exists() and hdr_out_p.stat().st_size > 0:
+                    logger.info(f"SDR2HDR upscaling succeeded: {hdr_out_p.name} ({hdr_out_p.stat().st_size / 1024 / 1024:.2f} MB)")
+                    return str(hdr_out_p)
+            except Exception as e:
+                logger.error(f"SDR2HDR upscale failed, falling back to SDR master: {e}")
+
         return str(out_p)
 
     async def _normalize_single_video(self, base_p: Path, out_p: Path) -> str:

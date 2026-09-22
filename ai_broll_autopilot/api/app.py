@@ -49,6 +49,7 @@ app.add_middleware(
 db = Database()
 learning_engine = FeedbackLearningEngine()
 orchestrator = Orchestrator()
+hdr_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 # Request Models
@@ -112,6 +113,16 @@ class JobSettingsRequest(BaseModel):
     bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
     bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
     bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
+    hdr_upscale_enabled: Optional[bool] = Field(None, description="Toggle SDR2HDR upscale & HDR10 output")
+    hdr_output_scale: Optional[float] = Field(None, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)")
+    hdr_tone: Optional[str] = Field(None, description="HDR tone: vivid or reference")
+
+
+class HdrUpscaleRequest(BaseModel):
+    output_scale: Optional[float] = Field(1.0, description="Scale factor: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)")
+    tone: Optional[str] = Field("vivid", description="Tone mapping: vivid (viral pop) or reference (BT.2408)")
+    hdr_style: Optional[str] = Field("natural", description="Style: natural, cinematic, or night")
+    fast_mode: Optional[bool] = Field(True, description="Fast mode for rapid generation")
 
 
 @app.on_event("startup")
@@ -1186,6 +1197,13 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
     if req.bgm_ducking is not None:
         settings["bgm_ducking"] = req.bgm_ducking
 
+    if req.hdr_upscale_enabled is not None:
+        settings["hdr_upscale_enabled"] = req.hdr_upscale_enabled
+    if req.hdr_output_scale is not None:
+        settings["hdr_output_scale"] = req.hdr_output_scale
+    if req.hdr_tone is not None:
+        settings["hdr_tone"] = req.hdr_tone
+
     job.edit_plan["render_settings"] = settings
     db.save_job(job)
     return {"status": "success", "render_settings": settings}
@@ -1249,6 +1267,10 @@ async def rerender_job_video(job_id: str):
         if p and p.exists():
             bgm_path = str(p.resolve())
 
+    hdr_enabled = bool(settings.get("hdr_upscale_enabled", False))
+    hdr_scale = float(settings.get("hdr_output_scale", 1.0))
+    hdr_tone = str(settings.get("hdr_tone", "vivid"))
+
     out_path = await renderer.render(
         base_video=job.source_file,
         edit_plan=job.edit_plan,
@@ -1256,7 +1278,10 @@ async def rerender_job_video(job_id: str):
         ass_subtitles_path=ass_path,
         bgm_path=bgm_path,
         bgm_volume=bgm_vol,
-        ducking_enabled=ducking
+        ducking_enabled=ducking,
+        upscale_hdr=hdr_enabled,
+        hdr_scale=hdr_scale,
+        hdr_tone=hdr_tone
     )
 
     # Also update final output video if exists
@@ -1272,8 +1297,139 @@ async def rerender_job_video(job_id: str):
         "video_url": f"/api/jobs/{job_id}/video",
         "file_size": Path(out_path).stat().st_size,
         "subtitles_burned": bool(ass_path),
-        "bgm_applied": bool(bgm_path)
+        "bgm_applied": bool(bgm_path),
+        "hdr_enabled": hdr_enabled
     }
+
+
+@app.post("/api/jobs/{job_id}/upscale-hdr")
+async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_tasks: BackgroundTasks):
+    """Start an asynchronous SDR2HDR upscaling and HDR10 conversion for a job's master video."""
+    import time
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
+    candidate_video = work_dir / f"rendered_{job.source_filename}"
+    if not candidate_video.exists() and job.output_video_path and Path(job.output_video_path).exists():
+        candidate_video = Path(job.output_video_path)
+
+    if not candidate_video.exists():
+        raise HTTPException(status_code=400, detail="Master video has not been rendered yet")
+
+    hdr_out = work_dir / f"rendered_{Path(job.source_filename).stem}_hdr10.mp4"
+
+    hdr_tasks[job_id] = {
+        "status": "converting",
+        "progress": 0.0,
+        "processed_frames": 0,
+        "total_frames": 0,
+        "fps": 0.0,
+        "error": None,
+        "output_path": str(hdr_out),
+        "output_url": f"/api/jobs/{job_id}/hdr-video",
+        "started_at": time.time(),
+        "metadata": None,
+    }
+
+    def _run_hdr_job():
+        try:
+            from ai_broll_autopilot.services.sdr2hdr_service import SDR2HDREngine
+            engine = SDR2HDREngine()
+
+            def _on_progress(processed, total, fps):
+                pct = round((processed / max(total, 1)) * 100, 1)
+                hdr_tasks[job_id]["progress"] = pct
+                hdr_tasks[job_id]["processed_frames"] = processed
+                hdr_tasks[job_id]["total_frames"] = total
+                hdr_tasks[job_id]["fps"] = round(fps, 2)
+
+            res = engine.convert_and_upscale(
+                input_path=str(candidate_video),
+                output_path=str(hdr_out),
+                output_scale=req.output_scale or 1.0,
+                tone=req.tone or "vivid",
+                hdr_style=req.hdr_style or "natural",
+                fast_mode=req.fast_mode,
+                processing_scale=Config.HDR_PROCESSING_SCALE,
+                progress_callback=_on_progress,
+            )
+
+            hdr_tasks[job_id]["status"] = "completed"
+            hdr_tasks[job_id]["progress"] = 100.0
+            hdr_tasks[job_id]["metadata"] = res.get("metadata", {})
+
+            # Persist HDR info into job edit_plan
+            j = db.get_job(job_id)
+            if j:
+                if not j.edit_plan:
+                    j.edit_plan = {}
+                j.edit_plan["hdr_output"] = {
+                    "path": str(hdr_out),
+                    "url": f"/api/jobs/{job_id}/hdr-video",
+                    "metadata": res.get("metadata", {})
+                }
+                db.save_job(j)
+
+        except Exception as e:
+            logger.error(f"SDR2HDR upscale failed for job {job_id}: {e}")
+            hdr_tasks[job_id]["status"] = "error"
+            hdr_tasks[job_id]["error"] = str(e)
+
+    background_tasks.add_task(_run_hdr_job)
+    return {"status": "started", "job_id": job_id, "output_url": f"/api/jobs/{job_id}/hdr-video"}
+
+
+@app.get("/api/jobs/{job_id}/hdr-status")
+async def get_job_hdr_status(job_id: str):
+    """Get real-time SDR2HDR upscaling status, progress %, and stream URL."""
+    task = hdr_tasks.get(job_id)
+    if task:
+        return task
+
+    # Check if already completed and persisted
+    job = db.get_job(job_id)
+    if job and job.edit_plan and "hdr_output" in job.edit_plan:
+        hdr_info = job.edit_plan["hdr_output"]
+        p = Path(hdr_info.get("path", ""))
+        if p.exists():
+            return {
+                "status": "completed",
+                "progress": 100.0,
+                "output_url": f"/api/jobs/{job_id}/hdr-video",
+                "output_path": str(p),
+                "metadata": hdr_info.get("metadata", {})
+            }
+
+    return {"status": "idle", "progress": 0.0}
+
+
+@app.get("/api/jobs/{job_id}/hdr-video")
+async def stream_job_hdr_video(job_id: str):
+    """Stream the 10-bit Rec.2020 HDR10 video with native range requests."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
+    hdr_path = work_dir / f"rendered_{Path(job.source_filename).stem}_hdr10.mp4"
+
+    if not hdr_path.exists():
+        if job.edit_plan and "hdr_output" in job.edit_plan:
+            cand = Path(job.edit_plan["hdr_output"].get("path", ""))
+            if cand.exists():
+                hdr_path = cand
+
+    if not hdr_path.exists():
+        raise HTTPException(status_code=404, detail="HDR video not found. Run HDR upscaling first.")
+
+    return FileResponse(
+        path=str(hdr_path),
+        media_type="video/mp4",
+        filename=hdr_path.name,
+        headers={"Accept-Ranges": "bytes"}
+    )
 
 
 @app.get("/api/sfx-catalog")
