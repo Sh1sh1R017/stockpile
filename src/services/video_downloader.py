@@ -140,13 +140,19 @@ class VideoDownloader:
         return downloaded_files
 
     def _download_single_video(
-        self, video: ScoredVideo, output_dir: Path
+        self,
+        video: ScoredVideo,
+        output_dir: Path,
+        max_clip_duration: Optional[int] = None,
+        start_offset: Optional[float] = None,
     ) -> Optional[str]:
         """Download a single video with yt-dlp.
 
         Args:
             video: ScoredVideo object to download
             output_dir: Directory to save the video
+            max_clip_duration: Max duration in seconds to download/trim (default from config, max 3)
+            start_offset: Start offset in seconds to skip intros/title cards/watermarks
 
         Returns:
             Path to downloaded file or None if failed
@@ -155,6 +161,18 @@ class VideoDownloader:
         # Get config for file size limit
         config = load_config()
         max_size = config.get("max_video_size_mb", 100) * 1024 * 1024
+        if max_clip_duration is None:
+            max_clip_duration = config.get("max_clip_duration_seconds", 3)
+
+        # Skip intro titles, channel watermarks, and speaker cards (typically first 4-8s)
+        video_dur = getattr(video.video_result, "duration", 0) or 0
+        if start_offset is None:
+            if video_dur > 15:
+                start_offset = 6.0
+            elif video_dur > 8:
+                start_offset = 2.0
+            else:
+                start_offset = 0.0
 
         # Configure yt-dlp options
         ydl_opts = {
@@ -171,6 +189,8 @@ class VideoDownloader:
             "retries": 3,
             # Audio options (keep audio for B-roll)
             "extractaudio": False,
+            # Format selection: fast, high quality 1080p/720p MP4
+            "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             # Post-processing with ffmpeg suppression
             "postprocessors": [
                 {
@@ -210,6 +230,15 @@ class VideoDownloader:
             "no_progress": True,  # Disable progress bar
         }
 
+        # Download buffer for requested clip duration (e.g. 0.6s or 3s)
+        if max_clip_duration and max_clip_duration > 0:
+            dl_seconds = max(3, int(max_clip_duration + 2))
+            end_offset = start_offset + dl_seconds
+            ydl_opts["download_ranges"] = yt_dlp.utils.download_range_func(
+                None, [(start_offset, end_offset)]
+            )
+            ydl_opts["force_keyframes_at_cuts"] = True
+
         try:
             # Get list of files before download
             files_before = set(output_dir.glob("*"))
@@ -218,19 +247,33 @@ class VideoDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([video.video_result.url])
 
-                # Find newly created files with the score prefix
+            # Find newly created files with the score prefix
+            files_after = set(output_dir.glob("*"))
+            new_files = files_after - files_before
+
+            score_prefix = f"score{video.score:02d}_"
+            for file_path in new_files:
+                if file_path.is_file() and file_path.name.startswith(score_prefix):
+                    return self._trim_to_max_duration(str(file_path), max_clip_duration)
+
+            # Fallback if range download failed to find cut
+            if not new_files and start_offset > 0:
+                logger.warning(f"Offset download returned no files for {video.video_id}; retrying with 0 offset")
+                ydl_opts["download_ranges"] = yt_dlp.utils.download_range_func(
+                    None, [(0, dl_seconds)]
+                )
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([video.video_result.url])
                 files_after = set(output_dir.glob("*"))
                 new_files = files_after - files_before
-
-                score_prefix = f"score{video.score:02d}_"
                 for file_path in new_files:
                     if file_path.is_file() and file_path.name.startswith(score_prefix):
-                        return str(file_path)
+                        return self._trim_to_max_duration(str(file_path), max_clip_duration)
 
-                logger.warning(
-                    f"No downloaded file found with score prefix: {score_prefix}"
-                )
-                return None
+            logger.warning(
+                f"No downloaded file found with score prefix: {score_prefix}"
+            )
+            return None
 
         except yt_dlp.DownloadError as e:
             logger.error(f"yt-dlp download error for {video.video_id}: {e}")
@@ -326,3 +369,58 @@ class VideoDownloader:
             "total_files": int(total_files),
             "total_size_mb": int(round(total_size / (1024 * 1024), 2)),
         }
+
+    def _trim_to_max_duration(self, file_path: str, max_duration: float = 3.0) -> str:
+        """Trim downloaded video to max_duration seconds accurately with FFmpeg."""
+        if not max_duration or max_duration <= 0:
+            return file_path
+
+        p = Path(file_path)
+        if not p.exists():
+            return file_path
+
+        temp_out = p.with_name(f"trim_{p.name}")
+        try:
+            import subprocess
+            # Try starting at 1.0s to skip static thumbnails or fade-in
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", "1.0",
+                "-i", str(p),
+                "-t", f"{max_duration:.2f}",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "22",
+                "-v", "quiet",
+                str(temp_out)
+            ]
+            res = subprocess.run(cmd, capture_output=True, timeout=30)
+            if not (res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 1000):
+                # Fallback to starting at 0.0s if 1.0s was beyond duration
+                cmd_fb = [
+                    "ffmpeg", "-y",
+                    "-i", str(p),
+                    "-t", f"{max_duration:.2f}",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "22",
+                    "-v", "quiet",
+                    str(temp_out)
+                ]
+                subprocess.run(cmd_fb, capture_output=True, timeout=30)
+
+            if temp_out.exists() and temp_out.stat().st_size > 0:
+                p.unlink(missing_ok=True)
+                temp_out.rename(p)
+                safe_name = p.name.encode("ascii", "replace").decode("ascii")
+                logger.info(f"Trimmed video {safe_name} to {max_duration:.2f} seconds")
+            else:
+                if temp_out.exists():
+                    temp_out.unlink(missing_ok=True)
+        except Exception as e:
+            safe_name = p.name.encode("ascii", "replace").decode("ascii") if "p" in locals() else "video"
+            logger.warning(f"Could not trim {safe_name} with ffmpeg: {e}")
+            if temp_out.exists():
+                temp_out.unlink(missing_ok=True)
+
+        return str(p)

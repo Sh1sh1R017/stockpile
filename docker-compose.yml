@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  ai-broll-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile.azure
+    container_name: ai_broll_studio
+    ports:
+      - "3000:3000"  # Next.js Web UI
+      - "8000:8000"  # FastAPI Backend API
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.5-flash}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_DRIVE_INPUT_FOLDER_ID=${GOOGLE_DRIVE_INPUT_FOLDER_ID}
+      - GOOGLE_DRIVE_OUTPUT_FOLDER_ID=${GOOGLE_DRIVE_OUTPUT_FOLDER_ID}
+      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL}
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./media:/app/media
+      - ./autopilot.db:/app/autopilot.db
+      - ./token.json:/app/token.json
+    restart: unless-stopped

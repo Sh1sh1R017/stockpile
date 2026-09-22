@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1
+# Multi-stage production container for Azure Container Apps
+
+# ==========================================
+# Stage 1: Build Next.js Web Frontend
+# ==========================================
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/web
+
+COPY web/package*.json ./
+RUN npm ci
+
+COPY web/ ./
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+RUN npm run build
+
+# ==========================================
+# Stage 2: Production Unified Container
+# ==========================================
+FROM python:3.11-slim AS runner
+
+# Install FFmpeg, Node.js (for Next.js runner), and system media libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for rapid Python dependency management
+COPY --from=ghcr.io/astral-sh/uv:0.5.1 /uv /bin/uv
+
+WORKDIR /app
+
+# Install Python requirements
+COPY requirements.txt ./
+RUN uv pip install --system --no-cache -r requirements.txt
+
+# Copy Python codebase
+COPY ai_broll_autopilot/ ./ai_broll_autopilot/
+COPY src/ ./src/
+COPY gbro-collage-broll/ ./gbro-collage-broll/
+COPY erduo-broll-loop-engineering/ ./erduo-broll-loop-engineering/
+COPY autopilot.py stockpile.py ./
+
+# Create runtime directories
+RUN mkdir -p /app/input /app/output /app/media /app/data
+
+# Copy Next.js build from builder
+COPY --from=frontend-builder /app/web/.next/standalone /app/web-standalone
+COPY --from=frontend-builder /app/web/.next/static /app/web-standalone/.next/static
+COPY --from=frontend-builder /app/web/public /app/web-standalone/public
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+# Environment settings
+ENV PORT=8000
+ENV FRONTEND_PORT=3000
+ENV BACKEND_API_URL=http://127.0.0.1:8000
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 3000 8000
+
+ENTRYPOINT ["/bin/bash", "/app/docker-entrypoint.sh"]

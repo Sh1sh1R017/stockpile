@@ -8,3 +8,6 @@ google-auth-httplib2
 watchdog
 python-dotenv
 rich
+fastapi
+uvicorn
+python-multipart

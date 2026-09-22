@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Erduo B-roll Loop Engineering 中文工作流程</title>
+  <desc id="desc">从完整 SRT 与设计要求，到独立导演、共享素材、连续章节制作、脚本渲染、独立审美与原作者返修，最终交付逐镜视频、完整预览和可编辑工程。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fffaf1"/>
+      <stop offset="1" stop-color="#f5f8ff"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a3d"/>
+      <stop offset="1" stop-color="#ff5c57"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#22304a" flood-opacity=".12"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto">
+      <path d="M0,0 L10,6 L0,12 Z" fill="#77839a"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .eyebrow { font-size: 21px; font-weight: 700; letter-spacing: 2px; fill: #ff6b48; }
+      .title { font-size: 46px; font-weight: 800; fill: #172033; }
+      .subtitle { font-size: 24px; fill: #667085; }
+      .step { font-size: 18px; font-weight: 800; fill: #fff; text-anchor: middle; dominant-baseline: middle; }
+      .node-title { font-size: 25px; font-weight: 800; fill: #172033; }
+      .node-copy { font-size: 19px; fill: #667085; }
+      .footer { font-size: 20px; font-weight: 650; fill: #344054; }
+      .footer-primary { fill: #fff; }
+      .footer-secondary { fill: #cbd5e1; }
+      .card { fill: #fff; stroke: #e4e8f0; stroke-width: 2; filter: url(#shadow); }
+      .flow { fill: none; stroke: #77839a; stroke-width: 4; stroke-linecap: round; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" rx="36" fill="url(#background)"/>
+  <text x="90" y="76" class="eyebrow">小白只需要准备输入，其余交给 AGENT</text>
+  <text x="90" y="132" class="title">从一份 SRT 到有审美、可编辑的 B-roll</text>
+  <text x="90" y="174" class="subtitle">安装一次 · 角色保持独立上下文 · 机械工作交给脚本 · 最终效果优先</text>
+
+  <path class="flow" d="M375 317 H445"/>
+  <path class="flow" d="M755 317 H825"/>
+  <path class="flow" d="M1135 317 H1205"/>
+  <path class="flow" d="M1360 425 V485"/>
+  <path class="flow" d="M1205 610 H1135"/>
+  <path class="flow" d="M825 610 H755"/>
+  <path class="flow" d="M445 610 H375"/>
+
+  <g transform="translate(65 220)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="url(#accent)"/>
+    <text x="42" y="43" class="step">1</text>
+    <text x="80" y="50" class="node-title">准备输入</text>
+    <text x="28" y="98" class="node-copy">完整原始 SRT 字幕</text>
+    <text x="28" y="132" class="node-copy">设计要求与可选口播视频</text>
+    <text x="28" y="166" class="node-copy">可选：图片 / Logo / 截图</text>
+  </g>
+
+  <g transform="translate(445 220)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#4f7cff"/>
+    <text x="42" y="43" class="step">2</text>
+    <text x="80" y="50" class="node-title">安装与体检</text>
+    <text x="28" y="98" class="node-copy">运行 Install.command</text>
+    <text x="28" y="132" class="node-copy">只准备共同工具与路径</text>
+    <text x="28" y="166" class="node-copy">需要搜索时再配置素材服务</text>
+  </g>
+
+  <g transform="translate(825 220)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#8b5cf6"/>
+    <text x="42" y="43" class="step">3</text>
+    <text x="80" y="50" class="node-title">独立导演</text>
+    <text x="28" y="98" class="node-copy">Director 理解内容结构</text>
+    <text x="28" y="132" class="node-copy">确定视觉、动作和镜头衔接</text>
+    <text x="28" y="166" class="node-copy">原始 SRT 与设计要求直达</text>
+  </g>
+
+  <g transform="translate(1205 220)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#12a594"/>
+    <text x="42" y="43" class="step">4</text>
+    <text x="80" y="50" class="node-title">共享素材</text>
+    <text x="28" y="98" class="node-copy">优先使用用户提供素材</text>
+    <text x="28" y="132" class="node-copy">全任务共用一份素材库</text>
+    <text x="28" y="166" class="node-copy">来源、字体与文件均验证</text>
+  </g>
+
+  <g transform="translate(1205 485)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#0f9f6e"/>
+    <text x="42" y="43" class="step">5</text>
+    <text x="80" y="50" class="node-title">章节制作</text>
+    <text x="28" y="98" class="node-copy">新的上下文负责连续镜头</text>
+    <text x="28" y="132" class="node-copy">按需读取本章与相邻衔接</text>
+    <text x="28" y="166" class="node-copy">交付可编辑源码并负责返修</text>
+  </g>
+
+  <g transform="translate(825 485)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#e85d75"/>
+    <text x="42" y="43" class="step">6</text>
+    <text x="80" y="50" class="node-title">脚本渲染</text>
+    <text x="28" y="98" class="node-copy">逐镜渲染与真实媒体验证</text>
+    <text x="28" y="132" class="node-copy">生成检查图与完整预览</text>
+    <text x="28" y="166" class="node-copy">修改时复用未变化的镜头</text>
+  </g>
+
+  <g transform="translate(445 485)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#f59e0b"/>
+    <text x="42" y="43" class="step">7</text>
+    <text x="80" y="50" class="node-title">独立审美与返修</text>
+    <text x="28" y="98" class="node-copy">实际看片：画面、节奏、衔接</text>
+    <text x="28" y="132" class="node-copy">问题交回原作者定点修改</text>
+    <text x="28" y="166" class="node-copy">再看片，按约定请你确认</text>
+  </g>
+
+  <g transform="translate(65 485)">
+    <rect class="card" width="310" height="205" rx="24"/>
+    <circle cx="42" cy="42" r="25" fill="#2d65d8"/>
+    <text x="42" y="43" class="step">8</text>
+    <text x="80" y="50" class="node-title">正式交付</text>
+    <text x="28" y="98" class="node-copy">每镜独立高质量 H.264</text>
+    <text x="28" y="132" class="node-copy">完整预览与可编辑工程</text>
+    <text x="28" y="166" class="node-copy">正式输出独立生成与检查</text>
+  </g>
+
+  <rect x="65" y="748" width="1470" height="88" rx="22" fill="#172033"/>
+  <text x="800" y="785" class="footer footer-primary" text-anchor="middle">你只需做三件事：准备输入 → 说明设计要求 → 观看并反馈</text>
+  <text x="800" y="817" class="node-copy footer-secondary" text-anchor="middle">导演、制作、审美接力；精简交接与局部返修，保留必要的创作空间</text>
+</svg>

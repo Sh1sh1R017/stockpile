@@ -1,0 +1,26 @@
+.DS_Store
+node_modules/
+.npm/
+*.log
+*.tmp
+*.tar
+*.tar.gz
+*.zip
+
+# Runtime and user production data
+.erduo-broll-loop-engineering/
+.erduo-hyperframes-broll/
+broll-production/
+renders/
+artifacts/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+config.json
+
+# Editor files
+.idea/
+.vscode/
+*~
