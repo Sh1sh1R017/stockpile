@@ -2341,6 +2341,9 @@ export default function StudioDashboard() {
                   {/* Popular Archetype Pills */}
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {[
+                      { key: "ishowspeed_shock", label: "⚡ Speed Shock" },
+                      { key: "caseoh_rage", label: "🎙️ CaseOh Rage" },
+                      { key: "jynxzi_freakout", label: "🎮 Jynxzi Freakout" },
                       { key: "the_trusted_doctor", label: "👨‍⚕️ The Specialist (IYKYK)" },
                       { key: "gigachad", label: "🗿 Gigachad" },
                       { key: "hide_the_pain_harold", label: "👴 Harold" },
@@ -2901,6 +2904,9 @@ export default function StudioDashboard() {
                       onChange={(e) => setInsertCutawayMemeTemplate(e.target.value)}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-fuchsia-500"
                     >
+                      <option value="ishowspeed_shock">⚡ IShowSpeed (Screaming Shock)</option>
+                      <option value="caseoh_rage">🎙️ CaseOh (Headset Mic Rage)</option>
+                      <option value="jynxzi_freakout">🎮 Jynxzi (Controller Disbelief)</option>
                       <option value="the_trusted_doctor">👨‍⚕️ The Specialist (IYKYK)</option>
                       <option value="gigachad">🗿 Gigachad</option>
                       <option value="hide_the_pain_harold">👴 Harold</option>

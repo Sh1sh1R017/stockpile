@@ -670,6 +670,33 @@ async def list_meme_templates(q: Optional[str] = None, limit: int = 80):
 
     featured_archetypes = [
         {
+            "key": "ishowspeed_shock",
+            "name": "⚡ IShowSpeed (Screaming Shock & Hype)",
+            "category": "Viral Streamers & Creators",
+            "description": "Darren Watkins Jr barking & wide-eyed screaming - captures #1 viewer retention",
+            "fields": [
+                {"name": "caption", "label": "Speed Reaction Caption (Optional)", "placeholder": "WHEN BRO ACTUALLY DID IT..."}
+            ]
+        },
+        {
+            "key": "caseoh_rage",
+            "name": "🎙️ CaseOh (Headset Mic Rage)",
+            "category": "Viral Streamers & Creators",
+            "description": "Furious mic-blast scream & chat spam - unhinged reaction for bad takes or roasting",
+            "fields": [
+                {"name": "caption", "label": "CaseOh Rage Caption (Optional)", "placeholder": "MODS, BAN THIS GUY IMMEDIATELY"}
+            ]
+        },
+        {
+            "key": "jynxzi_freakout",
+            "name": "🎮 Jynxzi (Controller Slam & Disbelief)",
+            "category": "Viral Streamers & Creators",
+            "description": "Glasses, headset, controller disbelief scream - viral reaction for shock and absurdity",
+            "fields": [
+                {"name": "caption", "label": "Jynxzi Reaction Caption (Optional)", "placeholder": "BRO JUST WITNESSED A MIRACLE"}
+            ]
+        },
+        {
             "key": "the_trusted_doctor",
             "name": "The Trusted Specialist (IYKYK)",
             "category": "IYKYK Pop-Culture Troll",

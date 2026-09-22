@@ -60,13 +60,29 @@ class Matcher:
         logger.info(f"Resolving B-roll for [{shot_id}] ({target_duration}s): '{prompt}'")
         asset_path = None
 
-        # 0. Check if shot is designated as a meme cutaway
-        if style == "meme":
+        # 0. Check if shot is designated as a meme cutaway or references viral creator/meme archetypes
+        creator_terms = ("ishowspeed", "speed shock", "caseoh", "jynxzi", "jynxi", "johnny sins", "the_trusted_doctor", "gigachad", "harold meme")
+        is_creator_prompt = any(k in (prompt or "").lower() for k in creator_terms)
+        if style == "meme" or is_creator_prompt:
             try:
+                if is_creator_prompt and not shot.get("meme_template"):
+                    p_lower = (prompt or "").lower()
+                    if "speed" in p_lower:
+                        shot["meme_template"] = "ishowspeed_shock"
+                    elif "caseoh" in p_lower:
+                        shot["meme_template"] = "caseoh_rage"
+                    elif "jynx" in p_lower:
+                        shot["meme_template"] = "jynxzi_freakout"
+                    elif "doctor" in p_lower or "sins" in p_lower:
+                        shot["meme_template"] = "the_trusted_doctor"
+                    elif "giga" in p_lower:
+                        shot["meme_template"] = "gigachad"
+                    elif "harold" in p_lower:
+                        shot["meme_template"] = "hide_the_pain_harold"
                 shot = self.meme_engine.create_meme_broll(shot, job_cache_dir, duration=target_duration)
                 asset_path = shot.get("asset_path")
                 if asset_path and Path(asset_path).exists():
-                    logger.info(f"Successfully generated meme cutaway for [{shot_id}]: {asset_path}")
+                    logger.info(f"Successfully generated meme/creator cutaway for [{shot_id}]: {asset_path}")
                     return shot
             except Exception as me:
                 logger.warning(f"Meme generation failed for [{shot_id}]: {me}. Falling back to standard stock footage.")

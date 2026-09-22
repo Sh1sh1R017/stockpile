@@ -93,6 +93,9 @@ class MemeEngine:
         # 2. Direct archetype aliases
         aliases = {
             "the_trusted_doctor": ["the_trusted_doctor", "the trusted doctor", "doctor", "specialist", "johnny sins", "johnny", "sins", "hospital doctor", "experienced doctor", "trust me im a doctor"],
+            "ishowspeed_shock": ["ishowspeed_shock", "ishowspeed", "speed", "darren watkins", "speed shock", "speed screaming", "barking", "speed reaction", "crazy streamer", "speed freakout"],
+            "caseoh_rage": ["caseoh_rage", "caseoh", "case oh", "caseoh rage", "caseoh screaming", "ban him", "mic scream", "heavy rage", "caseoh reaction"],
+            "jynxzi_freakout": ["jynxzi_freakout", "jynxzi", "jynxi", "jynxz", "controller slam", "jynxzi screaming", "good aim", "jynxzi freakout", "r6 streamer", "jynxzi reaction"],
             "gigachad": ["gigachad", "giga chad", "chad", "megachad", "absolute chad", "sigma"],
             "hide_the_pain_harold": ["hide_the_pain_harold", "hide the pain", "harold", "strained smile", "coffee smile"],
             "stepped_in_shit": ["stepped_in_shit", "stepped in shit", "ew i stepped in shit", "stepped", "walk shoe", "squash walk shoe"],
@@ -169,7 +172,14 @@ class MemeEngine:
         elif "same_picture" in template_key.lower() or "difference" in template_key.lower():
             self._render_same_picture(im, captions)
 
-        # 5. GENERIC: Modern Caption Card Banner
+        # 5. VIRAL STREAMER MEMES: IShowSpeed, CaseOh, Jynxzi (Rich reaction visuals)
+        elif any(k in template_key.lower() for k in ("ishowspeed", "speed", "caseoh", "jynxzi", "jynxi")):
+            # Only render top card banner if explicitly requested or custom caption is non-empty and show_banner is set
+            custom_cap = captions.get("caption") or captions.get("text") or captions.get("custom_text")
+            if custom_cap and custom_cap.strip() and captions.get("show_banner", False):
+                self._render_generic_card(im, captions)
+
+        # 6. GENERIC: Modern Caption Card Banner
         else:
             self._render_generic_card(im, captions)
 
@@ -320,7 +330,13 @@ class MemeEngine:
             "clown": "01_bonk_impact.mp3",
             "same_picture": "11_bruh.mp3",
             "batman_slap": "01_bonk_impact.mp3",
-            "gta_ah_shit": "60_sad_violin.mp3"
+            "gta_ah_shit": "60_sad_violin.mp3",
+            "the_trusted_doctor": "81_vine_boom.mp3",
+            "ishowspeed_shock": "81_vine_boom.mp3",
+            "caseoh_rage": "01_bonk_impact.mp3",
+            "jynxzi_freakout": "03_metal_pipe.mp3",
+            "gigachad": "03_metal_pipe.mp3",
+            "hide_the_pain_harold": "11_bruh.mp3"
         }
         target_fn = preferred_map.get(template_key, "81_vine_boom.mp3")
 

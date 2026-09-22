@@ -94,16 +94,20 @@ MANDATORY DIRECTING OBJECTIVES:
      • "person scrolling smartphone couch"
      • "father teaching son"
      • "businessman checking clipboard"
-4. CONTEXTUAL MEME CUTAWAYS (FOR VIRAL ENGAGEMENT, HUMOR, CONTRAST & BAD OPINIONS):
-   - Aim for a high-retention viral mix: whenever a spoken line expresses a contrast, bad opinion, bad habit, foolish decision, excuse, or funny take, use "style": "meme"!
-   - Aim for at least 1 to 2 meme cutaways in every clip to keep viewers highly engaged:
-     • "stepped_in_shit": For bad opinions, terrible takes, excuses, or distractions. Provide "meme_captions": {{"shoe_text": "The bad opinion / excuse / distraction"}}.
-     • "drake": For contrasting a rejected bad option vs an accepted good option. Provide "meme_captions": {{"top_text": "Rejected bad option", "bottom_text": "Accepted good option"}}.
+4. CONTEXTUAL MEME & CREATOR CUTAWAYS (PRIORITIZE FAMILIAR CREATOR FACES FOR MAXIMUM ATTENTION):
+   - CRITICAL USER MANDATE: Familiar creator faces (IShowSpeed, CaseOh, Jynxzi) capture exponentially higher viewer retention than generic stock footages! Prioritize them over dry stock when high emotion occurs!
+   - Whenever dialogue expresses intense emotion, shock, rage, disbelief, satire, or contrasted opinions, use "style": "meme"!
+   - VIRAL CREATOR ARCHETYPES:
+     • "ishowspeed_shock": Darren Watkins Jr (IShowSpeed) wide-eyed screaming shock & hype. Use for: intense hype, mind-blowing claims, screaming/shouting moments, crazy excitement, wild statements!
+     • "caseoh_rage": CaseOh furious headset mic rage & screaming. Use for: outrage, frustrating fails, bad takes, calling someone out, getting roasted, heavy mistakes!
+     • "jynxzi_freakout": Jynxzi controller-slam & disbelief scream. Use for: hilarious shock, absurdity, 'bro what' moments, clutch fails, gaming!
+     • "the_trusted_doctor": Johnny Sins specialist/doctor cutaway. Use whenever an expert, specialist, doctor, or seasoned professional is mentioned (comment section magnet)!
+     • "gigachad": Peak masculine discipline, sigma mindset, absolute winner triumph.
+     • "hide_the_pain_harold": Strained smile, enduring awkwardness or inner panic.
+     • "stepped_in_shit": For bad opinions, terrible takes, excuses, or distractions. Provide "meme_captions": {{"shoe_text": "The bad opinion / excuse"}}.
+     • "drake": For contrasting a rejected bad option vs an accepted good option. Provide "meme_captions": {{"top_text": "Rejected option", "bottom_text": "Accepted option"}}.
      • "clown": For progressive foolish steps or clown logic. Provide "meme_captions": {{"step_1": "...", "step_2": "...", "step_3": "...", "step_4": "..."}}.
-     • "same_picture": For comparing two identically bad or identical things. Provide "meme_captions": {{"item_1": "...", "item_2": "..."}}.
-     • "batman_slap": For shutting down an excuse or foolish complaint. Provide "meme_captions": {{"caption": "Excuse being slapped down"}}.
-     • "blinking_guy": For shock or disbelief reaction.
-     • "generic": For any punchline header caption. Provide "meme_captions": {{"caption": "..."}}.
+     • "same_picture": For comparing two identically bad or identical things.
    - For realistic scenes (workspace, athletics, mentor discussions), use "style": "stockpile".
 
 VIDEO DURATION: {video_duration:.2f} seconds
@@ -246,16 +250,36 @@ Return ONLY a valid JSON object matching this schema:
                 target_shot["style"] = "meme"
                 diag = target_shot.get("dialogue_quote", "").strip()
                 diag_lower = diag.lower()
-                if any(w in diag_lower for w in ["person", "meet", "talk", "real", "truth", "good", "better", "shake", "dinner"]):
+                
+                # Prioritize familiar creator faces over generic stock footages
+                if any(w in diag_lower for w in ["speed", "crazy", "insane", "screaming", "shouting", "hype", "unbelievable", "huge", "bark", "omg"]):
+                    target_shot["meme_template"] = "ishowspeed_shock"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "IShowSpeed Moment"}
+                elif any(w in diag_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy", "terrible", "worst"]):
+                    target_shot["meme_template"] = "caseoh_rage"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "CaseOh Rage"}
+                elif any(w in diag_lower for w in ["controller", "game", "gaming", "disbelief", "aim", "bro", "no way", "jynx", "jynxzi", "clutch"]):
+                    target_shot["meme_template"] = "jynxzi_freakout"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "Jynxzi Freakout"}
+                elif any(w in diag_lower for w in ["doctor", "specialist", "expert", "hospital", "patient", "nurse", "surgery", "experienced"]):
+                    target_shot["meme_template"] = "the_trusted_doctor"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "The Most Experienced Specialist"}
+                elif any(w in diag_lower for w in ["chad", "sigma", "winner", "grind", "discipline", "hard work"]):
+                    target_shot["meme_template"] = "gigachad"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "Average Consistency Enjoyer"}
+                elif any(w in diag_lower for w in ["pain", "awkward", "fine", "smile", "pretend", "strained"]):
+                    target_shot["meme_template"] = "hide_the_pain_harold"
+                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "Smiling Through The Pain"}
+                elif any(w in diag_lower for w in ["person", "meet", "talk", "real", "truth", "good", "better", "shake", "dinner"]):
                     target_shot["meme_template"] = "drake"
                     target_shot["meme_captions"] = {
                         "top_text": "15-minute Zoom interview",
                         "bottom_text": diag[:45] if diag else "Meet in person & have dinner"
                     }
                 else:
-                    target_shot["meme_template"] = "stepped_in_shit"
+                    target_shot["meme_template"] = "ishowspeed_shock"
                     target_shot["meme_captions"] = {
-                        "shoe_text": diag[:45] if diag else "Bad Habit / Excuse"
+                        "caption": diag[:45] if diag else "High Retention Reaction"
                     }
                 logger.info(f"Auto-injected meme cutaway on [{target_shot['shot_id']}] ({target_shot['meme_template']}) for viral retention.")
 
@@ -400,8 +424,25 @@ Return ONLY a valid JSON object matching this schema:
                 "narrative_reason": f"Contextual illustration of: {seg_text[:40]}",
             }
             if is_meme:
-                shot_data["meme_template"] = "stepped_in_shit"
-                shot_data["meme_captions"] = {"shoe_text": seg.get("text", "")[:45] or "Bad habits & excuses"}
+                seg_lower = seg_text.lower()
+                if any(w in seg_lower for w in ["speed", "crazy", "insane", "screaming", "shouting", "hype", "bark", "omg", "huge"]):
+                    shot_data["meme_template"] = "ishowspeed_shock"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "IShowSpeed Moment"}
+                elif any(w in seg_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy"]):
+                    shot_data["meme_template"] = "caseoh_rage"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "CaseOh Rage"}
+                elif any(w in seg_lower for w in ["controller", "game", "gaming", "disbelief", "aim", "bro", "no way", "jynx", "jynxzi"]):
+                    shot_data["meme_template"] = "jynxzi_freakout"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "Jynxzi Freakout"}
+                elif any(w in seg_lower for w in ["doctor", "specialist", "expert", "hospital", "patient", "experienced"]):
+                    shot_data["meme_template"] = "the_trusted_doctor"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "The Experienced Specialist"}
+                elif any(w in seg_lower for w in ["chad", "sigma", "winner", "grind", "discipline"]):
+                    shot_data["meme_template"] = "gigachad"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "Average Consistency Enjoyer"}
+                else:
+                    shot_data["meme_template"] = "ishowspeed_shock"
+                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "High Retention Creator Reaction"}
 
             shots.append(shot_data)
             last_end = end
