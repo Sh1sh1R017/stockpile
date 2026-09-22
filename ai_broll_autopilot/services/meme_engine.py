@@ -16,6 +16,8 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ai_broll_autopilot.config import Config
+
 logger = logging.getLogger(__name__)
 
 MEME_DIR = Path(r"D:\SUS AI ONLY\Memes templates -HD--20260917T031953Z-1-001\Memes templates -HD-")
@@ -33,18 +35,23 @@ class MemeEngine:
         self.sfx_catalog = self._load_sfx_catalog()
 
     def _load_templates(self) -> Dict[str, Path]:
-        """Index all template files in the HD templates directory."""
+        """Index all template files in the HD templates directory and project media/memes."""
         catalog = {}
-        if not self.templates_dir.exists():
-            logger.warning(f"Meme templates directory not found at: {self.templates_dir}")
-            return catalog
+        if self.templates_dir.exists():
+            for p in self.templates_dir.rglob("*"):
+                if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                    clean_key = re.sub(r"[^a-zA-Z0-9]+", "_", p.stem.lower()).strip("_")
+                    catalog[clean_key] = p
 
-        for p in self.templates_dir.rglob("*"):
-            if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
-                clean_key = re.sub(r"[^a-zA-Z0-9]+", "_", p.stem.lower()).strip("_")
-                catalog[clean_key] = p
+        # Also index local project media/memes for curated IYKYK memes
+        local_memes = Config.PROJECT_ROOT / "media" / "memes"
+        if local_memes.exists():
+            for p in local_memes.rglob("*"):
+                if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                    clean_key = re.sub(r"[^a-zA-Z0-9]+", "_", p.stem.lower()).strip("_")
+                    catalog[clean_key] = p
 
-        logger.info(f"MemeEngine indexed {len(catalog)} HD meme templates from {self.templates_dir.name}")
+        logger.info(f"MemeEngine indexed {len(catalog)} meme templates")
         return catalog
 
     def _load_sfx_catalog(self) -> List[Dict[str, Any]]:
@@ -85,6 +92,9 @@ class MemeEngine:
 
         # 2. Direct archetype aliases
         aliases = {
+            "the_trusted_doctor": ["the_trusted_doctor", "the trusted doctor", "doctor", "specialist", "johnny sins", "johnny", "sins", "hospital doctor", "experienced doctor", "trust me im a doctor"],
+            "gigachad": ["gigachad", "giga chad", "chad", "megachad", "absolute chad", "sigma"],
+            "hide_the_pain_harold": ["hide_the_pain_harold", "hide the pain", "harold", "strained smile", "coffee smile"],
             "stepped_in_shit": ["stepped_in_shit", "stepped in shit", "ew i stepped in shit", "stepped", "walk shoe", "squash walk shoe"],
             "drake": ["drake pointing", "drake hotline", "drake", "reject accept"],
             "clown": ["clown makeup", "clown", "circus"],

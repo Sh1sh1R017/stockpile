@@ -334,6 +334,15 @@ export default function StudioDashboard() {
         step_4: "Blaming bad luck"
       });
       setSelectedSfxFile("01_bonk_impact.mp3");
+    } else if (tmplKey === "the_trusted_doctor") {
+      setMemeCaptions({ caption: memeCaptions.caption || currentQuote || "The specialist she told you not to worry about" });
+      setSelectedSfxFile("81_vine_boom.mp3");
+    } else if (tmplKey === "gigachad") {
+      setMemeCaptions({ caption: memeCaptions.caption || currentQuote || "Average consistency enjoyer" });
+      setSelectedSfxFile("55_subtle_bass_drop.mp3");
+    } else if (tmplKey === "hide_the_pain_harold") {
+      setMemeCaptions({ caption: memeCaptions.caption || currentQuote || "Smiling through the pain" });
+      setSelectedSfxFile("11_bruh.mp3");
     } else if (tmplKey === "same_picture") {
       setMemeCaptions({
         item_1: "Procrastination",
@@ -2170,6 +2179,9 @@ export default function StudioDashboard() {
                   {/* Popular Archetype Pills */}
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {[
+                      { key: "the_trusted_doctor", label: "👨‍⚕️ The Specialist (IYKYK)" },
+                      { key: "gigachad", label: "🗿 Gigachad" },
+                      { key: "hide_the_pain_harold", label: "👴 Harold" },
                       { key: "stepped_in_shit", label: "👞 Stepped in Shit" },
                       { key: "drake", label: "🙅‍♂️ Drake" },
                       { key: "clown", label: "🤡 Clown" },
@@ -2727,6 +2739,9 @@ export default function StudioDashboard() {
                       onChange={(e) => setInsertCutawayMemeTemplate(e.target.value)}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-fuchsia-500"
                     >
+                      <option value="the_trusted_doctor">👨‍⚕️ The Specialist (IYKYK)</option>
+                      <option value="gigachad">🗿 Gigachad</option>
+                      <option value="hide_the_pain_harold">👴 Harold</option>
                       <option value="stepped_in_shit">👞 Stepped in Shit</option>
                       <option value="drake">🙅‍♂️ Drake Yes/No</option>
                       <option value="clown">🤡 Clown Makeup</option>

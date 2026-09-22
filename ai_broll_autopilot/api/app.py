@@ -659,6 +659,33 @@ async def list_meme_templates(q: Optional[str] = None, limit: int = 80):
 
     featured_archetypes = [
         {
+            "key": "the_trusted_doctor",
+            "name": "The Trusted Specialist (IYKYK)",
+            "category": "IYKYK Pop-Culture Troll",
+            "description": "The world's most qualified doctor & specialist - guaranteed comment section bait",
+            "fields": [
+                {"name": "caption", "label": "Caption / Meme Subtext", "placeholder": "The specialist she told you not to worry about..."}
+            ]
+        },
+        {
+            "key": "gigachad",
+            "name": "Gigachad (Absolute Legend)",
+            "category": "IYKYK Pop-Culture Troll",
+            "description": "Ultra-masculine jawline Chad - peak masculine discipline & winner mindset",
+            "fields": [
+                {"name": "caption", "label": "Chad Statement", "placeholder": "Average consistency enjoyer"}
+            ]
+        },
+        {
+            "key": "hide_the_pain_harold",
+            "name": "Hide The Pain Harold",
+            "category": "IYKYK Pop-Culture Troll",
+            "description": "Strained coffee smile - smiling through the inner panic",
+            "fields": [
+                {"name": "caption", "label": "Harold Reaction", "placeholder": "When they ask how the project is going"}
+            ]
+        },
+        {
             "key": "stepped_in_shit",
             "name": "Ew, I Stepped In Shit",
             "category": "Bad Opinions & Terrible Takes",
