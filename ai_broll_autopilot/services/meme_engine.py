@@ -183,11 +183,11 @@ class MemeEngine:
         elif "same_picture" in template_key.lower() or "difference" in template_key.lower():
             self._render_same_picture(im, captions)
 
-        # 5. VIRAL STREAMER & CREATOR MEMES: IShowSpeed, CaseOh, Jynxzi, Mom's Kinda Homeless, KiaraaKitty (Rich reaction visuals)
-        elif any(k in template_key.lower() for k in ("ishowspeed", "speed", "caseoh", "jynxzi", "jynxi", "homeless", "pornstar", "shave")):
-            # Only render top card banner if explicitly requested or custom caption is non-empty and show_banner is set
+        # 5. VIRAL STREAMER & CREATOR MEMES: IShowSpeed, CaseOh, Jynxzi, Mom's Kinda Homeless, KiaraaKitty, Johnny Sins, Gigachad, Harold
+        elif any(k in template_key.lower() for k in ("ishowspeed", "speed", "caseoh", "jynxzi", "jynxi", "homeless", "pornstar", "shave", "doctor", "specialist", "gigachad", "harold")):
+            # Render top card banner if custom caption is non-empty and show_banner is not explicitly False
             custom_cap = captions.get("caption") or captions.get("text") or captions.get("custom_text")
-            if custom_cap and custom_cap.strip() and captions.get("show_banner", False):
+            if custom_cap and custom_cap.strip() and captions.get("show_banner", True) is not False:
                 self._render_generic_card(im, captions)
 
         # 6. GENERIC: Modern Caption Card Banner
@@ -202,7 +202,7 @@ class MemeEngine:
 
     def _render_stepped_in_shit(self, im: Image.Image, captions: Dict[str, str]):
         """Render text rotated onto the shoe sole in panel 2."""
-        text = captions.get("shoe_text") or captions.get("bad_opinion") or captions.get("text") or "Bad Opinion"
+        text = captions.get("shoe_text") or captions.get("bad_opinion") or captions.get("caption") or captions.get("text") or "Bad Opinion"
         wrapped = "\n".join(textwrap.wrap(text, width=16))
 
         font = self.get_font("impact", size=95)
@@ -231,8 +231,8 @@ class MemeEngine:
     def _render_drake(self, im: Image.Image, captions: Dict[str, str]):
         """Render top (rejected) and bottom (accepted) text onto Drake template."""
         W, H = im.size
-        top_text = captions.get("top_text") or captions.get("rejected") or "Bad Option"
-        bot_text = captions.get("bottom_text") or captions.get("accepted") or "Good Option"
+        top_text = captions.get("top_text") or captions.get("rejected") or captions.get("caption") or "Bad Option"
+        bot_text = captions.get("bottom_text") or captions.get("accepted") or captions.get("text") or "Good Option"
 
         draw = ImageDraw.Draw(im)
         font = self.get_font("impact", size=max(70, int(W * 0.035)))
@@ -374,6 +374,122 @@ class MemeEngine:
             }
         return None
 
+    @classmethod
+    def generate_unique_contextual_meme(
+        cls,
+        shot_data: Dict[str, Any],
+        transcript_context: str = "",
+        client: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Autonomously generate a 100% unique meme archetype and witty caption tailored specifically to the shot's dialogue."""
+        quote = (shot_data.get("dialogue_quote") or "").strip()
+        if not quote and transcript_context:
+            quote = transcript_context[:100]
+
+        # 1. Try Gemini API generation for bespoke, contextual humor
+        if Config.GEMINI_API_KEY:
+            try:
+                from google import genai
+                gclient = client or genai.Client(api_key=Config.GEMINI_API_KEY)
+                prompt = f"""You are an elite viral meme director for high-retention short-form videos (TikTok, Reels, Shorts).
+Analyze this exact dialogue quote spoken in a video clip:
+"{quote}"
+Full Transcript Context: "{transcript_context[:300]}"
+
+Select the single funniest, most unhinged, viral meme template from this catalog:
+- "the_trusted_doctor": (Johnny Sins hospital doctor cutaway) Use if doctor, medical, specialist, expert, consultant, therapy, or seasoned authority is mentioned. High-engagement comment magnet!
+- "ishowspeed_shock": (IShowSpeed screaming/wide-eyed hype & shock) Use for crazy claims, high energy, wild statements, disbelief.
+- "not_your_personal_pornstar": (KiaraaKitty streamer public rage outburst) Use for ridiculous boundaries, audacity, cancelable moments, unhinged takes.
+- "moms_kinda_homeless": (Fortnite kid desperate plea) Use for absurd excuses, guilt trips, begging, financial desperation.
+- "caseoh_rage": (CaseOh furious headset rage & screaming) Use for bad mistakes, frustrating fails, outrage, calling someone out.
+- "jynxzi_freakout": (Jynxzi controller slam & disbelief scream) Use for gaming, sudden shock, 'bro what' realization.
+- "gigachad": (Sigma winner) Use for peak discipline, sigma mindset, absolute victory.
+- "stepped_in_shit": (Ew I stepped in shit) Use for bad opinions, terrible takes, mistakes.
+- "drake": (Reject bad option vs accept good option) Use for contrasting two choices.
+- "hide_the_pain_harold": (Strained painful smile) Use for awkward truth, coping, pain behind the smile.
+
+CRITICAL REQUIREMENT:
+Create a 100% UNIQUE, high-retention caption tailored specifically to roast, parody, or react to what the speaker said in this exact clip.
+NEVER return generic captions like "IShowSpeed Moment" or "CaseOh Rage".
+
+Return ONLY a JSON object:
+{{
+  "meme_template": "template_key",
+  "meme_captions": {{
+    "caption": "POV: [Hilarious 4 to 10 word reaction directly referencing the quote]",
+    "show_banner": true
+  }},
+  "humor_reason": "Why this is funny for this clip"
+}}
+(Note: If template is 'drake', provide "top_text" and "bottom_text". If template is 'stepped_in_shit', provide "shoe_text" and "caption".)"""
+
+                model_to_use = Config.GEMINI_MODEL or "gemini-3.1-flash-lite"
+                resp = gclient.models.generate_content(
+                    model=model_to_use,
+                    contents=prompt,
+                    config={"response_mime_type": "application/json", "temperature": 0.5},
+                )
+                raw_json = (resp.text or "{}").strip()
+                if raw_json.startswith("```json"):
+                    raw_json = raw_json[7:]
+                if raw_json.startswith("```"):
+                    raw_json = raw_json[3:]
+                if raw_json.endswith("```"):
+                    raw_json = raw_json[:-3]
+                parsed = json.loads(raw_json.strip())
+
+                t_key = parsed.get("meme_template", "ishowspeed_shock")
+                caps = parsed.get("meme_captions", {})
+                if not caps.get("caption") and not caps.get("top_text") and not caps.get("shoe_text"):
+                    caps["caption"] = f"POV: {quote[:45]}"
+                caps["show_banner"] = True
+
+                shot_data["meme_template"] = t_key
+                shot_data["meme_captions"] = caps
+                shot_data["humor_reason"] = parsed.get("humor_reason", "AI-tailored meme cutaway")
+                logger.info(f"AI autonomously crafted unique meme [{t_key}] for quote '{quote[:40]}...': {caps}")
+                return shot_data
+            except Exception as ge:
+                logger.warning(f"AI meme generation call failed ({ge}). Using smart lexical analysis.")
+
+        # 2. Heuristic fallback with dynamic lexical parsing (ZERO hardcoding)
+        q_lower = quote.lower()
+        if any(w in q_lower for w in ["doctor", "specialist", "expert", "hospital", "patient", "medical", "surgery", "nurse"]):
+            t_key = "the_trusted_doctor"
+            caps = {"caption": f"The most qualified specialist for: \"{quote[:40]}\"", "show_banner": True}
+        elif any(w in q_lower for w in ["homeless", "mom", "plead", "beg", "desperate", "need this", "struggle", "pity"]):
+            t_key = "moms_kinda_homeless"
+            caps = {"caption": f"The excuses people make when: \"{quote[:40]}\"", "show_banner": True}
+        elif any(w in q_lower for w in ["shave", "pornstar", "porn star", "creep", "boundary", "shut up", "inappropriate", "cancel"]):
+            t_key = "not_your_personal_pornstar"
+            caps = {"caption": f"Bro pushed his luck with: \"{quote[:40]}\"", "show_banner": True}
+        elif any(w in q_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy", "worst"]):
+            t_key = "caseoh_rage"
+            caps = {"caption": f"POV: Hearing someone say: \"{quote[:40]}\"", "show_banner": True}
+        elif any(w in q_lower for w in ["controller", "game", "gaming", "disbelief", "aim", "bro", "no way", "jynx", "jynxzi"]):
+            t_key = "jynxzi_freakout"
+            caps = {"caption": f"Bro could not believe: \"{quote[:40]}\"", "show_banner": True}
+        elif any(w in q_lower for w in ["chad", "sigma", "winner", "grind", "discipline", "champion"]):
+            t_key = "gigachad"
+            caps = {"caption": f"Average \"{quote[:35]}\" enjoyer", "show_banner": True}
+        elif any(w in q_lower for w in ["pain", "awkward", "fine", "smile", "pretend", "strained"]):
+            t_key = "hide_the_pain_harold"
+            caps = {"caption": f"Smiling through: \"{quote[:40]}\"", "show_banner": True}
+        elif any(w in q_lower for w in ["instead of", "rather than", "don't", "stop", "never"]):
+            t_key = "drake"
+            caps = {"top_text": "What losers do", "bottom_text": quote[:45]}
+        elif any(w in q_lower for w in ["excuse", "bad", "mistake", "wrong", "trap", "dumb"]):
+            t_key = "stepped_in_shit"
+            caps = {"shoe_text": quote[:40], "caption": f"Ew, I stepped in: {quote[:35]}"}
+        else:
+            t_key = "ishowspeed_shock"
+            caps = {"caption": f"POV: When you hear \"{quote[:40]}\"", "show_banner": True}
+
+        shot_data["meme_template"] = t_key
+        shot_data["meme_captions"] = caps
+        logger.info(f"Lexical fallback crafted unique meme [{t_key}] for quote '{quote[:40]}...': {caps}")
+        return shot_data
+
     def create_meme_broll(
         self,
         shot: Dict[str, Any],
@@ -384,6 +500,18 @@ class MemeEngine:
         sid = shot.get("shot_id", "meme_shot")
         dur = float(duration or shot.get("duration", 2.5))
 
+        # Check if shot needs unique autonomous captions
+        captions = shot.get("meme_captions", {})
+        is_generic = False
+        if captions:
+            c_str = str(captions).lower()
+            if any(g in c_str for g in ("high retention", "ishowspeed moment", "caseoh rage", "zoom interview", "what people say", "bad opinion")):
+                is_generic = True
+
+        if not captions or is_generic or not shot.get("meme_template"):
+            shot = self.generate_unique_contextual_meme(shot)
+            captions = shot.get("meme_captions", {})
+
         # 1. Resolve template
         template_name = shot.get("meme_template", "stepped_in_shit")
         found = self.find_template(template_name)
@@ -393,19 +521,6 @@ class MemeEngine:
         t_key, t_path = found
         shot["meme_template_resolved"] = t_path.name
         logger.info(f"MemeEngine matched template [{t_key}]: {t_path.name}")
-
-        # 2. Extract captions
-        captions = shot.get("meme_captions", {})
-        if not captions:
-            # Derive from dialogue quote or metaphor
-            diag = shot.get("dialogue_quote", "")
-            captions = {
-                "shoe_text": diag,
-                "bad_opinion": diag,
-                "text": diag,
-                "top_text": "What people say",
-                "bottom_text": diag
-            }
 
         # 3. Render composite image
         img_out = work_dir / f"{sid}_{t_key}.jpg"

@@ -51,6 +51,10 @@ class VideoSFXAnalyzer:
         logger.info(f"VideoSFXAnalyzer analyzing {len(shots)} B-roll shots for sound effect matching...")
 
         for idx, shot in enumerate(shots, start=1):
+            if shot.get("contextual_sfx"):
+                logger.info(f"Shot [{shot.get('shot_id')}] already has SFX ({shot['contextual_sfx'].get('name')}), keeping.")
+                continue
+
             try:
                 asset_path = shot.get("asset_path")
                 frame_path = None
@@ -129,8 +133,12 @@ Or if no sound effect fits:
         try:
             contents = []
             if frame_path and os.path.exists(frame_path):
-                uploaded_frame = self.client.files.upload(file=str(frame_path))
-                contents.append(uploaded_frame)
+                from PIL import Image
+                try:
+                    pil_img = Image.open(str(frame_path))
+                    contents.append(pil_img)
+                except Exception as ie:
+                    logger.warning(f"Could not open image for vision SFX: {ie}")
             contents.append(prompt)
 
             resp = self.client.models.generate_content(

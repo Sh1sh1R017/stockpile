@@ -20,6 +20,8 @@ from ai_broll_autopilot.services.delivery import DeliveryService
 from ai_broll_autopilot.services.watcher import InputWatcher
 from ai_broll_autopilot.services.video_sfx_analyzer import VideoSFXAnalyzer
 from ai_broll_autopilot.services.transition_engine import TransitionEngine
+from ai_broll_autopilot.services.subtitle_engine import SubtitleEngine
+from ai_broll_autopilot.services.bgm_engine import BGMEngine
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,8 @@ class Orchestrator:
         self.delivery = DeliveryService()
         self.sfx_analyzer = VideoSFXAnalyzer()
         self.transition_engine = TransitionEngine()
+        self.sub_engine = SubtitleEngine()
+        self.bgm_engine = BGMEngine()
         self.watcher = InputWatcher(Config.INPUT_DIR, self.enqueue_file_sync)
 
     def enqueue_file_sync(self, file_path: str):
@@ -66,9 +70,9 @@ class Orchestrator:
         except Exception:
             asyncio.run(self.enqueue_file(file_path))
 
-    async def enqueue_file(self, file_path: str) -> str:
+    async def enqueue_file(self, file_path: str, campaign_id: str = "default") -> str:
         """Create and enqueue a new job from a file path."""
-        job = Job.create(file_path)
+        job = Job.create(file_path, campaign_id=campaign_id)
         await self.queue.enqueue(job)
         return job.job_id
 
@@ -84,13 +88,15 @@ class Orchestrator:
 
     async def process_job(self, job: Job):
         """Process a single job end-to-end through the state machine."""
-        logger.info(f"=== Starting Autopilot for Job {job.job_id}: {job.source_filename} ===")
+        from ai_broll_autopilot.campaigns import campaign_registry
+        campaign = campaign_registry.get_campaign(job.campaign_id)
+        logger.info(f"=== Starting Autopilot for Job {job.job_id} [Campaign: {campaign.name}] ({job.source_filename}) ===")
         work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
         work_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             # 1. INGESTING
-            self._update_state(job, JobState.INGESTING, progress=0.1, msg="Validating input video")
+            self._update_state(job, JobState.INGESTING, progress=0.1, msg=f"Validating input for '{campaign.name}'")
             duration = get_video_duration(job.source_file)
             logger.info(f"Input video duration: {duration:.2f}s")
 
@@ -103,11 +109,20 @@ class Orchestrator:
             logger.info(f"Transcription completed ({len(job.transcript_segments)} segments)")
 
             # 3. DIRECTING
-            self._update_state(job, JobState.DIRECTING, progress=0.35, msg="AI Director generating Visual Edit Plan")
+            self._update_state(job, JobState.DIRECTING, progress=0.35, msg=f"AI Director tailoring for '{campaign.name}'")
+            moment_id_cand = getattr(job, "moment_id", None)
+            if not moment_id_cand and job.campaign_id == "curious_mike":
+                import re
+                m_match = re.search(r"c(\d{1,2})", job.source_filename, re.IGNORECASE)
+                if m_match:
+                    moment_id_cand = f"C{int(m_match.group(1)):02d}"
+
             edit_plan = await self.director.create_edit_plan(
                 job.transcript_text,
                 job.transcript_segments,
-                duration
+                duration,
+                campaign_id=job.campaign_id,
+                curated_moment_id=moment_id_cand
             )
             job.edit_plan = edit_plan
             self.db.save_job(job)
@@ -122,19 +137,108 @@ class Orchestrator:
             # 5. PLANNING: AutoTransitions & AI Sound Effects
             self._update_state(job, JobState.PLANNING, progress=0.65, msg="Planning AutoTransitions & AI Sound Effects")
             if "shots" in job.edit_plan and job.edit_plan["shots"]:
-                # 5a. AutoTransition recommendation (yaojie-shen/AutoTransition approach)
-                job.edit_plan["shots"] = await self.transition_engine.plan_transitions(job.edit_plan["shots"])
-                # 5b. Video Sound Effect Vision Analysis (sieve-community/video-sound-effect approach)
-                job.edit_plan["shots"] = await self.sfx_analyzer.analyze_and_assign_sfx(job.edit_plan["shots"], work_dir)
+                # 5a. AutoTransition recommendation: confident hard cuts with subtle whoosh for Curious Mike
+                if campaign.id == "curious_mike":
+                    for s in job.edit_plan["shots"]:
+                        s["transition"] = {
+                            "type_in": "cut",
+                            "duration_in": 0.0,
+                            "type_out": "cut",
+                            "duration_out": 0.0,
+                            "stinger_sfx": {
+                                "file": "whoosh.mp3",
+                                "path": "assets/sfx/whoosh.mp3",
+                                "volume": 0.18
+                            }
+                        }
+                else:
+                    job.edit_plan["shots"] = await self.transition_engine.plan_transitions(job.edit_plan["shots"])
+
+                # 5b. Video Sound Effect Vision Analysis: skip for Curious Mike to keep dialogue pure
+                if not getattr(campaign, "preserve_dialogue_only", False) and campaign.id != "curious_mike":
+                    job.edit_plan["shots"] = await self.sfx_analyzer.analyze_and_assign_sfx(job.edit_plan["shots"], work_dir)
+                else:
+                    logger.info(f"Campaign '{campaign.name}' enforces pure dialogue with editorial SFX only; skipping Foley vision analysis.")
                 self.db.save_job(job)
 
-            # 6. RENDERING
-            self._update_state(job, JobState.RENDERING, progress=0.75, msg="Compositing B-roll onto base video")
+            # 6. RENDERING: Kinetic Subtitles, Auto-Ducked BGM, AutoTransitions, Foley SFX, HDR10, Watermark
+            self._update_state(job, JobState.RENDERING, progress=0.75, msg=f"Compositing timeline for '{campaign.name}'")
             rendered_video = work_dir / f"rendered_{job.source_filename}"
+
+            # 6a. Generate authentic podcast torn paper frame overlay (with duotone hook & watermark)
+            frame_overlay_path = None
+            hook_txt = edit_plan.get("hook_text") or ""
+            if getattr(campaign, "frame_overlay_required", False):
+                try:
+                    from ai_broll_autopilot.services.podcast_frame_engine import PodcastFrameEngine
+                    frame_engine = PodcastFrameEngine()
+                    frame_dest = work_dir / "campaign_frame.png"
+                    frame_engine.generate_frame_overlay(
+                        hook_text=hook_txt,
+                        output_path=frame_dest,
+                        watermark_text="YT: @mpj" if campaign.id == "curious_mike" else ""
+                    )
+                    if frame_dest.exists():
+                        frame_overlay_path = str(frame_dest.resolve())
+                        logger.info(f"Podcast frame overlay generated at: {frame_overlay_path}")
+                except Exception as fe:
+                    logger.warning(f"Could not generate podcast frame overlay: {fe}")
+
+            # 6b. Generate kinetic subtitles with campaign styling and safe vertical positioning
+            ass_path = None
+            if job.transcript_segments and campaign.subtitles_required:
+                try:
+                    ass_dest = work_dir / "subtitles_kinetic.ass"
+                    self.sub_engine.generate_ass_file(
+                        segments=job.transcript_segments,
+                        output_path=ass_dest,
+                        style_preset=campaign.subtitle_style,
+                        position=campaign.subtitle_position,
+                        custom_margin_v=campaign.subtitle_margin_v,
+                        hook_text=hook_txt,
+                        hook_duration=duration if campaign.id == "curious_mike" else 4.0,
+                        suppress_hook=bool(frame_overlay_path),
+                        text_emphasis_events=edit_plan.get("text_emphasis_graphics"),
+                    )
+                    if ass_dest.exists():
+                        ass_path = str(ass_dest.resolve())
+                        logger.info(f"Kinetic subtitles generated at: {ass_path}")
+                except Exception as se:
+                    logger.warning(f"Could not generate kinetic subtitles: {se}")
+
+            # 6c. Background Music: only if campaign allows it
+            bgm_path = None
+            if campaign.allow_bgm:
+                try:
+                    bgm_genre = campaign.bgm_genre or "upbeat_phonk"
+                    p = self.bgm_engine.get_track_path(bgm_genre)
+                    if p and p.exists():
+                        bgm_path = str(p.resolve())
+                        logger.info(f"BGM track selected: {p.name}")
+                except Exception as be:
+                    logger.warning(f"Could not resolve BGM track: {be}")
+
+            # 6d. Watermark branding (compulsory for Curious Mike YT: @mpj)
+            wm_path = campaign.watermark_asset_path if (campaign.watermark_required and not frame_overlay_path) else None
+            wm_pos = campaign.watermark_position
+            wm_scale = campaign.watermark_scale
+
             final_rendered_path = await self.renderer.render(
                 job.source_file,
                 job.edit_plan,
-                str(rendered_video)
+                str(rendered_video),
+                ass_subtitles_path=ass_path,
+                bgm_path=bgm_path,
+                bgm_volume=0.14,
+                upscale_hdr=False if campaign.id == "curious_mike" else True,
+                hdr_scale=1.0,
+                hdr_tone="vivid",
+                watermark_path=wm_path,
+                watermark_position=wm_pos,
+                watermark_scale=wm_scale,
+                preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
+                frame_overlay_path=frame_overlay_path,
+                viewport=getattr(campaign, "frame_viewport", None),
             )
 
             # 7. REVIEWING & AUTO-REPAIR LOOP
@@ -165,7 +269,17 @@ class Orchestrator:
                 final_rendered_path = await self.renderer.render(
                     job.source_file,
                     job.edit_plan,
-                    str(rendered_video)
+                    str(rendered_video),
+                    ass_subtitles_path=ass_path,
+                    bgm_path=bgm_path,
+                    bgm_volume=0.14,
+                    ducking_enabled=True,
+                    watermark_path=wm_path,
+                    watermark_position=wm_pos,
+                    watermark_scale=wm_scale,
+                    preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
+                    frame_overlay_path=frame_overlay_path,
+                    viewport=getattr(campaign, "frame_viewport", None),
                 )
 
                 self._update_state(job, JobState.REVIEWING, progress=0.92, msg="Re-inspecting after repair")

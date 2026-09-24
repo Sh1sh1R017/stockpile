@@ -33,10 +33,16 @@ class Renderer:
         ducking_enabled: bool = True,
         upscale_hdr: bool = False,
         hdr_scale: float = 1.0,
-        hdr_tone: str = "vivid"
+        hdr_tone: str = "vivid",
+        watermark_path: str = None,
+        watermark_position: str = "bottom_safe",
+        watermark_scale: float = 0.28,
+        preserve_dialogue_only: bool = False,
+        frame_overlay_path: str = None,
+        viewport: tuple = None,
     ) -> str:
         """Render the composite video with B-roll cutaway overlays, dynamic transitions,
-        kinetic subtitles, and mixed audio SFX with ducked background music.
+        kinetic subtitles, frame overlay mask, watermark branding, and mixed audio SFX with ducked background music.
         Optionally upscales and converts the final master to HDR10 via sdr2hdr."""
         base_p = Path(base_video)
         out_p = Path(output_path)
@@ -44,37 +50,56 @@ class Renderer:
 
         shots: List[Dict[str, Any]] = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
 
-        # Gather all sound effects (transition stingers + contextual Foley)
+        # Gather all sound effects (transition stingers/whooshes + contextual Foley + Level 3 Graphic impacts)
         audio_sfx_list: List[Dict[str, Any]] = []
 
+        # 1. B-roll cutaway transition stingers / subtle whooshes
         for idx, shot in enumerate(shots, start=1):
             start_t = float(shot.get("start_time", 0.0))
-
-            # 1. Transition stinger SFX (e.g. whoosh on entry)
             trans = shot.get("transition", {})
             stinger = trans.get("stinger_sfx")
             if stinger and stinger.get("path") and os.path.exists(stinger["path"]):
                 audio_sfx_list.append({
                     "path": stinger["path"],
                     "start_time": max(0.0, start_t - 0.05),
-                    "volume": stinger.get("volume", 0.45),
+                    "volume": stinger.get("volume", 0.25),
                     "type": "transition_stinger"
                 })
-
-            # 2. Contextual Foley / Reaction SFX
-            ctx_sfx = shot.get("contextual_sfx")
-            if ctx_sfx and ctx_sfx.get("path") and os.path.exists(ctx_sfx["path"]):
-                offset = float(ctx_sfx.get("start_offset", 0.2))
+            elif os.path.exists("assets/sfx/whoosh.mp3"):
                 audio_sfx_list.append({
-                    "path": ctx_sfx["path"],
-                    "start_time": start_t + offset,
-                    "volume": ctx_sfx.get("volume", 0.40),
-                    "type": "contextual_foley"
+                    "path": "assets/sfx/whoosh.mp3",
+                    "start_time": max(0.0, start_t - 0.05),
+                    "volume": 0.18,
+                    "type": "transition_whoosh"
+                })
+
+            if not preserve_dialogue_only:
+                ctx_sfx = shot.get("contextual_sfx")
+                if ctx_sfx and ctx_sfx.get("path") and os.path.exists(ctx_sfx["path"]):
+                    offset = float(ctx_sfx.get("start_offset", 0.2))
+                    audio_sfx_list.append({
+                        "path": ctx_sfx["path"],
+                        "start_time": start_t + offset,
+                        "volume": ctx_sfx.get("volume", 0.40),
+                        "type": "contextual_foley"
+                    })
+
+        # 2. Level 3 Graphic Impact SFX
+        for item in edit_plan.get("text_emphasis_graphics", []):
+            start_t = float(item.get("start_time", 0.0))
+            impact_path = item.get("sfx_path", "assets/sfx/impact.mp3")
+            if impact_path and os.path.exists(impact_path):
+                audio_sfx_list.append({
+                    "path": impact_path,
+                    "start_time": max(0.0, start_t),
+                    "volume": item.get("sfx_volume", 0.22),
+                    "type": "graphic_impact"
                 })
 
         logger.info(
             f"Rendering timeline: base={base_p.name} with {len(shots)} B-roll cutaway overlays, "
-            f"{len(audio_sfx_list)} audio SFX tracks, subtitles={bool(ass_subtitles_path)}, BGM={bool(bgm_path)}"
+            f"{len(audio_sfx_list)} audio SFX tracks, subtitles={bool(ass_subtitles_path)}, "
+            f"BGM={bool(bgm_path)}, frame_overlay={bool(frame_overlay_path)}, watermark={bool(watermark_path)}"
         )
 
         # Build FFmpeg command inputs
@@ -85,14 +110,33 @@ class Renderer:
         for shot in shots:
             cmd.extend(["-stream_loop", "-1", "-i", str(shot["asset_path"])])
 
-        # Inputs (1 + len(shots)) .. : Audio SFX files
+        # Optional Frame Overlay stream (torn paper mask & branding)
+        frame_overlay_stream_idx = None
+        if frame_overlay_path and os.path.exists(frame_overlay_path):
+            frame_overlay_stream_idx = 1 + len(shots)
+            cmd.extend(["-loop", "1", "-i", str(frame_overlay_path)])
+
+        # Optional Watermark input stream
+        watermark_stream_idx = None
+        if watermark_path and os.path.exists(watermark_path):
+            watermark_stream_idx = 1 + len(shots) + (1 if frame_overlay_stream_idx is not None else 0)
+            cmd.extend(["-loop", "1", "-i", str(watermark_path)])
+
+        # Audio inputs start index
+        audio_inputs_start = (
+            1 + len(shots)
+            + (1 if frame_overlay_stream_idx is not None else 0)
+            + (1 if watermark_stream_idx is not None else 0)
+        )
+
+        # Inputs audio_inputs_start .. : Audio SFX files
         for sfx in audio_sfx_list:
             cmd.extend(["-i", str(sfx["path"])])
 
         # Optional BGM input stream (looped)
         bgm_stream_idx = None
         if bgm_path and os.path.exists(bgm_path):
-            bgm_stream_idx = 1 + len(shots) + len(audio_sfx_list)
+            bgm_stream_idx = audio_inputs_start + len(audio_sfx_list)
             cmd.extend(["-stream_loop", "-1", "-i", str(bgm_path)])
 
         # Build complex filtergraph
@@ -102,8 +146,28 @@ class Renderer:
             ass_subtitles_path=ass_subtitles_path,
             bgm_stream_idx=bgm_stream_idx,
             bgm_volume=bgm_volume,
-            ducking_enabled=ducking_enabled
+            ducking_enabled=ducking_enabled,
+            watermark_stream_idx=watermark_stream_idx,
+            watermark_position=watermark_position,
+            watermark_scale=watermark_scale,
+            frame_overlay_stream_idx=frame_overlay_stream_idx,
+            viewport=viewport,
         )
+
+        # Probe base video duration to ensure output matches base video exactly
+        import subprocess
+        base_dur = None
+        try:
+            probe_cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(base_p)
+            ]
+            res = subprocess.check_output(probe_cmd).decode().strip()
+            base_dur = float(res)
+        except Exception as e:
+            logger.warning(f"Could not probe base video duration: {e}")
 
         cmd.extend([
             "-filter_complex", filtergraph,
@@ -116,7 +180,12 @@ class Renderer:
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
-            "-shortest",
+        ])
+        if base_dur and base_dur > 0:
+            cmd.extend(["-t", f"{base_dur:.3f}"])
+        else:
+            cmd.append("-shortest")
+        cmd.extend([
             "-v", "warning",
             str(out_p)
         ])

@@ -36,10 +36,19 @@ class Director:
         self,
         full_transcript: str,
         segments: List[Dict[str, Any]],
-        video_duration: float
+        video_duration: float,
+        campaign_id: str = "default",
+        curated_moment_id: Optional[str] = None,
+        custom_hook: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate a complete Visual Edit Plan targeting ~60% B-roll coverage and deep contextual accuracy."""
-        logger.info(f"AI Director analyzing {len(segments)} segments for video length {video_duration}s (Target B-Roll: 60%)")
+        """Generate a complete Visual Edit Plan respecting campaign-specific constraints and visual pacing."""
+        from ai_broll_autopilot.campaigns import campaign_registry
+        campaign = campaign_registry.get_campaign(campaign_id)
+
+        logger.info(
+            f"AI Director analyzing {len(segments)} segments for video length {video_duration:.1f}s "
+            f"under campaign '{campaign.id}' (Target B-Roll: {campaign.max_broll_ratio*100:.0f}%)"
+        )
 
         # Format segments for Director prompt
         formatted_segments = "\n".join([
@@ -52,13 +61,86 @@ class Director:
 
         import math
 
-        # Target calculations for 60% B-roll coverage
-        target_broll_ratio = Config.TARGET_BROLL_RATIO  # 0.60
+        # Target calculations based on campaign rules
+        target_broll_ratio = campaign.max_broll_ratio  # 0.33 for Curious Mike, 0.60 for Default
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        target_shots = max(3, int(math.ceil(target_broll_seconds / 2.0)))
- 
-        director_prompt = f"""You are the Master AI Video Director for ultra-high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
+        target_shots = max(1, int(round(target_broll_seconds / 2.2)))
+
+        if campaign.id == "curious_mike":
+            # Match curated moment if specified
+            matched_moment = None
+            if curated_moment_id:
+                for m in campaign.curated_moments:
+                    if m.moment_id.lower() == curated_moment_id.lower():
+                        matched_moment = m
+                        break
+
+            chosen_hook = custom_hook or (matched_moment.screen_hook if matched_moment else None)
+
+            director_prompt = f"""You are the Master AI Video Director for the CURIOUS MIKE podcast clipping campaign (hosted by Michael Porter Jr. @curiousmike / @mpj).
+
+MANDATORY CAMPAIGN DIRECTING OBJECTIVES:
+1. FORMAT & SPEAKER COVERAGE (CRITICAL CAMPAIGN RULE):
+   - Format 1 (Straight Talking Head) or Format 2 (Talking Head + Real Sports B-Roll).
+   - NEVER cover the speaker for more than 1/3 (33%) of the video duration!
+   - Total Video Duration: {video_duration:.2f} seconds. Max B-roll duration: ~{target_broll_seconds:.1f}s total.
+   - The speaker's face and reactions MUST be on screen for at least 67% of the clip duration.
+   - Any cutaways MUST be short (1.0s to 2.5s each), cutting in directly on the spoken keyword (e.g. named player, arena, team, Knicks, Pat Bev, Jokic).
+   - Cut back to the speaker immediately.
+   - Generate at most {target_shots} focused, high-relevance cutaway(s).
+
+2. ZERO AI VIDEO POLICY (INSTANT REJECTION RULE):
+   - STRICTLY NO AI-generated video, AI avatars, cartoon memes, or fictional visuals.
+   - All visual B-roll MUST be real footage (NBA basketball highlights, press conferences, arena footage, or training).
+   - "style" MUST be "stockpile".
+
+3. HOOK REQUIREMENT:
+   - Provide a bold, punchy, all-caps screen hook in "hook_text" (e.g. "HE REALLY SAID THIS ABOUT KNICKS FANS").
+   {f'Target Hook: "{chosen_hook}"' if chosen_hook else ''}
+
+4. LEVEL 3 LARGE TYPOGRAPHIC EMPHASIS GRAPHICS:
+   - Identify 2 to 4 high-impact keywords, player names, or punchy phrases (e.g., "COLLIN\\nSEXTON", "JAYLEN\\nHANDS", "TOOK THAT\\nPERSONAL") spoken in the clip.
+   - Format: 1-3 uppercase words, stacked with \\n.
+   - Color: "yellow" for player names/rankings/facts, "pink" for dramatic hot-takes/climax phrases.
+   - Duration: 1.0 to 1.4 seconds.
+
+VIDEO DURATION: {video_duration:.2f} seconds
+TIMESTAMPED TRANSCRIPT:
+{formatted_segments}
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON object matching this schema:
+{{
+  "summary": "Short 1-sentence description of the moment",
+  "hook_text": "{chosen_hook or 'TRAE DID NOT HOLD BACK'}",
+  "text_emphasis_graphics": [
+    {{
+      "text": "COLLIN\\nSEXTON",
+      "start_time": 0.6,
+      "duration": 1.2,
+      "color": "yellow"
+    }}
+  ],
+  "shots": [
+    {{
+      "shot_id": "broll_1",
+      "start_time": 2.5,
+      "end_time": 4.5,
+      "duration": 2.0,
+      "style": "stockpile",
+      "dialogue_quote": "Exact spoken line from transcript",
+      "emotional_core": "NBA rivalry or basketball discussion",
+      "visceral_human_metaphor": "Real basketball action or arena atmosphere",
+      "micro_prompts": ["nba basketball game action", "basketball arena court crowd"],
+      "search_prompt": "nba basketball game",
+      "overlay_type": "cutaway",
+      "narrative_reason": "Contextual sports illustration on keyword"
+    }}
+  ]
+}}"""
+        else:
+            director_prompt = f"""You are the Master AI Video Director for ultra-high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
 
 MANDATORY DIRECTING OBJECTIVES:
 1. HIGH-VELOCITY ~60% B-ROLL TIMELINE COVERAGE (CRITICAL USER MANDATE):
@@ -97,23 +179,34 @@ MANDATORY DIRECTING OBJECTIVES:
      • "person scrolling smartphone couch"
      • "father teaching son"
      • "businessman checking clipboard"
-4. CONTEXTUAL MEME & CREATOR CUTAWAYS (PRIORITIZE FAMILIAR CREATOR FACES FOR MAXIMUM ATTENTION):
-   - CRITICAL USER MANDATE: Familiar creator faces (IShowSpeed, CaseOh, Jynxzi) capture exponentially higher viewer retention than generic stock footages! Prioritize them over dry stock when high emotion occurs!
-   - Whenever dialogue expresses intense emotion, shock, rage, disbelief, satire, or contrasted opinions, use "style": "meme"!
-   - VIRAL CREATOR ARCHETYPES:
-     • "ishowspeed_shock": Darren Watkins Jr (IShowSpeed) wide-eyed screaming shock & hype. Use for: intense hype, mind-blowing claims, screaming/shouting moments, crazy excitement, wild statements!
-     • "moms_kinda_homeless": Desperate kid begging in Fortnite ("Please I need this my mom is kinda homeless") while streamer struggles not to laugh. Use for: desperate excuses, begging, financial struggles, absurd guilt trips.
-     • "not_your_personal_pornstar": Unhinged IRL streamer shouting in public ("SHUT THE F*** UP! I AM NOT YOUR PERSONAL PORN STAR!" after chat asked 'did you shave?'). Use for: unhinged boundary violations, creepy comments, crazy outbursts, borderline cancelable moments, supreme comment section bait!
-     • "caseoh_rage": CaseOh furious headset mic rage & screaming. Use for: outrage, frustrating fails, bad takes, calling someone out, getting roasted, heavy mistakes!
-     • "jynxzi_freakout": Jynxzi controller-slam & disbelief scream. Use for: hilarious shock, absurdity, 'bro what' moments, clutch fails, gaming!
-     • "the_trusted_doctor": Johnny Sins specialist/doctor cutaway. Use whenever an expert, specialist, doctor, or seasoned professional is mentioned (comment section magnet)!
-     • "gigachad": Peak masculine discipline, sigma mindset, absolute winner triumph.
-     • "hide_the_pain_harold": Strained smile, enduring awkwardness or inner panic.
-     • "stepped_in_shit": For bad opinions, terrible takes, excuses, or distractions. Provide "meme_captions": {{"shoe_text": "The bad opinion / excuse"}}.
-     • "drake": For contrasting a rejected bad option vs an accepted good option. Provide "meme_captions": {{"top_text": "Rejected option", "bottom_text": "Accepted option"}}.
-     • "clown": For progressive foolish steps or clown logic. Provide "meme_captions": {{"step_1": "...", "step_2": "...", "step_3": "...", "step_4": "..."}}.
-     • "same_picture": For comparing two identically bad or identical things.
-   - For realistic scenes (workspace, athletics, mentor discussions), use "style": "stockpile".
+ 4. FULLY AUTONOMOUS CONTEXTUAL MEME & CREATOR CUTAWAYS (MANDATORY UNIQUE MEMES FOR EVERY CLIP):
+    - CRITICAL HOOK MANDATE: Shot 1 ("broll_1") MUST ALWAYS BE A VIRAL MEME CUTAWAY ("style": "meme") starting within the first 1.0s–1.5s (duration 1.8s–2.2s) to immediately hook viewer attention and spark comment section engagement!
+    - USER MANDATE: The user NEVER wants to make memes manually. YOU (AI Director) MUST autonomously generate unique, viral, satirical meme cutaways tailored specifically to what the speaker says in this exact clip.
+    - MANDATORY: For videos >= 15s, designate at least 2 shots as "style": "meme" (Shot 1 is ALWAYS the first meme). For shorter clips, designate at least 1 shot (Shot 1) as "style": "meme".
+    - Familiar creator faces (IShowSpeed, CaseOh, Jynxzi, Johnny Sins, KiaraaKitty) capture 10x higher viewer retention and flood comment sections! Prioritize them whenever high emotion, hot takes, absurd claims, or punchlines occur.
+    - VIRAL ARCHETYPES & USAGE:
+      • "the_trusted_doctor": Johnny Sins specialist/hospital doctor cutaway. Use whenever an expert, specialist, doctor, medical advice, authority, therapy, or surgery is mentioned. Comment section MAGNET!
+        Captions: {{"caption": "The most experienced specialist for [speaker's topic]", "show_banner": true}}
+      • "ishowspeed_shock": Darren Watkins Jr (IShowSpeed) wide-eyed screaming shock & hype. Use for crazy claims, high energy, wild statements, mind-blowing stats!
+        Captions: {{"caption": "POV: Hearing [speaker's statement] for the first time", "show_banner": true}}
+      • "not_your_personal_pornstar": KiaraaKitty public streamer rage outburst. Use for ridiculous boundaries, audacity, cancelable moments, creepy questions, unhinged takes.
+        Captions: {{"caption": "Bro was not having it after hearing [context]", "show_banner": true}}
+      • "moms_kinda_homeless": Fortnite kid desperate plea. Use for absurd excuses, guilt trips, begging, financial desperation, lazy habits.
+        Captions: {{"caption": "The excuses people make when [context]", "show_banner": true}}
+      • "caseoh_rage": CaseOh furious headset mic rage & screaming. Use for bad mistakes, frustrating fails, outrage, calling someone out, getting roasted.
+        Captions: {{"caption": "POV: Hearing someone defend [mistake mentioned in clip]", "show_banner": true}}
+      • "jynxzi_freakout": Jynxzi controller slam & disbelief scream. Use for gaming, sudden shock, 'bro what' realization, clutch fails.
+        Captions: {{"caption": "Bro could not believe [context]", "show_banner": true}}
+      • "gigachad": Sigma grind, discipline, unshakeable confidence, victorious habit.
+        Captions: {{"caption": "Average [good habit/mindset] enjoyer", "show_banner": true}}
+      • "stepped_in_shit": For bad opinions, terrible takes, excuses, or toxic traps.
+        Captions: {{"shoe_text": "[Exact bad take mentioned in clip]"}}
+      • "drake": For contrasting a rejected bad option vs an accepted good option.
+        Captions: {{"top_text": "[Bad way speaker rejects]", "bottom_text": "[Good way speaker advocates]"}}
+      • "clown": For progressive foolish steps or clown logic.
+      • "hide_the_pain_harold": Strained smile, enduring awkwardness or inner panic.
+    - CRITICAL: Captions MUST be 100% UNIQUE, witty, and directly reactive to the exact words spoken in this specific clip. NEVER output generic captions like "IShowSpeed Moment" or "CaseOh Rage".
+    - For realistic scenes (workspace, athletics, mentor discussions), use "style": "stockpile".
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT:
@@ -128,12 +221,12 @@ Return ONLY a valid JSON object matching this schema:
   "shots": [
     {{
       "shot_id": "broll_1",
-      "start_time": 1.5,
-      "end_time": 4.8,
-      "duration": 3.3,
-      "style": "stockpile",
-      "meme_template": "stepped_in_shit",
-      "meme_captions": {{"shoe_text": "Bad opinion"}},
+      "start_time": 1.2,
+      "end_time": 3.2,
+      "duration": 2.0,
+      "style": "meme",
+      "meme_template": "the_trusted_doctor",
+      "meme_captions": {{"caption": "The most experienced specialist for this exact topic", "show_banner": true}},
       "dialogue_quote": "Exact spoken line from transcript",
       "emotional_core": "Topic theme (e.g. Deep Focus, Victory, Bad Opinion)",
       "visceral_human_metaphor": "Exact contextual scene or meme description",
@@ -143,7 +236,7 @@ Return ONLY a valid JSON object matching this schema:
       ],
       "search_prompt": "focused person writing desk",
       "overlay_type": "cutaway",
-      "narrative_reason": "Directly illustrates laser focus or humorous take spoken in the dialogue"
+      "narrative_reason": "Compulsory viral hook cutaway in first 5 seconds to maximize viewer retention"
     }}
   ]
 }}"""
@@ -163,18 +256,21 @@ Return ONLY a valid JSON object matching this schema:
                 )
                 raw_text = clean_json_string(response.text or "{}")
                 plan_data = json.loads(raw_text)
-                if plan_data and "shots" in plan_data and len(plan_data["shots"]) >= 2:
+                min_shots = 1 if campaign.id == "curious_mike" else 2
+                if plan_data and "shots" in plan_data and len(plan_data["shots"]) >= min_shots:
                     break
             except Exception as model_err:
                 logger.warning(f"AI Director model {model_cand} failed: {model_err}. Trying next fallback...")
                 continue
 
         if not plan_data or "shots" not in plan_data or not plan_data["shots"]:
-            logger.warning("AI Director failed to produce valid plan. Falling back to heuristic plan.")
-            return self._create_heuristic_plan(segments, video_duration)
+            logger.warning(f"AI Director failed to produce valid plan for '{campaign.id}'. Falling back to heuristic plan.")
+            return self._create_heuristic_plan(
+                segments, video_duration, campaign=campaign, custom_hook=chosen_hook or custom_hook, curated_moment_id=curated_moment_id
+            )
 
         try:
-            # Validate and clamp shot timestamps to video bounds and target ~60% duration
+            # Validate and clamp shot timestamps to video bounds and campaign constraints
             clean_shots = []
             last_end = 0.0
             max_dur = float(Config.MAX_CLIP_DURATION_SECONDS)
@@ -195,12 +291,12 @@ Return ONLY a valid JSON object matching this schema:
                     break
 
                 style = shot.get("style", "stockpile").lower()
-                if style not in ("stockpile", "collage", "meme"):
+                if not campaign.allow_ai_broll or style not in ("stockpile", "collage", "meme"):
                     style = "stockpile"
 
                 # Fast-paced short-form duration: 1.4s to 2.4s (snappy cuts)
-                max_clip = min(2.5, max_dur)
-                duration = min(max_clip, max(1.4, float(shot.get("duration", 2.0))))
+                max_clip = min(campaign.max_cutaway_seconds, max_dur)
+                duration = min(max_clip, max(1.2, float(shot.get("duration", 2.0))))
                 if style == "meme":
                     duration = min(2.0, max(1.3, duration))
                 end = min(video_duration, start + duration)
@@ -227,11 +323,11 @@ Return ONLY a valid JSON object matching this schema:
                         base_prompt,
                         f"{base_prompt} close up",
                         f"{base_prompt} hands",
-                        f"{base_prompt} detail",
+                        f"{base_prompt} action",
                     ]
 
                 shot_entry = {
-                    "shot_id": shot.get("shot_id", f"broll_{len(clean_shots)+1}"),
+                    "shot_id": f"broll_{len(clean_shots)+1}",
                     "start_time": round(start, 2),
                     "end_time": round(end, 2),
                     "duration": duration,
@@ -251,58 +347,46 @@ Return ONLY a valid JSON object matching this schema:
                 clean_shots.append(shot_entry)
                 last_end = end
 
-            # Ensure at least 1 shot is a meme cutaway for viral retention and meme pack utilization
-            has_meme = any(s.get("style") == "meme" for s in clean_shots)
-            if not has_meme and clean_shots:
-                target_idx = 1 if len(clean_shots) >= 2 else 0
-                target_shot = clean_shots[target_idx]
-                target_shot["style"] = "meme"
-                diag = target_shot.get("dialogue_quote", "").strip()
-                diag_lower = diag.lower()
-                
-                # Prioritize familiar creator faces over generic stock footages
-                if any(w in diag_lower for w in ["speed", "crazy", "insane", "screaming", "shouting", "hype", "unbelievable", "huge", "bark", "omg"]):
-                    target_shot["meme_template"] = "ishowspeed_shock"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "IShowSpeed Moment"}
-                elif any(w in diag_lower for w in ["homeless", "mom", "plead", "beg", "desperate", "need this", "struggle", "pity"]):
-                    target_shot["meme_template"] = "moms_kinda_homeless"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "My Mom Is Kinda Homeless"}
-                elif any(w in diag_lower for w in ["shave", "pornstar", "porn star", "creep", "boundary", "shut up", "inappropriate", "cancel"]):
-                    target_shot["meme_template"] = "not_your_personal_pornstar"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "I Am Not Your Personal Pornstar"}
-                elif any(w in diag_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy", "terrible", "worst"]):
-                    target_shot["meme_template"] = "caseoh_rage"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "CaseOh Rage"}
-                elif any(w in diag_lower for w in ["controller", "game", "gaming", "disbelief", "aim", "bro", "no way", "jynx", "jynxzi", "clutch"]):
-                    target_shot["meme_template"] = "jynxzi_freakout"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "Jynxzi Freakout"}
-                elif any(w in diag_lower for w in ["doctor", "specialist", "expert", "hospital", "patient", "nurse", "surgery", "experienced"]):
-                    target_shot["meme_template"] = "the_trusted_doctor"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "The Most Experienced Specialist"}
-                elif any(w in diag_lower for w in ["chad", "sigma", "winner", "grind", "discipline", "hard work"]):
-                    target_shot["meme_template"] = "gigachad"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "Average Consistency Enjoyer"}
-                elif any(w in diag_lower for w in ["pain", "awkward", "fine", "smile", "pretend", "strained"]):
-                    target_shot["meme_template"] = "hide_the_pain_harold"
-                    target_shot["meme_captions"] = {"caption": diag[:45] if diag else "Smiling Through The Pain"}
-                elif any(w in diag_lower for w in ["person", "meet", "talk", "real", "truth", "good", "better", "shake", "dinner"]):
-                    target_shot["meme_template"] = "drake"
-                    target_shot["meme_captions"] = {
-                        "top_text": "15-minute Zoom interview",
-                        "bottom_text": diag[:45] if diag else "Meet in person & have dinner"
-                    }
-                else:
-                    target_shot["meme_template"] = "ishowspeed_shock"
-                    target_shot["meme_captions"] = {
-                        "caption": diag[:45] if diag else "High Retention Reaction"
-                    }
-                logger.info(f"Auto-injected meme cutaway on [{target_shot['shot_id']}] ({target_shot['meme_template']}) for viral retention.")
+            # Memes assignment only for campaigns that allow AI/meme B-roll
+            if campaign.allow_ai_broll:
+                from ai_broll_autopilot.services.meme_engine import MemeEngine
+                if clean_shots:
+                    clean_shots[0]["style"] = "meme"
+                    if clean_shots[0].get("start_time", 0.0) > 2.0:
+                        clean_shots[0]["start_time"] = 1.2
+                    clean_shots[0]["duration"] = min(2.2, max(1.5, float(clean_shots[0].get("duration", 2.0))))
+                    clean_shots[0]["end_time"] = round(clean_shots[0]["start_time"] + clean_shots[0]["duration"], 2)
+
+                meme_shots = [s for s in clean_shots if s.get("style") == "meme"]
+                target_meme_count = 2 if len(clean_shots) >= 4 and video_duration >= 15.0 else 1
+
+                while len(meme_shots) < target_meme_count and clean_shots:
+                    cand = None
+                    for idx in [2, 1, 3]:
+                        if idx < len(clean_shots) and clean_shots[idx] not in meme_shots:
+                            cand = clean_shots[idx]
+                            break
+                    if not cand:
+                        break
+                    cand["style"] = "meme"
+                    meme_shots.append(cand)
+
+                for ms in meme_shots:
+                    caps = ms.get("meme_captions", {})
+                    is_generic = False
+                    if caps:
+                        c_str = str(caps).lower()
+                        if any(g in c_str for g in ("high retention", "ishowspeed moment", "caseoh rage", "zoom interview", "what people say", "bad opinion")):
+                            is_generic = True
+                    if not caps or is_generic or not ms.get("meme_template"):
+                        ms = MemeEngine.generate_unique_contextual_meme(ms, full_transcript, client=self.client)
+                        logger.info(f"AI Director autonomous meme cutaway generated on [{ms['shot_id']}] ({ms.get('meme_template')}): {ms.get('meme_captions')}")
 
             total_broll_time = sum(s["duration"] for s in clean_shots)
             coverage_pct = round((total_broll_time / video_duration) * 100, 1) if video_duration > 0 else 0
 
-            # 1. Expand shots if coverage is below 58%
-            if coverage_pct < 58.0 and clean_shots:
+            # Expand coverage only for default viral campaign (~60% target)
+            if campaign.allow_ai_broll and coverage_pct < 58.0 and clean_shots:
                 logger.info(f"B-roll coverage ({coverage_pct}%) below 58%. Expanding shot durations toward ~60%...")
                 for idx, s in enumerate(clean_shots):
                     next_start = clean_shots[idx + 1]["start_time"] if idx + 1 < len(clean_shots) else (video_duration - 0.5)
@@ -316,8 +400,30 @@ Return ONLY a valid JSON object matching this schema:
                 total_broll_time = sum(s["duration"] for s in clean_shots)
                 coverage_pct = round((total_broll_time / video_duration) * 100, 1)
 
-            # 2. If still below 55% and there is an uncovered window at the end or in a wide gap, add a contextual shot
-            if coverage_pct < 56.0 and segments:
+            # Clamp coverage if campaign enforces max_broll_ratio (e.g. Curious Mike <= 33%)
+            if not campaign.allow_ai_broll and coverage_pct > (campaign.max_broll_ratio * 100):
+                logger.info(f"Clamping B-roll coverage ({coverage_pct}%) to campaign limit {campaign.max_broll_ratio*100}%...")
+                max_total_sec = video_duration * campaign.max_broll_ratio
+                cur_total = 0.0
+                clamped_shots = []
+                for s in clean_shots:
+                    if cur_total + s["duration"] <= max_total_sec:
+                        clamped_shots.append(s)
+                        cur_total += s["duration"]
+                    elif cur_total < max_total_sec:
+                        rem = round(max_total_sec - cur_total, 2)
+                        if rem >= 1.0:
+                            s["duration"] = rem
+                            s["end_time"] = round(s["start_time"] + rem, 2)
+                            clamped_shots.append(s)
+                            cur_total += rem
+                        break
+                clean_shots = clamped_shots
+                total_broll_time = sum(s["duration"] for s in clean_shots)
+                coverage_pct = round((total_broll_time / video_duration) * 100, 1)
+
+            # 2. If still below 55% and there is an uncovered window at the end or in a wide gap, add a contextual shot (Default campaign only)
+            if campaign.allow_ai_broll and campaign.id != "curious_mike" and coverage_pct < 56.0 and segments:
                 last_shot_end = clean_shots[-1]["end_time"] if clean_shots else 1.0
                 if (video_duration - last_shot_end) >= 3.0:
                     start = round(last_shot_end + 0.6, 2)
@@ -350,33 +456,64 @@ Return ONLY a valid JSON object matching this schema:
                         total_broll_time = sum(s["duration"] for s in clean_shots)
                         coverage_pct = round((total_broll_time / video_duration) * 100, 1)
 
+            if campaign.id == "curious_mike":
+                # Ensure all shots are strictly real basketball footage (no corporate stock, no memes)
+                for s in clean_shots:
+                    s["style"] = "stockpile"
+                    sp = s.get("search_prompt", "").lower()
+                    if not any(k in sp for k in ("basketball", "nba", "court", "hoop", "dunk", "guard", "sexton", "hands")):
+                        s["search_prompt"] = f"basketball player {s.get('search_prompt', 'game action')}"
+                # Enforce Curious Mike 33% max B-roll rule (max 3 punchy cuts)
+                if len(clean_shots) > 3:
+                    clean_shots = clean_shots[:3]
+                total_broll_time = sum(s["duration"] for s in clean_shots)
+                coverage_pct = round((total_broll_time / video_duration) * 100, 1)
+
+            # Preserve or detect Level 3 typographic emphasis graphics
+            emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
+            if not emphasis_graphics and campaign and campaign.id == "curious_mike":
+                emphasis_graphics = self._detect_curious_mike_emphasis(segments, video_duration)
+
             plan_result = {
                 "total_duration": video_duration,
                 "broll_shot_count": len(clean_shots),
                 "broll_coverage_seconds": round(total_broll_time, 2),
                 "broll_coverage_percentage": coverage_pct,
-                "summary": plan_data.get("summary", "Contextual B-Roll Edit Plan"),
+                "summary": plan_data.get("summary", f"{campaign.name} Contextual Edit Plan"),
+                "hook_text": chosen_hook or plan_data.get("hook_text"),
+                "campaign_id": campaign.id,
                 "shots": clean_shots,
+                "text_emphasis_graphics": emphasis_graphics,
             }
 
             logger.info(f"AI Director planned {len(clean_shots)} B-roll cutaways covering {total_broll_time:.1f}s ({coverage_pct}% of {video_duration:.1f}s)")
             return plan_result
 
-
         except Exception as e:
             logger.error(f"AI Director planning post-processing failed: {e}", exc_info=True)
-            return self._create_heuristic_plan(segments, video_duration)
+            return self._create_heuristic_plan(
+                segments, video_duration, campaign=campaign, custom_hook=chosen_hook or custom_hook, curated_moment_id=curated_moment_id
+            )
 
-    def _create_heuristic_plan(self, segments: List[Dict[str, Any]], video_duration: float) -> Dict[str, Any]:
-        """Deterministic fallback edit plan ensuring ~60% B-roll coverage and contextual keywords."""
+    def _create_heuristic_plan(
+        self,
+        segments: List[Dict[str, Any]],
+        video_duration: float,
+        campaign: Optional[Any] = None,
+        custom_hook: Optional[str] = None,
+        curated_moment_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Deterministic fallback edit plan ensuring campaign constraints and contextual keywords."""
         shots = []
-        target_broll_dur = video_duration * Config.TARGET_BROLL_RATIO
-        shot_dur = 2.0  # Fast-moving cuts every 2.0 seconds
-        num_shots = max(3, int(round(target_broll_dur / shot_dur)))
+        is_curious_mike = bool(campaign and campaign.id == "curious_mike")
+        target_ratio = campaign.max_broll_ratio if campaign else Config.TARGET_BROLL_RATIO
+        target_broll_dur = video_duration * target_ratio
+        shot_dur = 2.0
+        num_shots = max(1, min(2, int(round(target_broll_dur / shot_dur)))) if is_curious_mike else max(3, int(round(target_broll_dur / shot_dur)))
 
         # Distribute shots across available segments
-        step = max(1, len(segments) // (num_shots + 1))
-        chosen_indices = [min(len(segments) - 1, (i + 1) * step) for i in range(num_shots)]
+        step = max(1, len(segments) // (num_shots + 1)) if segments else 1
+        chosen_indices = [min(len(segments) - 1, (i + 1) * step) for i in range(num_shots)] if segments else []
         chosen_indices = sorted(list(set(chosen_indices)))
 
         last_end = 0.8  # leave 0.8s speaker hook
@@ -393,7 +530,10 @@ Return ONLY a valid JSON object matching this schema:
             seg_text = seg.get("text", "").lower()
 
             # Contextual keyword detection
-            if any(w in seg_text for w in ["focus", "disciplin", "work", "habit", "lesson"]):
+            if is_curious_mike:
+                search_prompt = "nba basketball player court"
+                emotional_core = "NBA Basketball Conversation"
+            elif any(w in seg_text for w in ["focus", "disciplin", "work", "habit", "lesson"]):
                 search_prompt = "focused person writing desk"
                 emotional_core = "Deep Focus and Discipline"
             elif any(w in seg_text for w in ["win", "winner", "success", "goal", "champion"]):
@@ -417,11 +557,15 @@ Return ONLY a valid JSON object matching this schema:
                 search_prompt,
                 f"{search_prompt} close up",
                 f"{search_prompt} detail",
-                f"{search_prompt} workflow",
+                f"{search_prompt} action",
             ]
 
-            # In heuristic plan, designate the 2nd shot as a viral meme cutaway
-            is_meme = (len(shots) == 1)
+            # In heuristic plan, memes only if campaign allows AI/meme B-roll
+            is_meme = (not is_curious_mike) and ((len(shots) == 0) or (len(shots) == 2 and video_duration >= 15.0))
+            if is_meme and len(shots) == 0:
+                start = 1.2
+                dur = min(2.2, max(1.5, dur))
+                end = round(start + dur, 2)
             shot_style = "meme" if is_meme else "stockpile"
 
             shot_data = {
@@ -436,34 +580,12 @@ Return ONLY a valid JSON object matching this schema:
                 "micro_prompts": micro_prompts,
                 "search_prompt": search_prompt,
                 "overlay_type": "cutaway",
-                "narrative_reason": f"Contextual illustration of: {seg_text[:40]}",
+                "narrative_reason": "Compulsory viral hook meme in first 5s" if is_meme else f"Contextual illustration of: {seg_text[:40]}",
             }
             if is_meme:
-                seg_lower = seg_text.lower()
-                if any(w in seg_lower for w in ["speed", "crazy", "insane", "screaming", "shouting", "hype", "bark", "omg", "huge"]):
-                    shot_data["meme_template"] = "ishowspeed_shock"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "IShowSpeed Moment"}
-                elif any(w in seg_lower for w in ["homeless", "mom", "plead", "beg", "desperate", "need this", "struggle", "pity"]):
-                    shot_data["meme_template"] = "moms_kinda_homeless"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "My Mom Is Kinda Homeless"}
-                elif any(w in seg_lower for w in ["shave", "pornstar", "porn star", "creep", "boundary", "shut up", "inappropriate", "cancel"]):
-                    shot_data["meme_template"] = "not_your_personal_pornstar"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "I Am Not Your Personal Pornstar"}
-                elif any(w in seg_lower for w in ["rage", "angry", "mad", "stupid", "dumb", "hate", "ban", "fail", "heavy"]):
-                    shot_data["meme_template"] = "caseoh_rage"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "CaseOh Rage"}
-                elif any(w in seg_lower for w in ["controller", "game", "gaming", "disbelief", "aim", "bro", "no way", "jynx", "jynxzi"]):
-                    shot_data["meme_template"] = "jynxzi_freakout"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "Jynxzi Freakout"}
-                elif any(w in seg_lower for w in ["doctor", "specialist", "expert", "hospital", "patient", "experienced"]):
-                    shot_data["meme_template"] = "the_trusted_doctor"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "The Experienced Specialist"}
-                elif any(w in seg_lower for w in ["chad", "sigma", "winner", "grind", "discipline"]):
-                    shot_data["meme_template"] = "gigachad"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "Average Consistency Enjoyer"}
-                else:
-                    shot_data["meme_template"] = "ishowspeed_shock"
-                    shot_data["meme_captions"] = {"caption": seg.get("text", "")[:45] or "High Retention Creator Reaction"}
+                from ai_broll_autopilot.services.meme_engine import MemeEngine
+                full_t = " ".join(s.get("text", "") for s in segments)
+                shot_data = MemeEngine.generate_unique_contextual_meme(shot_data, full_t, client=self.client)
 
             shots.append(shot_data)
             last_end = end
@@ -471,11 +593,100 @@ Return ONLY a valid JSON object matching this schema:
         total_broll = sum(s["duration"] for s in shots)
         coverage_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0
 
+        emphasis_graphics = []
+        if campaign and campaign.id == "curious_mike":
+            emphasis_graphics = self._detect_curious_mike_emphasis(segments, video_duration)
+
+        resolved_hook = custom_hook
+        if not resolved_hook and campaign and campaign.curated_moments:
+            if curated_moment_id:
+                for m in campaign.curated_moments:
+                    if m.moment_id.lower() == curated_moment_id.lower():
+                        resolved_hook = m.screen_hook
+                        break
+            if not resolved_hook:
+                resolved_hook = campaign.curated_moments[0].screen_hook
+
         return {
             "total_duration": video_duration,
             "broll_shot_count": len(shots),
             "broll_coverage_seconds": round(total_broll, 2),
             "broll_coverage_percentage": coverage_pct,
-            "summary": "Heuristic contextual edit plan (~60% coverage)",
+            "summary": f"{campaign.name if campaign else 'Heuristic'} Contextual Edit Plan",
+            "hook_text": resolved_hook,
+            "campaign_id": campaign.id if campaign else "default",
             "shots": shots,
+            "text_emphasis_graphics": emphasis_graphics,
         }
+
+    def _detect_curious_mike_emphasis(
+        self,
+        segments: List[Dict[str, Any]],
+        video_duration: float
+    ) -> List[Dict[str, Any]]:
+        """Detect signature Level 3 typographic emphasis moments for Curious Mike."""
+        emphasis_list = []
+        last_t = -10.0
+
+        target_triggers = [
+            (["colin", "collin", "sexton"], "COLLIN\nSEXTON", "yellow"),
+            (["jalen", "jaylen", "hands"], "JALEN\nHANDS", "yellow"),
+            (["chip", "shoulder"], "CHIP ON\nMY SHOULDER", "pink"),
+            (["regular guy"], "REGULAR\nGUY", "pink"),
+            (["jokic", "nikola"], "NIKOLA\nJOKIC", "yellow"),
+            (["knicks"], "KNICKS\nFANS", "pink"),
+            (["roommate", "roommates"], "ROOMMATES", "yellow"),
+            (["my bad"], "MY BAD", "pink"),
+            (["quit", "quitting"], "WANTED TO\nQUIT", "pink"),
+        ]
+
+        for seg in segments:
+            words = seg.get("words", [])
+            seg_text = seg.get("text", "").lower()
+
+            for keywords, display_text, color in target_triggers:
+                if any(k in seg_text for k in keywords):
+                    match_time = float(seg.get("start", 0.0))
+                    if words:
+                        for w_obj in words:
+                            w_clean = re.sub(r"[^\w\s']", "", w_obj.get("word", "").lower()).strip()
+                            if any(w_clean == k or (len(w_clean) >= 3 and (k.startswith(w_clean) or w_clean.startswith(k))) for k in keywords):
+                                match_time = float(w_obj.get("start", match_time))
+                                break
+
+                    if "SEXTON" in display_text:
+                        match_time = max(0.4, round(match_time - 0.16, 2))
+                    elif "HANDS" in display_text:
+                        match_time = round(match_time, 2)
+                    elif "SHOULDER" in display_text:
+                        match_time = round(max(0.0, match_time - 0.5), 2)
+
+                    # Ensure at least 4.0 seconds between graphics and not right at the end
+                    if match_time - last_t >= 4.0 and match_time < max(0.0, video_duration - 1.5):
+                        emphasis_list.append({
+                            "text": display_text,
+                            "start_time": round(match_time, 2),
+                            "duration": 1.2,
+                            "color": color
+                        })
+                        last_t = match_time
+                        break
+
+        # Fallback if no triggers found
+        if not emphasis_list and video_duration >= 10.0:
+            emphasis_list.append({
+                "text": "HIGH SCHOOL\nRANKINGS",
+                "start_time": 0.8,
+                "duration": 1.2,
+                "color": "yellow"
+            })
+            if video_duration >= 25.0:
+                emphasis_list.append({
+                    "text": "CHIP ON\nSHOULDER",
+                    "start_time": round(video_duration * 0.75, 2),
+                    "duration": 1.2,
+                    "color": "pink"
+                })
+
+        return emphasis_list
+

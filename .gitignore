@@ -22,6 +22,7 @@ env/
 web/node_modules/
 web/.next/
 web/out/
+*.tsbuildinfo
 node_modules/
 .next/
 

@@ -38,10 +38,13 @@ class Matcher:
         shots = plan.get("shots", [])
         job_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Resolving {len(shots)} B-roll shots concurrently in parallel...")
+        campaign_id = plan.get("campaign_id", "default")
+        from ai_broll_autopilot.campaigns import campaign_registry
+        campaign = campaign_registry.get_campaign(campaign_id)
+        allow_memes = campaign.allow_ai_broll
 
         # Resolve all shots concurrently with asyncio.gather
-        tasks = [self._resolve_single_shot(shot, job_cache_dir) for shot in shots]
+        tasks = [self._resolve_single_shot(shot, job_cache_dir, allow_memes=allow_memes) for shot in shots]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
         resolved_shots = [s for s in results if s is not None]
@@ -50,26 +53,40 @@ class Matcher:
         logger.info(f"Successfully matched {len(resolved_shots)} of {len(shots)} shots in parallel")
         return plan
 
-    async def _resolve_single_shot(self, shot: Dict[str, Any], job_cache_dir: Path) -> Optional[Dict[str, Any]]:
+    async def _resolve_single_shot(
+        self,
+        shot: Dict[str, Any],
+        job_cache_dir: Path,
+        allow_memes: bool = True
+    ) -> Optional[Dict[str, Any]]:
         """Resolve a single B-roll shot concurrently."""
         shot_id = shot.get("shot_id", "shot")
         prompt = shot.get("search_prompt") or shot.get("visceral_human_metaphor") or shot.get("emotional_core")
         style = shot.get("style", "stockpile")
         target_duration = shot.get("duration", 2.5)
 
-        logger.info(f"Resolving B-roll for [{shot_id}] ({target_duration}s): '{prompt}'")
+        logger.info(f"Resolving B-roll for [{shot_id}] ({target_duration}s): '{prompt}' (allow_memes={allow_memes})")
         asset_path = None
 
-        # 0. Check if shot is designated as a meme cutaway or references viral creator/meme archetypes
+        # 0. Check if shot is designated as a meme cutaway (only if campaign allows it)
+        if allow_memes:
+            is_first_shot = (shot_id in ("broll_1", "shot_1")) or (float(shot.get("start_time", 99.0)) <= 3.5)
+            if is_first_shot:
+                style = "meme"
+                shot["style"] = "meme"
+        else:
+            style = "stockpile"
+            shot["style"] = "stockpile"
+
         creator_terms = (
             "ishowspeed", "speed shock", "caseoh", "jynxzi", "jynxi", "johnny sins",
             "the_trusted_doctor", "gigachad", "harold meme", "homeless", "moms kinda homeless",
             "pornstar", "personal porn star", "did you shave", "kiaraakitty"
         )
         is_creator_prompt = any(k in (prompt or "").lower() for k in creator_terms)
-        if style == "meme" or is_creator_prompt:
+        if allow_memes and (style == "meme" or is_creator_prompt):
             try:
-                if is_creator_prompt and not shot.get("meme_template"):
+                if (is_creator_prompt or is_first_shot) and not shot.get("meme_template"):
                     p_lower = (prompt or "").lower()
                     if "homeless" in p_lower or "mom" in p_lower:
                         shot["meme_template"] = "moms_kinda_homeless"
@@ -87,13 +104,28 @@ class Matcher:
                         shot["meme_template"] = "gigachad"
                     elif "harold" in p_lower:
                         shot["meme_template"] = "hide_the_pain_harold"
+                    else:
+                        from ai_broll_autopilot.services.meme_engine import MemeEngine
+                        shot = MemeEngine.generate_unique_contextual_meme(shot, prompt or shot.get("dialogue_quote", ""))
                 shot = self.meme_engine.create_meme_broll(shot, job_cache_dir, duration=target_duration)
                 asset_path = shot.get("asset_path")
                 if asset_path and Path(asset_path).exists():
                     logger.info(f"Successfully generated meme/creator cutaway for [{shot_id}]: {asset_path}")
                     return shot
             except Exception as me:
-                logger.warning(f"Meme generation failed for [{shot_id}]: {me}. Falling back to standard stock footage.")
+                logger.warning(f"Meme generation failed for [{shot_id}]: {me}.")
+                if is_first_shot:
+                    # For Shot 1, never fallback to Pexels stock footage! Use guaranteed meme fallback
+                    try:
+                        shot["meme_template"] = "the_trusted_doctor"
+                        shot["meme_captions"] = {"caption": "The specialist when you need real answers", "show_banner": True}
+                        shot = self.meme_engine.create_meme_broll(shot, job_cache_dir, duration=target_duration)
+                        asset_path = shot.get("asset_path")
+                        if asset_path and Path(asset_path).exists():
+                            logger.info(f"Fallback meme cutaway succeeded for opening hook [{shot_id}]: {asset_path}")
+                            return shot
+                    except Exception as fe:
+                        logger.error(f"Fallback meme generation failed for [{shot_id}]: {fe}")
 
         # 1. Check local asset cache in DB
         cached = self.db.find_cached_asset(prompt)

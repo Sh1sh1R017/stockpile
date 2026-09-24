@@ -21,10 +21,15 @@ class TimelineEngine:
         ass_subtitles_path: str = None,
         bgm_stream_idx: int = None,
         bgm_volume: float = 0.15,
-        ducking_enabled: bool = True
+        ducking_enabled: bool = True,
+        watermark_stream_idx: int = None,
+        watermark_position: str = "bottom_safe",
+        watermark_scale: float = 0.28,
+        frame_overlay_stream_idx: int = None,
+        viewport: Tuple[int, int, int, int] = None,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
-        kinetic subtitles, and multi-track audio mixing with BGM auto-ducking.
+        kinetic subtitles, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
 
         Returns:
             (filtergraph_string, final_video_layer_name, final_audio_layer_name)
@@ -35,10 +40,19 @@ class TimelineEngine:
         # -------------------------------------------------------------
         # 1. Base Video Normalization (Stream 0:v)
         # -------------------------------------------------------------
-        filters.append(
-            f"[0:v]scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-            f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps}[base]"
-        )
+        if viewport:
+            vp_x, vp_y, vp_w, vp_h = viewport
+            scale_and_pad = (
+                f"scale={vp_w}:{vp_h}:force_original_aspect_ratio=increase,"
+                f"crop={vp_w}:{vp_h},pad={self.width}:{self.height}:{vp_x}:{vp_y}:color=black,setsar=1,fps={self.fps}"
+            )
+            filters.append(f"[0:v]{scale_and_pad}[base]")
+        else:
+            scale_and_pad = (
+                f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps}"
+            )
+            filters.append(f"[0:v]{scale_and_pad}[base]")
 
         current_layer = "base"
 
@@ -76,8 +90,7 @@ class TimelineEngine:
                 # Whip slide in from right
                 filters.append(
                     f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
+                    f"{scale_and_pad},"
                     f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(1-(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
@@ -88,8 +101,7 @@ class TimelineEngine:
                 # Whip slide in from left
                 filters.append(
                     f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
+                    f"{scale_and_pad},"
                     f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(-1+(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
@@ -100,8 +112,7 @@ class TimelineEngine:
                 # Direct hard cut
                 filters.append(
                     f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
+                    f"{scale_and_pad},"
                     f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
                 )
                 filters.append(
@@ -113,8 +124,7 @@ class TimelineEngine:
                 fade_out_st = max(0.0, shot_dur - dur_out)
                 filters.append(
                     f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},"
+                    f"{scale_and_pad},"
                     f"format=yuva420p,"
                     f"fade=t=in:st=0:d={dur_in:.2f}:alpha=1,"
                     f"fade=t=out:st={fade_out_st:.2f}:d={dur_out:.2f}:alpha=1,"
@@ -127,7 +137,44 @@ class TimelineEngine:
             current_layer = next_layer
 
         # -------------------------------------------------------------
-        # 3. Kinetic Subtitle Burn-In (Overlayed on top of all video)
+        # 2b. Campaign Frame Overlay (Torn Paper Mask & Header/Watermark)
+        # -------------------------------------------------------------
+        if frame_overlay_stream_idx is not None:
+            framed_layer = "framed_layer"
+            filters.append(
+                f"[{current_layer}][{frame_overlay_stream_idx}:v]overlay=0:0:format=auto:shortest=1[{framed_layer}]"
+            )
+            current_layer = framed_layer
+
+        # -------------------------------------------------------------
+        # 3. Campaign Watermark Overlay (e.g. YT: @mpj for Curious Mike)
+        # -------------------------------------------------------------
+        if watermark_stream_idx is not None:
+            wm_in = f"[{watermark_stream_idx}:v]"
+            scale_factor = watermark_scale if watermark_scale else 0.28
+            target_wm_w = max(100, int(self.width * scale_factor))
+            filters.append(f"{wm_in}scale={target_wm_w}:-1[scaled_wm]")
+
+            if watermark_position == "top_safe":
+                ox = "(W-w)/2"
+                oy = "160"
+            elif watermark_position == "top_left":
+                ox = "40"
+                oy = "160"
+            elif watermark_position == "bottom_left":
+                ox = "60"
+                oy = "H-h-200"
+            else:  # Default bottom_safe (centered, above lower UI and clear of captions)
+                ox = "(W-w)/2"
+                oy = "H-h-200"
+
+            filters.append(
+                f"[{current_layer}][scaled_wm]overlay=x='{ox}':y='{oy}':format=auto:eof_action=repeat[wm_layer]"
+            )
+            current_layer = "wm_layer"
+
+        # -------------------------------------------------------------
+        # 4. Kinetic Subtitle Burn-In (Overlayed on top of all video)
         # -------------------------------------------------------------
         if ass_subtitles_path:
             import os
@@ -146,7 +193,11 @@ class TimelineEngine:
 
         # 4a. Transition stingers & Foley SFX
         if audio_sfx_list:
-            audio_inputs_start = 1 + len(shots)
+            audio_inputs_start = (
+                1 + len(shots)
+                + (1 if frame_overlay_stream_idx is not None else 0)
+                + (1 if watermark_stream_idx is not None else 0)
+            )
             for a_idx, sfx_item in enumerate(audio_sfx_list):
                 stream_in = f"[{audio_inputs_start + a_idx}:a]"
                 stream_out = f"sfx_{a_idx}"

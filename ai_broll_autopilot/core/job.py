@@ -1,4 +1,4 @@
-﻿"""Job models and state definitions for AI B-Roll Autopilot."""
+"""Job models and state definitions for AI B-Roll Autopilot."""
 
 import enum
 import time
@@ -73,17 +73,21 @@ class Job:
     drive_file_url: Optional[str] = None
     retry_count: int = 0
     repair_count: int = 0
+    campaign_id: str = "default"
 
     @classmethod
-    def create(cls, source_file_path: str) -> "Job":
+    def create(cls, source_file_path: str, campaign_id: str = "default") -> "Job":
         path = Path(source_file_path)
         job_id = generate_job_id(prefix=path.stem[:12])
+        if campaign_id == "default" and "curious_mike" in path.name.lower():
+            campaign_id = "curious_mike"
         return cls(
             job_id=job_id,
             source_file=str(path.resolve()),
             source_filename=path.name,
             status=JobState.QUEUED,
             progress=0.0,
+            campaign_id=campaign_id or "default",
         )
 
     def can_transition_to(self, target_state: JobState) -> bool:

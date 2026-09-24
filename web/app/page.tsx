@@ -73,6 +73,36 @@ interface MemeTemplateOption {
   fields: { name: string; label: string; placeholder: string }[];
 }
 
+interface CuratedMoment {
+  moment_id: string;
+  timestamp_range: string;
+  start_time_sec: number;
+  end_time_sec: number;
+  screen_hook: string;
+  post_caption: string;
+  broll_theme?: string;
+  broll_sources: string[];
+  angle?: string;
+}
+
+interface CampaignSummary {
+  id: string;
+  name: string;
+  client: string;
+  rate: string;
+  total_budget: string;
+  platforms: string[];
+  description: string;
+  allow_bgm: boolean;
+  allow_ai_broll: boolean;
+  max_broll_ratio: number;
+  watermark_required: boolean;
+  subtitle_style: string;
+  rules_checklist: string[];
+  instant_rejections: string[];
+  curated_moments: CuratedMoment[];
+}
+
 interface JobSummary {
   job_id: string;
   filename: string;
@@ -84,6 +114,7 @@ interface JobSummary {
   has_video: boolean;
   emotional_summary?: string;
   drive_file_url?: string;
+  campaign_id?: string;
   review_data?: {
     verdict: string;
     score: number;
@@ -167,6 +198,7 @@ export default function StudioDashboard() {
   const [showUploadMode, setShowUploadMode] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [uploadTab, setUploadTab] = useState<"file" | "youtube">("file");
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [isImportingYouTube, setIsImportingYouTube] = useState(false);
   const [jobToDelete, setJobToDelete] = useState<{ id: string; name: string } | null>(null);
@@ -237,6 +269,14 @@ export default function StudioDashboard() {
   const [hdrAvailable, setHdrAvailable] = useState<boolean>(false);
   const [hdrMeta, setHdrMeta] = useState<any>(null);
 
+  // Campaigns & Curated Moments State
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("curious_mike");
+  const [showMomentsModal, setShowMomentsModal] = useState<boolean>(false);
+  const [momentSearchQuery, setMomentSearchQuery] = useState<string>("");
+  const [momentFilterAngle, setMomentFilterAngle] = useState<string>("all");
+  const [curatedMomentsTab, setCuratedMomentsTab] = useState<"moments" | "rules">("moments");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const customVideoInputRef = useRef<HTMLInputElement>(null);
   const masterVideoRef = useRef<HTMLVideoElement>(null);
@@ -260,13 +300,14 @@ export default function StudioDashboard() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Fetch Meme templates, SFX catalog, and BGM tracks
+  // Fetch Meme templates, SFX catalog, BGM tracks, and Campaigns
   const fetchResources = async () => {
     try {
-      const [tRes, sfxRes, bgmRes] = await Promise.all([
+      const [tRes, sfxRes, bgmRes, campRes] = await Promise.all([
         fetch("/api/memes/templates?limit=120"),
         fetch("/api/sfx-catalog"),
-        fetch("/api/bgm/tracks")
+        fetch("/api/bgm/tracks"),
+        fetch("/api/campaigns"),
       ]);
       if (tRes.ok) {
         const tData = await tRes.json();
@@ -279,6 +320,10 @@ export default function StudioDashboard() {
       if (bgmRes.ok) {
         const bgmData = await bgmRes.json();
         setBgmTracks(bgmData);
+      }
+      if (campRes.ok) {
+        const campData = await campRes.json();
+        setCampaigns(campData);
       }
     } catch (e) {
       console.error("Failed to load studio resources:", e);
@@ -353,6 +398,32 @@ export default function StudioDashboard() {
     } catch (e) {
       alert("Error triggering SDR2HDR: " + e);
       setIsUpscalingHdr(false);
+    }
+  };
+
+  const [isAutoGeneratingMeme, setIsAutoGeneratingMeme] = useState<Record<string, boolean>>({});
+
+  const handleAutoGenerateMeme = async (shotId: string) => {
+    if (!selectedJob) return;
+    setIsAutoGeneratingMeme((prev) => ({ ...prev, [shotId]: true }));
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/shots/${encodeURIComponent(shotId)}/auto-meme`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`AI generated unique meme: ${data.shot?.meme_template || "Meme"}!`);
+        const jres = await fetch(`/api/jobs/${encodeURIComponent(selectedJob.job_id)}`);
+        if (jres.ok) setSelectedJob(await jres.json());
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Auto-meme generation failed: ${err.detail || "Server error"}`);
+      }
+    } catch (e) {
+      alert("Error auto-generating meme: " + e);
+    } finally {
+      setIsAutoGeneratingMeme((prev) => ({ ...prev, [shotId]: false }));
     }
   };
 
@@ -824,7 +895,10 @@ export default function StudioDashboard() {
       const res = await fetch("/api/jobs/youtube", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: youtubeUrl.trim() }),
+        body: JSON.stringify({
+          url: youtubeUrl.trim(),
+          campaign_id: selectedCampaignId,
+        }),
       });
 
       if (res.ok) {
@@ -940,13 +1014,16 @@ export default function StudioDashboard() {
 
   // Single Clip File Upload Handler
   const handleFileUpload = async (file: File) => {
+    if (!file) return;
     setIsUploading(true);
-    setUploadProgress(20);
+    setUploadProgress(25);
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("campaign_id", selectedCampaignId);
 
     try {
+      setUploadProgress(50);
       const res = await fetch("/api/jobs/upload", {
         method: "POST",
         body: formData,
@@ -959,7 +1036,8 @@ export default function StudioDashboard() {
         showToast(`Uploaded ${file.name} - Autopilot pipeline running!`);
         fetchData();
       } else {
-        alert("Upload failed. Please ensure the file is an MP4, MOV, or MKV.");
+        const errData = await res.json().catch(() => ({}));
+        alert(`Upload failed: ${errData.detail || "Please ensure the file is a valid video (MP4, MOV, MKV, WebM)."}`);
       }
     } catch (err) {
       alert("Error uploading video: " + err);
@@ -1138,13 +1216,48 @@ export default function StudioDashboard() {
               </span>
             </div>
             <p className="text-xs text-zinc-400">
-              One video at a time • Emotional metaphors • Stockpile footage • 9:16 vertical render
+              One video at a time • Autonomous AI Memes (Speed, Johnny Sins, CaseOh) • Stockpile footage • 9:16 vertical
             </p>
           </div>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
+          {/* Campaign Preset Selector */}
+          <div className="flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800 p-1 rounded-xl shadow-inner">
+            <div className="flex items-center gap-1 px-1.5 py-0.5">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Campaign:</span>
+              <select
+                value={selectedCampaignId}
+                onChange={(e) => setSelectedCampaignId(e.target.value)}
+                className="bg-zinc-900 border border-zinc-700/80 rounded-lg text-xs font-semibold text-zinc-100 px-2.5 py-1 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.id === "curious_mike" ? "🎯 Curious Mike ($1.25/1k)" : `⚡ ${c.name}`}
+                  </option>
+                ))}
+                {campaigns.length === 0 && (
+                  <>
+                    <option value="curious_mike">🎯 Curious Mike ($1.25/1k)</option>
+                    <option value="default">⚡ Default Viral Shorts</option>
+                  </>
+                )}
+              </select>
+            </div>
+            {selectedCampaignId === "curious_mike" && (
+              <button
+                type="button"
+                onClick={() => setShowMomentsModal(true)}
+                className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all"
+                title="Browse 50 pre-curated timestamped moments and 6 rules"
+              >
+                <Sparkles className="w-3 h-3 text-emerald-400" />
+                <span>50 Moments & Rules</span>
+              </button>
+            )}
+          </div>
+
           {/* Active Clip Switcher */}
           {jobs.length > 0 && (
             <div className="relative">
@@ -1220,27 +1333,41 @@ export default function StudioDashboard() {
             </div>
           )}
 
-          {/* Meme Studio Standalone Button */}
-          <button
-            onClick={openStandaloneMemeStudio}
-            className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-md shadow-fuchsia-600/20 transition-all hover:scale-[1.02]"
-            title="Browse all 1,036 HD Meme Templates and generate standalone vertical cutaways"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-fuchsia-200" />
-            <span>🎭 Meme Studio</span>
-          </button>
-
-          {/* New Clip Button */}
-          <button
-            onClick={() => {
-              setShowUploadMode(true);
-              setShowProjectPicker(false);
-            }}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all hover:scale-[1.02]"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Process New Clip
-          </button>
+          {/* Main Top Navigation Tabs */}
+          <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => {
+                setShowUploadMode(true);
+                setShowProjectPicker(false);
+              }}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                showUploadMode || !selectedJob
+                  ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload Video</span>
+            </button>
+            {selectedJob && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUploadMode(false);
+                  setShowProjectPicker(false);
+                }}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                  !showUploadMode
+                    ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>Editor & Cutaways</span>
+              </button>
+            )}
+          </div>
 
           {/* Re-render Master Video Button */}
           {selectedJob && !showUploadMode && (
@@ -1279,9 +1406,89 @@ export default function StudioDashboard() {
             </p>
           </div>
 
+          {/* Active Campaign Rules Banner */}
+          {selectedCampaignId === "curious_mike" ? (
+            <div className="max-w-2xl mx-auto bg-gradient-to-r from-zinc-950 via-emerald-950/20 to-zinc-950 border border-emerald-500/30 rounded-3xl p-5 text-left shadow-xl space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-lg shadow-inner">
+                    🎯
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-white">Curious Mike Clipping Campaign</h3>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                        $1.25 / 1k views • $7.5k Budget
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400">
+                      Client: Michael Porter Jr. • Trae Young Episode • 2,000 views min to qualify ($2.50 - $300/clip)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMomentsModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-md shadow-emerald-600/25 transition-all flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>50 Curated Moments & Rules</span>
+                </button>
+              </div>
+
+              {/* 6 Campaign Rules Checklist Badges */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-2 border-t border-zinc-800/80">
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
+                  <div className="text-[11px] font-bold text-emerald-400">Rule 1: Geo</div>
+                  <div className="text-[10px] text-zinc-400">40%+ US/CA/UK</div>
+                </div>
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
+                  <div className="text-[11px] font-bold text-emerald-400">Rule 2: Hook</div>
+                  <div className="text-[10px] text-zinc-400">1%+ Engagement</div>
+                </div>
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
+                  <div className="text-[11px] font-bold text-emerald-400">Rule 3: Real B-roll</div>
+                  <div className="text-[10px] text-zinc-400">0% AI Video (Max 33%)</div>
+                </div>
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
+                  <div className="text-[11px] font-bold text-emerald-400">Rule 4: Audio</div>
+                  <div className="text-[10px] text-zinc-400">Dialogue Only (No BGM)</div>
+                </div>
+                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
+                  <div className="text-[11px] font-bold text-emerald-400">Rule 5: Subtitles</div>
+                  <div className="text-[10px] text-zinc-400">Word-by-word Clean</div>
+                </div>
+                <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-xl p-2 text-center">
+                  <div className="text-[11px] font-bold text-emerald-300">Rule 6: Watermark</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">YT: @mpj (100%)</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-2xl mx-auto bg-zinc-950/70 border border-zinc-800 rounded-2xl p-3.5 text-left flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-lg">⚡</span>
+                <div>
+                  <h4 className="text-xs font-bold text-zinc-200">Default Viral Short-Form Preset</h4>
+                  <p className="text-[11px] text-zinc-400">
+                    High-velocity meme hooks (Speed, CaseOh, Jynxzi), phonk BGM with voice ducking, Hormozi kinetic captions.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCampaignId("curious_mike")}
+                className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 shrink-0 underline"
+              >
+                Switch to Curious Mike Campaign →
+              </button>
+            </div>
+          )}
+
           {/* Tab Selector: Upload File vs Import YouTube */}
           <div className="flex items-center justify-center gap-2 max-w-md mx-auto bg-zinc-950 p-1.5 rounded-2xl border border-zinc-800">
             <button
+              type="button"
               onClick={() => setUploadTab("file")}
               className={`flex-1 py-2 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
                 uploadTab === "file"
@@ -1293,6 +1500,7 @@ export default function StudioDashboard() {
               Upload Local Video
             </button>
             <button
+              type="button"
               onClick={() => setUploadTab("youtube")}
               className={`flex-1 py-2 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
                 uploadTab === "youtube"
@@ -1307,19 +1515,39 @@ export default function StudioDashboard() {
 
           {uploadTab === "file" ? (
             <div
-              onDragOver={(e) => e.preventDefault()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingFile(true);
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                setIsDraggingFile(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDraggingFile(false);
+              }}
               onDrop={(e) => {
                 e.preventDefault();
+                setIsDraggingFile(false);
                 if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
               }}
               onClick={() => fileInputRef.current?.click()}
-              className="max-w-2xl mx-auto border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10 rounded-3xl p-12 text-center cursor-pointer transition-all group shadow-inner"
+              className={`max-w-2xl mx-auto border-2 border-dashed rounded-3xl p-12 text-center cursor-pointer transition-all group shadow-inner ${
+                isDraggingFile
+                  ? "border-indigo-400 bg-indigo-500/20 scale-[1.01]"
+                  : "border-indigo-500/40 hover:border-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10"
+              }`}
             >
               <input
                 type="file"
                 ref={fileInputRef}
-                accept="video/mp4,video/quicktime,video/x-matroska"
+                accept="video/*,.mp4,.mov,.mkv,.webm,.avi"
                 className="hidden"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  (e.target as HTMLInputElement).value = "";
+                }}
                 onChange={(e) => {
                   if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
                 }}
@@ -1329,6 +1557,20 @@ export default function StudioDashboard() {
               </div>
               <h3 className="font-bold text-base text-zinc-100">Drop your raw MP4 or MOV here</h3>
               <p className="text-xs text-zinc-400 mt-1.5">Single-clip pipeline • Up to 500MB • Zero watermarks guarantee</p>
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-indigo-600/20 inline-flex items-center gap-2"
+                >
+                  <Upload className="w-4 h-4" />
+                  Browse Files
+                </button>
+              </div>
 
               {isUploading && (
                 <div className="mt-6 max-w-sm mx-auto space-y-2">
@@ -1463,14 +1705,22 @@ export default function StudioDashboard() {
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span>Clipper Video Studio</span>
-                    <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
-                      Viral Ready
-                    </span>
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-white">Clipper Video Studio</h3>
+                    {selectedJob.campaign_id === "curious_mike" ? (
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        🎯 Curious Mike Compliant
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                        Viral Ready
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-zinc-400">
-                    Alex Hormozi kinetic word-highlights • Royalty-Free BGM library • Voice sidechain auto-ducking
+                    {selectedJob.campaign_id === "curious_mike"
+                      ? "YT: @mpj Watermark Burned • Subtitle Safe-Zone Offset • Pure Dialogue (No BGM) • Real Footage Only"
+                      : "Alex Hormozi kinetic word-highlights • Royalty-Free BGM library • Voice sidechain auto-ducking"}
                   </p>
                 </div>
               </div>
@@ -1943,9 +2193,14 @@ export default function StudioDashboard() {
                         <span className="text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
                           ⚡ {shot.speed ? `${shot.speed}x` : (shot.style === "meme" ? "1.30x" : "1.25x")}
                         </span>
-                        {shot.style === "meme" && (
+                        {idx === 0 && (
+                          <span className="text-[10px] font-extrabold bg-gradient-to-r from-fuchsia-600/30 to-rose-600/30 text-fuchsia-300 border border-fuchsia-500/50 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                            🔥 Compulsory Hook Meme (0–5s)
+                          </span>
+                        )}
+                        {shot.style === "meme" && idx !== 0 && (
                           <span className="text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-                            🎭 Meme Cutaway
+                            🎭 Auto AI Meme: {shot.meme_template?.replace(/_/g, " ") || "Meme"}
                           </span>
                         )}
                       </div>
@@ -1960,15 +2215,28 @@ export default function StudioDashboard() {
                           <span>Swap Footage</span>
                         </button>
 
-                        {/* Convert to Meme / Edit Meme Button */}
-                        <button
-                          onClick={() => openMemeCustomizerForShot(shot)}
-                          className="text-[11px] font-semibold text-fuchsia-300 hover:text-white bg-fuchsia-500/15 hover:bg-fuchsia-600/30 border border-fuchsia-500/40 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all shadow-sm"
-                          title="Transform or customize this cutaway with any of 1,036 HD Meme templates"
-                        >
-                          <Sparkles className="w-3 h-3 text-fuchsia-400" />
-                          <span>{shot.style === "meme" ? "Edit Meme" : "Make Meme Cutaway"}</span>
-                        </button>
+                        {/* Autonomous AI Meme Button / Regenerate */}
+                        {shot.style === "meme" ? (
+                          <button
+                            disabled={isAutoGeneratingMeme[shot.shot_id]}
+                            onClick={() => handleAutoGenerateMeme(shot.shot_id)}
+                            className="text-[11px] font-semibold text-fuchsia-200 hover:text-white bg-fuchsia-600/25 hover:bg-fuchsia-600/40 border border-fuchsia-500/40 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                            title="Regenerate another unique AI meme tailored specifically to this dialogue quote"
+                          >
+                            <Sparkles className={`w-3 h-3 text-fuchsia-300 ${isAutoGeneratingMeme[shot.shot_id] ? "animate-spin" : ""}`} />
+                            <span>{isAutoGeneratingMeme[shot.shot_id] ? "Generating..." : "⚡ AI Regenerate Meme"}</span>
+                          </button>
+                        ) : (
+                          <button
+                            disabled={isAutoGeneratingMeme[shot.shot_id]}
+                            onClick={() => handleAutoGenerateMeme(shot.shot_id)}
+                            className="text-[11px] font-semibold text-fuchsia-300 hover:text-white bg-fuchsia-500/15 hover:bg-fuchsia-600/30 border border-fuchsia-500/40 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                            title="Autonomously create a unique meme cutaway tailored to this dialogue quote"
+                          >
+                            <Sparkles className={`w-3 h-3 text-fuchsia-400 ${isAutoGeneratingMeme[shot.shot_id] ? "animate-spin" : ""}`} />
+                            <span>{isAutoGeneratingMeme[shot.shot_id] ? "Creating Meme..." : "⚡ Auto AI Meme"}</span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => jumpToCutaway(shot.start_time)}
@@ -2301,21 +2569,34 @@ export default function StudioDashboard() {
                 <div className="text-xs text-indigo-200 truncate mr-3">
                   <span className="font-semibold text-indigo-400">Spoken Quote:</span> "{memeTargetShot.dialogue_quote}"
                 </div>
-                <button
-                  onClick={() => {
-                    const q = memeTargetShot.dialogue_quote || "";
-                    if (selectedTemplateKey === "stepped_in_shit") {
-                      setMemeCaptions({ shoe_text: q });
-                    } else if (selectedTemplateKey === "drake") {
-                      setMemeCaptions({ top_text: "Making Excuses", bottom_text: q });
-                    } else {
-                      setMemeCaptions({ caption: q });
-                    }
-                  }}
-                  className="text-[11px] font-semibold text-indigo-300 hover:text-white bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 px-2.5 py-1 rounded-lg shrink-0 transition-all"
-                >
-                  📋 Use as Caption
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    disabled={isAutoGeneratingMeme[memeTargetShot.shot_id]}
+                    onClick={async () => {
+                      await handleAutoGenerateMeme(memeTargetShot.shot_id);
+                      setShowMemeModal(false);
+                    }}
+                    className="text-[11px] font-semibold text-white bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 px-3 py-1 rounded-lg transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Sparkles className={`w-3.5 h-3.5 ${isAutoGeneratingMeme[memeTargetShot.shot_id] ? "animate-spin" : ""}`} />
+                    <span>{isAutoGeneratingMeme[memeTargetShot.shot_id] ? "Writing Meme..." : "🤖 Auto AI Meme"}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const q = memeTargetShot.dialogue_quote || "";
+                      if (selectedTemplateKey === "stepped_in_shit") {
+                        setMemeCaptions({ shoe_text: q });
+                      } else if (selectedTemplateKey === "drake") {
+                        setMemeCaptions({ top_text: "Making Excuses", bottom_text: q });
+                      } else {
+                        setMemeCaptions({ caption: q });
+                      }
+                    }}
+                    className="text-[11px] font-semibold text-indigo-300 hover:text-white bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 px-2.5 py-1 rounded-lg transition-all"
+                  >
+                    📋 Use as Caption
+                  </button>
+                </div>
               </div>
             )}
 
@@ -2762,8 +3043,12 @@ export default function StudioDashboard() {
                     <input
                       type="file"
                       ref={customVideoInputRef}
-                      accept="video/mp4,video/quicktime,video/x-matroska"
+                      accept="video/*,.mp4,.mov,.mkv,.webm,.avi"
                       className="hidden"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        (e.target as HTMLInputElement).value = "";
+                      }}
                       onChange={(e) => {
                         if (e.target.files?.[0]) handleCustomVideoUpload(e.target.files[0]);
                       }}
@@ -2773,6 +3058,19 @@ export default function StudioDashboard() {
                     <p className="text-xs text-zinc-400 mt-1">
                       Supports MP4, MOV. Will be automatically formatted to 1080x1920 9:16 vertical.
                     </p>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          customVideoInputRef.current?.click();
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/20 inline-flex items-center gap-1.5"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        Choose Video File
+                      </button>
+                    </div>
                     {isUploadingCustom && (
                       <p className="text-xs text-indigo-400 mt-3 animate-pulse">
                         Uploading and formatting video clip with FFmpeg...
@@ -2956,6 +3254,304 @@ export default function StudioDashboard() {
               >
                 <Scissors className={`w-3.5 h-3.5 ${isInsertingCutaway ? "animate-spin" : ""}`} />
                 <span>{isInsertingCutaway ? "Inserting Cutaway..." : "Insert Cutaway"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CURIOUS MIKE CAMPAIGN HUB & 50 CURATED MOMENTS MODAL */}
+      {showMomentsModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-emerald-500/40 rounded-3xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-lg shadow-inner">
+                  🎯
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white">Curious Mike Campaign Hub</h3>
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                      $1.25 / 1k Views • $7,500 Budget
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400">
+                    Host: Michael Porter Jr. (@curiousmike / @mpj) • Trae Young Episode • 2,000 views min to qualify
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMomentsModal(false)}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Inner Tabs: Moments Catalog vs Rules */}
+            <div className="px-5 py-3 border-b border-zinc-800 bg-zinc-950/40 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCuratedMomentsTab("moments")}
+                  className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
+                    curatedMomentsTab === "moments"
+                      ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                      : "text-zinc-400 hover:text-zinc-200 bg-zinc-900 border border-zinc-800"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>50 Curated Moments</span>
+                  <span className="text-[10px] bg-emerald-800/80 px-1.5 py-0.2 rounded-full font-mono">
+                    {campaigns.find((c) => c.id === "curious_mike")?.curated_moments?.length || 50}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCuratedMomentsTab("rules")}
+                  className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-2 transition-all ${
+                    curatedMomentsTab === "rules"
+                      ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                      : "text-zinc-400 hover:text-zinc-200 bg-zinc-900 border border-zinc-800"
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Campaign Rules & The No List</span>
+                </button>
+              </div>
+
+              {curatedMomentsTab === "moments" && (
+                <div className="relative max-w-xs w-full">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={momentSearchQuery}
+                    onChange={(e) => setMomentSearchQuery(e.target.value)}
+                    placeholder="Search moments (Trae, Knicks, AAU, pass)..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              {curatedMomentsTab === "moments" ? (
+                <div className="space-y-4">
+                  {/* Category Chips */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { key: "all", label: "All Moments" },
+                      { key: "debate", label: "⚔️ Debates & Controversies" },
+                      { key: "story", label: "📖 Stories & AAU Memories" },
+                      { key: "technique", label: "🏀 Skills & Technique" },
+                      { key: "take", label: "🔥 Hot Takes" },
+                    ].map((chip) => (
+                      <button
+                        key={chip.key}
+                        type="button"
+                        onClick={() => setMomentFilterAngle(chip.key)}
+                        className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all ${
+                          momentFilterAngle === chip.key
+                            ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm"
+                            : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {chip.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Moments Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {(
+                      campaigns.find((c) => c.id === "curious_mike")?.curated_moments || []
+                    )
+                      .filter((m) => {
+                        if (momentFilterAngle !== "all") {
+                          const angle = m.angle?.toLowerCase() || "";
+                          if (!angle.includes(momentFilterAngle)) return false;
+                        }
+                        if (!momentSearchQuery.trim()) return true;
+                        const q = momentSearchQuery.toLowerCase();
+                        return (
+                          m.moment_id.toLowerCase().includes(q) ||
+                          m.screen_hook.toLowerCase().includes(q) ||
+                          m.post_caption.toLowerCase().includes(q) ||
+                          (m.broll_theme && m.broll_theme.toLowerCase().includes(q))
+                        );
+                      })
+                      .map((m) => (
+                        <div
+                          key={m.moment_id}
+                          className="bg-zinc-950/80 border border-zinc-800/90 hover:border-emerald-500/50 rounded-2xl p-4 space-y-2.5 transition-all group flex flex-col justify-between"
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                                {m.moment_id}
+                              </span>
+                              <span className="font-mono text-[11px] text-zinc-400 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-zinc-500" />
+                                {m.timestamp_range} ({Math.round(m.end_time_sec - m.start_time_sec)}s)
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-bold text-zinc-100 group-hover:text-emerald-300 transition-colors">
+                              "{m.screen_hook}"
+                            </div>
+
+                            <p className="text-[11px] text-zinc-400 italic">
+                              "{m.post_caption}"
+                            </p>
+
+                            {m.broll_theme && (
+                              <div className="text-[10px] text-zinc-400 bg-zinc-900/80 rounded-lg p-2 border border-zinc-800/60">
+                                <span className="font-semibold text-zinc-300">Suggested B-roll:</span> {m.broll_theme}
+                              </div>
+                            )}
+
+                            {m.broll_sources && m.broll_sources.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {m.broll_sources.map((s, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="text-[9px] font-medium bg-zinc-900 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-800"
+                                  >
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="pt-2 border-t border-zinc-900 flex items-center justify-between">
+                            <span className="text-[10px] text-emerald-500 font-medium">
+                              {m.angle ? `Angle: ${m.angle}` : "Curated Moment"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(
+                                  `Moment ${m.moment_id} (${m.timestamp_range})\nHook: ${m.screen_hook}\nCaption: ${m.post_caption}`
+                                );
+                                showToast(`Selected Moment ${m.moment_id}! Hook & timestamps copied to clipboard.`);
+                                setShowMomentsModal(false);
+                                setShowUploadMode(true);
+                              }}
+                              className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-all flex items-center gap-1"
+                            >
+                              <span>Use This Moment</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5 text-left max-w-4xl mx-auto">
+                  {/* Payout specs table */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 text-center">
+                      <div className="text-[10px] uppercase font-bold text-zinc-400">Payout Rate</div>
+                      <div className="text-base font-extrabold text-emerald-400 mt-0.5">$1.25</div>
+                      <div className="text-[10px] text-zinc-500">per 1,000 views</div>
+                    </div>
+                    <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 text-center">
+                      <div className="text-[10px] uppercase font-bold text-zinc-400">Total Bounty</div>
+                      <div className="text-base font-extrabold text-white mt-0.5">$7,500</div>
+                      <div className="text-[10px] text-zinc-500">~6M views pool</div>
+                    </div>
+                    <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 text-center">
+                      <div className="text-[10px] uppercase font-bold text-zinc-400">Cap Per Clip</div>
+                      <div className="text-base font-extrabold text-white mt-0.5">$300 Max</div>
+                      <div className="text-[10px] text-zinc-500">240,000 views</div>
+                    </div>
+                    <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 text-center">
+                      <div className="text-[10px] uppercase font-bold text-zinc-400">Min to Qualify</div>
+                      <div className="text-base font-extrabold text-amber-400 mt-0.5">2,000 Views</div>
+                      <div className="text-[10px] text-zinc-500">pays $2.50+</div>
+                    </div>
+                  </div>
+
+                  {/* The 6 Golden Rules */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      The 6 Rules Every Clip Must Pass
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 space-y-1">
+                        <div className="text-xs font-bold text-emerald-300">Rule 1: 40%+ US, Canada, UK Geo</div>
+                        <p className="text-[11px] text-zinc-400">
+                          Post between 12pm-9pm Eastern. Use English text hooks and American sports context so algorithms target NBA viewers.
+                        </p>
+                      </div>
+                      <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 space-y-1">
+                        <div className="text-xs font-bold text-emerald-300">Rule 2: 1%+ Engagement (Debates)</div>
+                        <p className="text-[11px] text-zinc-400">
+                          Frame hot takes where viewers fight in comments. Comment fights push clips to 100k+ views.
+                        </p>
+                      </div>
+                      <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 space-y-1">
+                        <div className="text-xs font-bold text-emerald-300">Rule 3: 0% AI Video & Real B-Roll Only</div>
+                        <p className="text-[11px] text-zinc-400">
+                          Zero AI video or Opus clips allowed. Autopilot only uses authentic NBA/sports footage capped at 33% total duration.
+                        </p>
+                      </div>
+                      <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 space-y-1">
+                        <div className="text-xs font-bold text-emerald-300">Rule 4: Pure Dialogue (No Phonk/BGM)</div>
+                        <p className="text-[11px] text-zinc-400">
+                          Submissions with phonk music or loud tracks get rejected. Autopilot automatically disables background music.
+                        </p>
+                      </div>
+                      <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-3.5 space-y-1">
+                        <div className="text-xs font-bold text-emerald-300">Rule 5: Burned-in Word-by-Word Subtitles</div>
+                        <p className="text-[11px] text-zinc-400">
+                          High contrast, perfectly spelled, safe-zone elevated subtitles so they never obscure the platform buttons or watermark.
+                        </p>
+                      </div>
+                      <div className="bg-zinc-950/80 border border-emerald-500/40 rounded-2xl p-3.5 space-y-1 bg-emerald-950/20">
+                        <div className="text-xs font-bold text-emerald-300">Rule 6: Mandatory YT: @mpj Watermark</div>
+                        <p className="text-[11px] text-zinc-400">
+                          Autopilot automatically composites the official high-resolution YT: @mpj watermark across 100% of video duration.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* The Instant Rejection List */}
+                  <div className="bg-rose-950/20 border border-rose-500/30 rounded-2xl p-4 space-y-2">
+                    <h4 className="text-xs font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      Instant Rejections ("The No List")
+                    </h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] text-zinc-300">
+                      <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Reposting MPJ's socials</div>
+                      <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Phonk or BGM music</div>
+                      <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ AI video / avatars</div>
+                      <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Aura / glow / skull edits</div>
+                      <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Low-effort uncut clips</div>
+                      <div className="bg-zinc-950/60 rounded-lg p-2 border border-rose-500/40 text-rose-300">❌ Missing @mpj watermark</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
+              <span className="text-xs text-zinc-500">
+                AI B-Roll Autopilot • Curious Mike Campaign Engine Active
+              </span>
+              <button
+                onClick={() => setShowMomentsModal(false)}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-5 py-2 rounded-xl transition-all shadow-md shadow-emerald-600/30"
+              >
+                Close Hub
               </button>
             </div>
           </div>

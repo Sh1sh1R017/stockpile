@@ -70,6 +70,7 @@ class DriveConfigUpdate(BaseModel):
 
 class YouTubeJobRequest(BaseModel):
     url: str = Field(..., description="YouTube video or Shorts URL to download and process")
+    campaign_id: Optional[str] = Field("default", description="Target campaign preset (e.g. curious_mike or default)")
 
 
 class MemeGenerateRequest(BaseModel):
@@ -209,6 +210,7 @@ async def list_jobs(limit: int = 50):
             "emotional_summary": emotional_summary,
             "drive_file_url": j.drive_file_url,
             "review_data": j.review_data,
+            "campaign_id": getattr(j, "campaign_id", "default"),
         })
     return res
 
@@ -279,6 +281,7 @@ async def get_job_detail(job_id: str):
         "has_video": has_video,
         "drive_file_url": job.drive_file_url,
         "survey_data": survey_data,
+        "campaign_id": getattr(job, "campaign_id", "default"),
     }
 
 
@@ -517,7 +520,10 @@ async def clear_all_jobs_endpoint():
 
 
 @app.post("/api/jobs/upload")
-async def upload_video(file: UploadFile = File(...)):
+async def upload_video(
+    file: UploadFile = File(...),
+    campaign_id: Optional[str] = Form("default"),
+):
     """Upload a raw video file, save to input/, and enqueue for autopilot processing."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -536,15 +542,16 @@ async def upload_video(file: UploadFile = File(...)):
     with open(target_file, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    logger.info(f"Uploaded file saved to: {target_file}")
+    logger.info(f"Uploaded file saved to: {target_file} (Campaign: {campaign_id})")
 
     # Enqueue job
-    job_id = await orchestrator.enqueue_file(str(target_file))
+    job_id = await orchestrator.enqueue_file(str(target_file), campaign_id=campaign_id or "default")
 
     return {
         "status": "queued",
         "job_id": job_id,
         "filename": target_file.name,
+        "campaign_id": campaign_id or "default",
         "message": f"Successfully uploaded and enqueued {target_file.name}",
     }
 
@@ -556,7 +563,8 @@ async def import_youtube_video(req: YouTubeJobRequest):
     if not url:
         raise HTTPException(status_code=400, detail="YouTube URL is required")
 
-    logger.info(f"Importing YouTube video from URL: {url}")
+    target_campaign = req.campaign_id or "default"
+    logger.info(f"Importing YouTube video from URL: {url} (Campaign: {target_campaign})")
     loop = asyncio.get_event_loop()
 
     def _download_yt():
@@ -585,17 +593,59 @@ async def import_youtube_video(req: YouTubeJobRequest):
             raise HTTPException(status_code=500, detail="Failed to download YouTube video")
 
         logger.info(f"YouTube video downloaded to: {downloaded_file}")
-        job_id = await orchestrator.enqueue_file(str(downloaded_file))
+        job_id = await orchestrator.enqueue_file(str(downloaded_file), campaign_id=target_campaign)
 
         return {
             "status": "queued",
             "job_id": job_id,
             "filename": downloaded_file.name,
+            "campaign_id": target_campaign,
             "message": f"Successfully imported and enqueued {downloaded_file.name}",
         }
     except Exception as e:
         logger.error(f"Error importing YouTube video: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to import YouTube video: {str(e)}")
+
+
+@app.get("/api/campaigns")
+async def list_campaigns():
+    """List all available clipping campaigns with configuration metadata."""
+    from ai_broll_autopilot.campaigns import campaign_registry
+    campaigns = campaign_registry.list_campaigns()
+    return [c.to_dict() for c in campaigns]
+
+
+@app.get("/api/campaigns/{campaign_id}")
+async def get_campaign_detail(campaign_id: str):
+    """Retrieve full details, rules checklist, and curated moments for a specific campaign."""
+    from ai_broll_autopilot.campaigns import campaign_registry
+    c = campaign_registry.get_campaign(campaign_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return c.to_dict()
+
+
+@app.get("/api/campaigns/{campaign_id}/moments")
+async def get_campaign_moments(campaign_id: str):
+    """Retrieve pre-curated timestamped moments for a campaign."""
+    from ai_broll_autopilot.campaigns import campaign_registry
+    c = campaign_registry.get_campaign(campaign_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return [
+        {
+            "moment_id": m.moment_id,
+            "timestamp_range": m.timestamp_range,
+            "start_time_sec": m.start_time_sec,
+            "end_time_sec": m.end_time_sec,
+            "screen_hook": m.screen_hook,
+            "post_caption": m.post_caption,
+            "broll_theme": m.broll_theme,
+            "broll_sources": m.broll_sources,
+            "angle": m.angle,
+        }
+        for m in c.curated_moments
+    ]
 
 
 @app.post("/api/feedback")
@@ -1000,6 +1050,54 @@ async def update_shot_to_meme(job_id: str, shot_id: str, req: ShotMemeRequest):
     }
 
 
+@app.post("/api/jobs/{job_id}/shots/{shot_id}/auto-meme")
+async def auto_generate_shot_meme(job_id: str, shot_id: str):
+    """Autonomously analyze dialogue and generate a 100% unique meme cutaway tailored to this shot."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.edit_plan or not isinstance(job.edit_plan, dict) or "shots" not in job.edit_plan:
+        raise HTTPException(status_code=400, detail="Job has no edit plan")
+
+    target_shot = None
+    for s in job.edit_plan["shots"]:
+        if s.get("shot_id") == shot_id:
+            target_shot = s
+            break
+
+    if not target_shot:
+        raise HTTPException(status_code=404, detail=f"Shot '{shot_id}' not found in job")
+
+    from ai_broll_autopilot.services.meme_engine import MemeEngine
+    engine = MemeEngine()
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    dur = float(target_shot.get("duration", (target_shot.get("end_time", 3.0) - target_shot.get("start_time", 0.0))))
+
+    # Automatically generate 100% unique meme archetype and witty captions for this shot
+    full_context = job.transcript_text or ""
+    target_shot["style"] = "meme"
+    target_shot = engine.generate_unique_contextual_meme(target_shot, full_context)
+    target_shot["duration"] = dur
+
+    updated_shot = engine.create_meme_broll(target_shot, work_dir, duration=dur)
+    db.save_job(job)
+
+    # Attach preview URLs
+    sc = dict(updated_shot)
+    sc["video_url"] = f"/api/jobs/{job.job_id}/broll/{shot_id}"
+    sc["thumbnail_url"] = f"/api/jobs/{job.job_id}/broll/{shot_id}/thumb"
+    if sc.get("contextual_sfx") and "file" in sc["contextual_sfx"]:
+        sc["contextual_sfx"]["audio_url"] = f"/api/sfx/{sc['contextual_sfx']['file']}"
+
+    return {
+        "status": "success",
+        "job_id": job_id,
+        "shot": sc
+    }
+
+
 # =========================================================================
 # Editor Refinement Endpoints: Stock Search, Swap, Trim, Insert, BGM & Subs
 # =========================================================================
@@ -1278,9 +1376,38 @@ async def rerender_job_video(job_id: str):
     work_dir.mkdir(parents=True, exist_ok=True)
     rendered_video = work_dir / f"rendered_{job.source_filename}"
 
+    raw_shots = job.edit_plan.get("shots", [])
+
+    # Compulsory check: ensure Shot 1 (first 5 seconds) is a meme cutaway and has a valid rendered video asset
+    from ai_broll_autopilot.services.meme_engine import MemeEngine
+    meme_engine = MemeEngine()
+    if raw_shots:
+        shot_0 = raw_shots[0]
+        curr_p = str(shot_0.get("asset_path", "")).lower()
+        if shot_0.get("style") != "meme" or not curr_p or "pexels" in curr_p or not os.path.exists(shot_0.get("asset_path", "")):
+            logger.info(f"Rerender enforcing compulsory first 5s meme on [{shot_0.get('shot_id')}]...")
+            shot_0["style"] = "meme"
+            if float(shot_0.get("start_time", 0)) > 2.0:
+                shot_0["start_time"] = 1.2
+            shot_0["duration"] = min(2.2, max(1.5, float(shot_0.get("duration", 2.0))))
+            shot_0["end_time"] = round(shot_0["start_time"] + shot_0["duration"], 2)
+            shot_0 = MemeEngine.generate_unique_contextual_meme(shot_0, job.transcript_text or "", client=None)
+            shot_0 = meme_engine.create_meme_broll(shot_0, work_dir, duration=shot_0.get("duration", 2.0))
+            raw_shots[0] = shot_0
+            logger.info(f"Compulsory first 5s meme rendered: {shot_0.get('asset_path')}")
+
+    # Also guarantee any other meme shot in the plan has its video asset rendered
+    for idx, s in enumerate(raw_shots):
+        if s.get("style") == "meme":
+            s_asset = s.get("asset_path")
+            if not s_asset or not os.path.exists(s_asset) or "pexels" in str(s_asset).lower():
+                s = meme_engine.create_meme_broll(s, work_dir, duration=s.get("duration", 2.0))
+                raw_shots[idx] = s
+
     # Plan transitions and stingers for shots
-    shots = await trans_engine.plan_transitions(job.edit_plan["shots"])
+    shots = await trans_engine.plan_transitions(raw_shots)
     job.edit_plan["shots"] = shots
+    db.save_job(job)
 
     settings = job.edit_plan.get("render_settings", {})
     sub_enabled = settings.get("subtitles_enabled", True)

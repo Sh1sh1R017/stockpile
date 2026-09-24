@@ -46,7 +46,10 @@ async def cmd_run(args):
 
     console.print(f"[bold green]Starting AI B-Roll Autopilot for:[/bold green] {video_path.name}")
     orchestrator = Orchestrator()
-    job = Job.create(str(video_path))
+    campaign_id = getattr(args, "campaign", "default")
+    job = Job.create(str(video_path), campaign_id=campaign_id)
+    if getattr(args, "moment", None):
+        job.moment_id = args.moment
     orchestrator.db.save_job(job)
 
     # Process job directly
@@ -167,6 +170,8 @@ def main():
     # run command
     p_run = subparsers.add_parser("run", help="Process a video file end-to-end")
     p_run.add_argument("video_file", help="Path to input video file")
+    p_run.add_argument("--campaign", type=str, default="default", help="Campaign preset ID (e.g. curious_mike)")
+    p_run.add_argument("--moment", type=str, default=None, help="Curated moment ID (e.g. C04)")
 
     # watch command
     p_watch = subparsers.add_parser("watch", help="Start background input folder watcher")

@@ -74,6 +74,19 @@ class SubtitleEngine:
             "shadow_offset": 2.0,
             "uppercase": False,
             "words_per_group": 4,
+        },
+        "curious_clean": {
+            "name": "Curious Mike Benchmark (Yellow Badge)",
+            "active_color": "&H0014D5E9&",    # Bright Canary Yellow in BGR (&HAABBGGRR)
+            "inactive_color": "&H00FFFFFF&",  # Pure crisp white
+            "outline_color": "&H00000000&",   # Dark outline for legibility
+            "font_name": "Arial Black",       # Heavy punchy sans
+            "font_size": 54,
+            "outline_width": 3.5,
+            "shadow_offset": 2.0,
+            "uppercase": True,
+            "words_per_group": 3,
+            "box_badge": True,
         }
     }
 
@@ -87,21 +100,26 @@ class SubtitleEngine:
         output_path: Path,
         style_preset: str = "hormozi",
         position: str = "bottom",
+        custom_margin_v: Optional[int] = None,
+        hook_text: Optional[str] = None,
+        hook_duration: Optional[float] = None,
+        suppress_hook: bool = False,
+        text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Path:
-        """Generate an .ass file with kinetic active-word highlighting."""
+        """Generate an .ass file with kinetic active-word highlighting and optional Level 3 emphasis graphics."""
         cfg = self.PRESETS.get(style_preset.lower(), self.PRESETS["hormozi"])
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Alignment: 2 = bottom-center, 5 = middle-center, 8 = top-center
-        margin_v = 280
+        margin_v = custom_margin_v if custom_margin_v is not None else 280
         align = 2
         if position == "center":
             align = 5
             margin_v = 0
         elif position == "top":
             align = 8
-            margin_v = 280
+            margin_v = custom_margin_v if custom_margin_v is not None else 280
 
         header = f"""[Script Info]
 ScriptType: v4.00+
@@ -112,12 +130,32 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Kinetic,{cfg['font_name']},{cfg['font_size']},{cfg['inactive_color']},{cfg['active_color']},{cfg['outline_color']},&H80000000,-1,0,0,0,100,100,1,0,1,{cfg['outline_width']},{cfg['shadow_offset']},{align},40,40,{margin_v},1
+Style: Hook,Impact,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5.0,2.5,8,40,40,160,1
+Style: Level3Yellow,Arial Black,110,&H0014D5E9&,&H0014D5E9&,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,8.0,4.0,5,40,40,0,1
+Style: Level3Pink,Arial Black,110,&H005500FF&,&H005500FF&,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,8.0,4.0,5,40,40,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
         events = []
+        if not suppress_hook and hook_text and hook_text.strip():
+            h_dur = hook_duration if hook_duration else 45.0
+            h_start = "0:00:00.00"
+            h_end = format_ass_timestamp(h_dur)
+            clean_hook = hook_text.strip().upper()
+            events.append(f"Dialogue: 1,{h_start},{h_end},Hook,,0,0,0,,{clean_hook}")
+
+        if text_emphasis_events:
+            for ev in text_emphasis_events:
+                st = format_ass_timestamp(float(ev["start_time"]))
+                et = format_ass_timestamp(float(ev["start_time"]) + float(ev.get("duration", 1.2)))
+                style_name = "Level3Pink" if ev.get("color") == "pink" else "Level3Yellow"
+                raw_text = ev.get("text", "").strip()
+                clean_text = raw_text.replace("\n", "\\N")
+                anim = "{\\fscx85\\fscy85\\t(0,120,\\fscx115\\fscy115)\\t(120,240,\\fscx100\\fscy100)}"
+                events.append(f"Dialogue: 2,{st},{et},{style_name},,0,0,0,,{anim}{clean_text}")
+
         words_per_group = cfg["words_per_group"]
 
         # Flatten word stream
@@ -174,18 +212,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
                 # Format text with previous words, active word, and next words
                 formatted_words = []
+                is_box_badge = cfg.get("box_badge", False)
                 for idx, item in enumerate(group):
                     word_str = item["word"].upper() if cfg["uppercase"] else item["word"]
                     if idx == active_idx:
-                        # Highlighted active word with scale pop
-                        formatted_words.append(
-                            f"{{\\c{cfg['active_color']}\\fscx108\\fscy108}}{word_str}{{\\c{cfg['inactive_color']}\\fscx100\\fscy100}}"
-                        )
+                        if is_box_badge:
+                            # Signature Curious Mike yellow filled badge with black text
+                            formatted_words.append(
+                                f"{{\\1c&H00000000&\\3c{cfg['active_color']}\\bord20\\fscx104\\fscy104}} {word_str} "
+                                f"{{\\1c{cfg['inactive_color']}\\3c{cfg['outline_color']}\\bord{cfg['outline_width']}\\fscx100\\fscy100}}"
+                            )
+                        else:
+                            # Highlighted active word with scale pop
+                            formatted_words.append(
+                                f"{{\\c{cfg['active_color']}\\fscx108\\fscy108}}{word_str}{{\\c{cfg['inactive_color']}\\fscx100\\fscy100}}"
+                            )
                     else:
                         formatted_words.append(word_str)
 
                 line_text = " ".join(formatted_words)
                 events.append(f"Dialogue: 0,{start_str},{end_str},Kinetic,,0,0,0,,{line_text}")
+
+        # Sort all dialogue events chronologically so libass streams them without skipping
+        def _get_start_sec(line: str) -> float:
+            try:
+                tokens = line.split(",")
+                t_str = tokens[1].strip()
+                h, m, sc = t_str.split(":")
+                s, c = sc.split(".")
+                return int(h) * 3600 + int(m) * 60 + int(s) + int(c) / 100.0
+            except Exception:
+                return 0.0
+
+        events.sort(key=_get_start_sec)
 
         full_ass = header + "\n".join(events) + "\n"
         output_path.write_text(full_ass, encoding="utf-8")
