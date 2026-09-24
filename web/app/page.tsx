@@ -269,6 +269,10 @@ export default function StudioDashboard() {
   const [hdrAvailable, setHdrAvailable] = useState<boolean>(false);
   const [hdrMeta, setHdrMeta] = useState<any>(null);
 
+  // OpenReel Integration State
+  const [isOpenReelExporting, setIsOpenReelExporting] = useState<boolean>(false);
+  const [openReelModalData, setOpenReelModalData] = useState<any>(null);
+
   // Campaigns & Curated Moments State
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("curious_mike");
@@ -617,6 +621,37 @@ export default function StudioDashboard() {
       alert("Error re-rendering: " + err);
     } finally {
       setIsRerenderingMaster(false);
+    }
+  };
+
+  const handleExportToOpenReel = async () => {
+    if (!selectedJob || !selectedJob.edit_plan) {
+      alert("No active edit plan to export to OpenReel.");
+      return;
+    }
+    setIsOpenReelExporting(true);
+    showToast("Exporting non-destructive OpenReel project (.oreel)...");
+    try {
+      const res = await fetch("/api/export-openreel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          edit_plan: selectedJob.edit_plan,
+          project_name: selectedJob.filename || "Stockpile Edit",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOpenReelModalData(data);
+        showToast("🎬 Project exported to OpenReel Schema 1.2.0!");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Export failed: ${err.detail || "Server error"}`);
+      }
+    } catch (e) {
+      alert("Error exporting to OpenReel: " + e);
+    } finally {
+      setIsOpenReelExporting(false);
     }
   };
 
@@ -1756,6 +1791,17 @@ export default function StudioDashboard() {
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isRerenderingMaster ? "animate-spin" : ""}`} />
                   <span>{isRerenderingMaster ? "Burning Subtitles & BGM..." : "⚡ Re-render Master Edit"}</span>
+                </button>
+
+                {/* Open in OpenReel Button */}
+                <button
+                  onClick={handleExportToOpenReel}
+                  disabled={isOpenReelExporting}
+                  className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02]"
+                  title="Export non-destructive multitrack project to OpenReel Schema 1.2.0 (.oreel)"
+                >
+                  <Film className={`w-3.5 h-3.5 ${isOpenReelExporting ? "animate-spin" : ""}`} />
+                  <span>{isOpenReelExporting ? "Exporting OpenReel..." : "🎬 Open in OpenReel"}</span>
                 </button>
               </div>
             </div>
@@ -3709,6 +3755,55 @@ export default function StudioDashboard() {
               >
                 <Sparkles className={`w-3.5 h-3.5 ${isUpscalingHdr ? "animate-spin" : ""}`} />
                 <span>{isUpscalingHdr ? `Upscaling (${hdrProgress.toFixed(0)}%)...` : "⚡ Start SDR2HDR Upscale"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OPENREEL EXPORT SUCCESS MODAL */}
+      {openReelModalData && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-indigo-500/40 rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Film className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-sm text-white">OpenReel Project Exported (.oreel)</h3>
+              </div>
+              <button
+                onClick={() => setOpenReelModalData(null)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-zinc-300">
+              <p>Your edit plan has been compiled into a native OpenReel Schema 1.2.0 non-destructive multitrack project.</p>
+              
+              <div className="bg-black/60 rounded-xl p-3 border border-zinc-800 space-y-1 font-mono text-[11px]">
+                <div className="text-indigo-300 font-bold">Files Generated:</div>
+                <div className="text-zinc-400 truncate">.oreel: {openReelModalData.files?.oreel}</div>
+                <div className="text-zinc-400 truncate">Manifest: {openReelModalData.files?.manifest}</div>
+                <div className="text-zinc-400 truncate">Edit Plan: {openReelModalData.files?.plan}</div>
+              </div>
+
+              <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 text-[11px] space-y-1">
+                <div className="font-bold text-indigo-200">How to open in OpenReel Editor:</div>
+                <ol className="list-decimal list-inside space-y-1 text-zinc-300">
+                  <li>Start OpenReel web app (<code className="text-indigo-300">pnpm --filter @openreel/web dev</code>).</li>
+                  <li>In OpenReel, select <strong>File → Open Project</strong> and choose the <code className="text-indigo-300">project.oreel</code> file.</li>
+                  <li>All timeline tracks (Speaker A-Roll, B-Roll cutaways, subtitles, and audio) remain 100% editable!</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setOpenReelModalData(null)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all"
+              >
+                Done
               </button>
             </div>
           </div>

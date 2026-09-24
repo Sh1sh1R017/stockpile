@@ -26,6 +26,14 @@ from ai_broll_autopilot.services.learning import FeedbackLearningEngine
 from ai_broll_autopilot.services.drive_sync import drive_sync_service
 from ai_broll_autopilot.services.pexels import pexels_service
 from ai_broll_autopilot.services.nle_exporter import NLEExporter
+from ai_broll_autopilot.niches import niche_registry
+from ai_broll_autopilot.styles import style_registry
+from ai_broll_autopilot.services.niche_detector import niche_detector, content_analyzer
+from ai_broll_autopilot.services.clip_detector import clip_detector
+from ai_broll_autopilot.services.edit_director import edit_director, EditPlan
+from ai_broll_autopilot.services.openreel_adapter import openreel_adapter
+from ai_broll_autopilot.services.broll_library import broll_library, extract_media_metadata
+from ai_broll_autopilot.services.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -1612,6 +1620,182 @@ async def get_sfx_catalog():
         return []
     with open(catalog_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+# =====================================================================
+# STOCKPILE → OPENREEL INTELLIGENCE & EDIT PLANNING ENDPOINTS
+# =====================================================================
+
+class NicheAnalyzeRequest(BaseModel):
+    transcript_text: str
+    title: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class DetectClipsRequest(BaseModel):
+    transcript_segments: List[Dict[str, Any]]
+    video_duration: float
+    target_clip_count: Optional[int] = 5
+    min_duration: Optional[float] = 25.0
+    max_duration: Optional[float] = 75.0
+    niche_id: Optional[str] = None
+
+
+class PlanEditRequest(BaseModel):
+    source_media: Dict[str, Any]
+    transcript_segments: List[Dict[str, Any]]
+    clip_candidate: Optional[Dict[str, Any]] = None
+    in_point: Optional[float] = None
+    out_point: Optional[float] = None
+    niche_id: Optional[str] = None
+    style_id: Optional[str] = None
+    custom_hook: Optional[str] = None
+
+
+class ExportOpenReelRequest(BaseModel):
+    edit_plan: Dict[str, Any]
+    project_name: Optional[str] = None
+    output_folder: Optional[str] = None
+    resolved_broll_map: Optional[Dict[str, str]] = None
+
+
+class LibraryIndexRequest(BaseModel):
+    directory_path: str
+    niche_id: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@app.get("/api/niches")
+async def get_niches():
+    """Retrieve all available content niche profiles."""
+    return [p.to_dict() for p in niche_registry.list_profiles()]
+
+
+@app.get("/api/styles")
+async def get_styles():
+    """Retrieve all available visual style profiles for OpenReel."""
+    return [s.to_dict() for s in style_registry.list_styles()]
+
+
+@app.post("/api/analyze-niche")
+async def analyze_niche_endpoint(req: NicheAnalyzeRequest):
+    """Classify video content into a content niche and extract structural understanding."""
+    res = await niche_detector.detect_niche(
+        transcript_text=req.transcript_text,
+        title=req.title,
+        metadata=req.metadata,
+    )
+    return res.to_dict()
+
+
+@app.post("/api/detect-clips")
+async def detect_clips_endpoint(req: DetectClipsRequest):
+    """Extract viral short clips from long-form content using 9-factor scoring."""
+    clips = await clip_detector.detect_clips(
+        transcript_segments=req.transcript_segments,
+        video_duration=req.video_duration,
+        target_clip_count=req.target_clip_count or 5,
+        min_duration=req.min_duration or 25.0,
+        max_duration=req.max_duration or 75.0,
+        niche_id=req.niche_id,
+    )
+    return [c.to_dict() for c in clips]
+
+
+@app.post("/api/plan-edit")
+async def plan_edit_endpoint(req: PlanEditRequest):
+    """Generate declarative, non-destructive Edit Plan."""
+    cand = None
+    if req.clip_candidate:
+        from ai_broll_autopilot.services.clip_detector import ClipCandidate
+        c = req.clip_candidate
+        cand = ClipCandidate(
+            id=c.get("id", "clip_01"),
+            start_time=c.get("start_time", 0.0),
+            end_time=c.get("end_time", req.source_media.get("duration", 30.0)),
+            duration=c.get("duration", 30.0),
+            title=c.get("title", "Clip"),
+            hook_text=c.get("hook_text", ""),
+            summary=c.get("summary", ""),
+            viral_score=c.get("viral_score", 80.0),
+            factor_scores=c.get("factor_scores", {}),
+            rationale=c.get("rationale", ""),
+            suggested_broll_topics=c.get("suggested_broll_topics", []),
+            tags=c.get("tags", []),
+        )
+
+    plan = await edit_director.plan_edit(
+        source_media=req.source_media,
+        transcript_segments=req.transcript_segments,
+        clip_candidate=cand,
+        in_point=req.in_point,
+        out_point=req.out_point,
+        niche_id=req.niche_id,
+        style_id=req.style_id,
+        custom_hook=req.custom_hook,
+    )
+    return plan.to_dict()
+
+
+@app.post("/api/export-openreel")
+async def export_openreel_endpoint(req: ExportOpenReelRequest):
+    """Export EditPlan as OpenReel Schema 1.2.0 project (.oreel / project.json)."""
+    p_data = req.edit_plan
+    plan = EditPlan(
+        plan_id=p_data.get("plan_id", "plan_01"),
+        title=p_data.get("title", "OpenReel Project"),
+        target_duration=p_data.get("target_duration", 30.0),
+        source_media=p_data.get("source_media", {}),
+        clip_interval=p_data.get("clip_interval", {"in_point": 0.0, "out_point": 30.0}),
+        niche=p_data.get("niche", {}),
+        style=p_data.get("style", {}),
+        shots=p_data.get("shots", []),
+        text_overlays=p_data.get("text_overlays", []),
+        subtitles=p_data.get("subtitles", []),
+        zooms=p_data.get("zooms", []),
+        audio_cues=p_data.get("audio_cues", {}),
+    )
+
+    out_folder = Path(req.output_folder) if req.output_folder else (Config.OUTPUT_DIR / "openreel_projects" / plan.plan_id)
+    files = openreel_adapter.export_project_files(
+        edit_plan=plan,
+        output_dir=out_folder,
+        resolved_broll_map=req.resolved_broll_map,
+    )
+
+    manifest_json = {}
+    if files["manifest"].exists():
+        with open(files["manifest"], "r", encoding="utf-8") as f:
+            manifest_json = json.load(f)
+
+    return {
+        "status": "success",
+        "plan_id": plan.plan_id,
+        "files": {k: str(v) for k, v in files.items()},
+        "manifest": manifest_json,
+        "openreel_payload": openreel_adapter.create_openreel_project(plan, resolved_broll_map=req.resolved_broll_map),
+    }
+
+
+@app.get("/api/library")
+async def get_library_endpoint(niche_id: Optional[str] = None, limit: int = 50):
+    """Retrieve cataloged B-roll assets and statistics."""
+    stats = broll_library.get_stats()
+    assets = broll_library.list_assets(niche_id=niche_id, limit=limit)
+    return {
+        "stats": stats,
+        "assets": assets,
+    }
+
+
+@app.post("/api/library/index")
+async def index_library_endpoint(req: LibraryIndexRequest):
+    """Index video files from a local directory into the B-roll library."""
+    p = Path(req.directory_path)
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=400, detail="Directory not found")
+    count = broll_library.index_directory(p, niche_id=req.niche_id, tags=req.tags)
+    return {"status": "indexed", "count": count, "stats": broll_library.get_stats()}
 
 
 # Standalone runner

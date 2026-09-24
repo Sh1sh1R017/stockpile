@@ -31,5 +31,6 @@ scratch/
 test_email.py
 detected_segments.txt
 clips/
+openreel/
 *.pyc
 __pycache__/

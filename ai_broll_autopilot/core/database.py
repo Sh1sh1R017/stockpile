@@ -73,9 +73,30 @@ class Database:
                 prompt TEXT,
                 duration REAL,
                 score INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                niche_id TEXT DEFAULT 'generic',
+                tags TEXT DEFAULT '[]',
+                width INTEGER,
+                height INTEGER,
+                fps REAL,
+                description TEXT
             )
             """)
+
+            # Graceful migrations for broll_assets
+            for col, col_type in [
+                ("niche_id", "TEXT DEFAULT 'generic'"),
+                ("tags", "TEXT DEFAULT '[]'"),
+                ("width", "INTEGER"),
+                ("height", "INTEGER"),
+                ("fps", "REAL"),
+                ("description", "TEXT"),
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE broll_assets ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass
+
             conn.commit()
 
     def save_job(self, job: Job):
@@ -183,17 +204,124 @@ class Database:
             """, (job_id, from_state, to_state, utc_now_iso(), message))
             conn.commit()
 
-    def save_broll_asset(self, asset_id: str, file_path: str, title: str, source: str, prompt: str, duration: float, score: int):
+    def save_broll_asset(
+        self,
+        asset_id: str,
+        file_path: str,
+        title: str,
+        source: str,
+        prompt: str,
+        duration: float,
+        score: int = 5,
+        niche_id: str = "generic",
+        tags: Optional[List[str]] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        fps: Optional[float] = None,
+        description: Optional[str] = None,
+    ):
+        tags_json = json.dumps(tags or [])
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-            INSERT INTO broll_assets (asset_id, file_path, title, source, prompt, duration, score, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO broll_assets (
+                asset_id, file_path, title, source, prompt, duration, score, created_at,
+                niche_id, tags, width, height, fps, description
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(asset_id) DO UPDATE SET
                 score=excluded.score,
-                file_path=excluded.file_path
-            """, (asset_id, file_path, title, source, prompt, duration, score, utc_now_iso()))
+                file_path=excluded.file_path,
+                niche_id=excluded.niche_id,
+                tags=excluded.tags,
+                width=excluded.width,
+                height=excluded.height,
+                fps=excluded.fps,
+                description=excluded.description
+            """, (
+                asset_id, file_path, title, source, prompt, duration, score,
+                utc_now_iso(), niche_id, tags_json, width, height, fps, description
+            ))
             conn.commit()
+
+    def search_broll_assets(
+        self,
+        niche_id: Optional[str] = None,
+        query: Optional[str] = None,
+        min_score: int = 0,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Search indexed local B-roll assets matching niche and query terms."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            sql = "SELECT * FROM broll_assets WHERE score >= ?"
+            params: List[Any] = [min_score]
+
+            if niche_id and niche_id != "generic":
+                sql += " AND (niche_id = ? OR niche_id = 'generic')"
+                params.append(niche_id)
+
+            if query:
+                terms = query.lower().split()
+                for term in terms:
+                    sql += " AND (LOWER(title) LIKE ? OR LOWER(prompt) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)"
+                    pattern = f"%{term}%"
+                    params.extend([pattern, pattern, pattern, pattern])
+
+            sql += " ORDER BY score DESC, created_at DESC LIMIT ?"
+            params.append(limit)
+
+            cursor.execute(sql, tuple(params))
+            results = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                if d.get("tags"):
+                    try:
+                        d["tags"] = json.loads(d["tags"])
+                    except Exception:
+                        d["tags"] = []
+                results.append(d)
+            return results
+
+    def list_broll_assets(self, niche_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """List assets optionally filtered by niche."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if niche_id:
+                cursor.execute(
+                    "SELECT * FROM broll_assets WHERE niche_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (niche_id, limit)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM broll_assets ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                )
+            results = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                if d.get("tags"):
+                    try:
+                        d["tags"] = json.loads(d["tags"])
+                    except Exception:
+                        d["tags"] = []
+                results.append(d)
+            return results
+
+    def get_broll_asset(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM broll_assets WHERE asset_id = ?", (asset_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            if d.get("tags"):
+                try:
+                    d["tags"] = json.loads(d["tags"])
+                except Exception:
+                    d["tags"] = []
+            return d
 
     def find_cached_asset(self, prompt: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
@@ -204,7 +332,13 @@ class Database:
             )
             row = cursor.fetchone()
             if row:
-                return dict(row)
+                d = dict(row)
+                if d.get("tags"):
+                    try:
+                        d["tags"] = json.loads(d["tags"])
+                    except Exception:
+                        d["tags"] = []
+                return d
             return None
 
     def _row_to_job(self, row: sqlite3.Row) -> Job:
