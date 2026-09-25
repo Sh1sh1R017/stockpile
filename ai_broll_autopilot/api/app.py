@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -325,6 +326,7 @@ async def get_job_video(job_id: str):
         path=str(vpath),
         media_type="video/mp4",
         filename=vpath.name,
+        content_disposition_type="inline",
     )
 
 
@@ -360,6 +362,7 @@ async def get_job_broll_asset(job_id: str, shot_id: str):
         path=str(target_path),
         media_type="video/mp4",
         filename=target_path.name,
+        content_disposition_type="inline",
     )
 
 
@@ -414,6 +417,7 @@ async def get_job_broll_thumb(job_id: str, shot_id: str):
         path=str(thumb_path),
         media_type="image/jpeg",
         filename=thumb_path.name,
+        content_disposition_type="inline",
     )
 
 
@@ -516,7 +520,9 @@ async def get_job_openreel_project(job_id: str):
                 data = json.load(f)
                 items = data.get("project", {}).get("mediaLibrary", {}).get("items", [])
                 has_file_urls = any((item.get("url") or "").startswith("file:///") for item in items)
-                if not has_file_urls and items:
+                has_space_urls = any(" " in (item.get("url") or "") for item in items)
+                has_missing_thumbs = any(not item.get("thumbnailUrl") for item in items if item.get("type") == "video")
+                if not has_file_urls and not has_space_urls and not has_missing_thumbs and items:
                     return data
         except Exception:
             pass
@@ -544,7 +550,7 @@ async def get_job_openreel_project(job_id: str):
         audio_cues=plan_dict.get("audio_cues", {}),
     )
 
-    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{job.job_id}/assets"
+    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id)}/assets"
 
     oreel_dir.mkdir(parents=True, exist_ok=True)
     openreel_adapter.export_project_files(
@@ -632,45 +638,103 @@ async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
 
 @app.api_route("/api/jobs/{job_id}/assets/{asset_name:path}", methods=["GET", "HEAD"])
 async def get_job_asset(job_id: str, asset_name: str):
-    """Serve media assets (source video, B-roll clips, audio, graphics) to OpenReel Editor."""
+    """Serve media assets (source video, B-roll clips, audio, graphics, thumbnails) to OpenReel Editor."""
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    clean_asset = Path(asset_name).name
+    def _infer_mime(filename: str) -> str:
+        s = Path(filename).suffix.lower()
+        if s in (".jpg", ".jpeg"):
+            return "image/jpeg"
+        if s == ".png":
+            return "image/png"
+        if s == ".webp":
+            return "image/webp"
+        if s in (".mp3", ".mpeg"):
+            return "audio/mpeg"
+        if s == ".wav":
+            return "audio/wav"
+        return "video/mp4"
 
+    raw_asset = urllib.parse.unquote(asset_name).strip()
+    is_thumb = raw_asset.endswith("/thumb") or raw_asset.endswith(".thumb.jpg")
+    clean_asset = raw_asset[:-6] if raw_asset.endswith("/thumb") else (raw_asset[:-10] if raw_asset.endswith(".thumb.jpg") else raw_asset)
+    clean_name = Path(clean_asset).name
+
+    # Handle Thumbnail requests
+    if is_thumb:
+        # 1. A-Roll source thumb
+        if clean_name in ("source", "main", Path(job.source_filename).name):
+            source_thumb = Config.OUTPUT_DIR / "workspace" / job.job_id / "source_thumb.jpg"
+            if not source_thumb.exists() and job.source_file and Path(job.source_file).exists():
+                source_thumb.parent.mkdir(parents=True, exist_ok=True)
+                cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(job.source_file), "-frames:v", "1", "-update", "1", "-q:v", "2", str(source_thumb)]
+                try:
+                    import subprocess
+                    await asyncio.to_thread(subprocess.run, cmd, capture_output=True, check=True)
+                except Exception as e:
+                    logger.error(f"Failed to generate source thumb: {e}")
+            if source_thumb.exists():
+                return FileResponse(path=str(source_thumb), media_type="image/jpeg", filename="source_thumb.jpg", content_disposition_type="inline")
+
+        # 2. B-Roll thumb in workspace
+        broll_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+        if broll_dir.exists():
+            stem = Path(clean_name).stem
+            for cand_name in (f"{stem}_thumb.jpg", f"{clean_name}_thumb.jpg", f"{clean_name}.jpg"):
+                cand = broll_dir / cand_name
+                if cand.exists():
+                    return FileResponse(path=str(cand), media_type="image/jpeg", filename=cand.name, content_disposition_type="inline")
+            # Generate if video exists
+            vid_cand = broll_dir / clean_name
+            if not vid_cand.exists() and not clean_name.endswith(".mp4"):
+                vid_cand = broll_dir / f"{clean_name}.mp4"
+            if vid_cand.exists():
+                thumb_target = broll_dir / f"{stem}_thumb.jpg"
+                cmd = ["ffmpeg", "-y", "-ss", "0.5", "-i", str(vid_cand), "-frames:v", "1", "-update", "1", "-q:v", "2", str(thumb_target)]
+                try:
+                    import subprocess
+                    await asyncio.to_thread(subprocess.run, cmd, capture_output=True, check=True)
+                    if thumb_target.exists():
+                        return FileResponse(path=str(thumb_target), media_type="image/jpeg", filename=thumb_target.name, content_disposition_type="inline")
+                except Exception as e:
+                    logger.error(f"Failed to generate broll thumb: {e}")
+
+        raise HTTPException(status_code=404, detail=f"Thumbnail for asset '{asset_name}' not found")
+
+    # Regular Asset requests
     # 1. Main A-Roll source video
-    if clean_asset in ("source", "main", Path(job.source_filename).name):
+    if clean_name in ("source", "main", Path(job.source_filename).name):
         if job.source_file and Path(job.source_file).exists():
-            return FileResponse(path=str(job.source_file), media_type="video/mp4", filename=clean_asset)
+            return FileResponse(path=str(job.source_file), media_type="video/mp4", filename=clean_name, content_disposition_type="inline")
 
     # 2. B-roll workspace directory
     broll_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
-    target = broll_dir / clean_asset
-    if target.exists():
-        return FileResponse(path=str(target), media_type="video/mp4", filename=clean_asset)
-
-    # Also check if asset_name matches any shot_id prefix in broll_dir
     if broll_dir.exists():
+        target = broll_dir / clean_name
+        if target.exists():
+            return FileResponse(path=str(target), media_type=_infer_mime(clean_name), filename=clean_name, content_disposition_type="inline")
         for f in broll_dir.iterdir():
-            if f.is_file() and f.name.startswith(clean_asset):
-                return FileResponse(path=str(f), media_type="video/mp4", filename=f.name)
+            if f.is_file() and f.name.startswith(clean_name):
+                return FileResponse(path=str(f), media_type=_infer_mime(f.name), filename=f.name, content_disposition_type="inline")
 
     # 3. SFX or audio in workspace
     sfx_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "sfx"
-    target = sfx_dir / clean_asset
-    if target.exists():
-        return FileResponse(path=str(target), media_type="audio/mpeg", filename=clean_asset)
+    if sfx_dir.exists():
+        target = sfx_dir / clean_name
+        if target.exists():
+            return FileResponse(path=str(target), media_type=_infer_mime(clean_name), filename=clean_name, content_disposition_type="inline")
 
     # 4. Global static SFX
-    static_sfx = Path("ai_broll_autopilot/assets/sfx") / clean_asset
+    static_sfx = Path("ai_broll_autopilot/assets/sfx") / clean_name
     if static_sfx.exists():
-        return FileResponse(path=str(static_sfx), media_type="audio/mpeg", filename=clean_asset)
+        return FileResponse(path=str(static_sfx), media_type=_infer_mime(clean_name), filename=clean_name, content_disposition_type="inline")
 
     # 5. Direct workspace asset
-    target = Config.OUTPUT_DIR / "workspace" / job.job_id / clean_asset
+    target = Config.OUTPUT_DIR / "workspace" / job.job_id / clean_name
     if target.exists():
-        return FileResponse(path=str(target), filename=clean_asset)
+        return FileResponse(path=str(target), media_type=_infer_mime(clean_name), filename=clean_name, content_disposition_type="inline")
 
     raise HTTPException(status_code=404, detail=f"Asset '{asset_name}' not found for job {job_id}")
 

@@ -9,6 +9,7 @@ and multi-track audio mix (Dialogue, BGM ducking, SFX).
 import json
 import logging
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -59,9 +60,10 @@ class OpenReelAdapter:
         source_name = Path(source_path).name if source_path else "source_video.mp4"
         source_media_id = "media_source_main"
 
-        source_http_url = f"{base_asset_url}/{source_name}" if base_asset_url else (
+        source_http_url = f"{base_asset_url}/source" if base_asset_url else (
             f"file:///{Path(source_path).as_posix()}" if source_path else ""
         )
+        source_thumb_url = f"{base_asset_url}/source/thumb" if base_asset_url else None
 
         media_items.append({
             "id": source_media_id,
@@ -81,7 +83,7 @@ class OpenReelAdapter:
             },
             "fileHandle": None,
             "blob": None,
-            "thumbnailUrl": None,
+            "thumbnailUrl": source_thumb_url,
             "waveformData": None,
             "isPlaceholder": False,
             "originalUrl": source_http_url,
@@ -100,7 +102,8 @@ class OpenReelAdapter:
             asset_path = shot.get("asset_path") or broll_map.get(shot_id)
             if asset_path:
                 broll_name = Path(asset_path).name
-                broll_http_url = f"{base_asset_url}/{broll_name}" if base_asset_url else f"file:///{Path(asset_path).as_posix()}"
+                broll_http_url = f"{base_asset_url}/{urllib.parse.quote(broll_name)}" if base_asset_url else f"file:///{Path(asset_path).as_posix()}"
+                broll_thumb_url = f"{base_asset_url}/{urllib.parse.quote(broll_name)}/thumb" if base_asset_url else None
                 media_items.append({
                     "id": f"media_{shot_id}",
                     "name": broll_name,
@@ -119,7 +122,7 @@ class OpenReelAdapter:
                     },
                     "fileHandle": None,
                     "blob": None,
-                    "thumbnailUrl": None,
+                    "thumbnailUrl": broll_thumb_url,
                     "waveformData": None,
                     "isPlaceholder": False,
                     "originalUrl": broll_http_url,
@@ -267,10 +270,12 @@ class OpenReelAdapter:
             # Assign SFX cue if present
             sfx_file = shot.get("sfx_file") or shot.get("sfx_cue")
             if sfx_file:
+                sfx_name = Path(sfx_file).name
+                sfx_http_url = f"{base_asset_url}/{urllib.parse.quote(sfx_name)}" if base_asset_url else f"file:///{Path(sfx_file).as_posix()}"
                 sfx_media_id = f"media_sfx_{shot_id}"
                 media_items.append({
                     "id": sfx_media_id,
-                    "name": Path(sfx_file).name,
+                    "name": sfx_name,
                     "type": "audio",
                     "metadata": {
                         "duration": 1.5,
@@ -286,8 +291,8 @@ class OpenReelAdapter:
                     "thumbnailUrl": None,
                     "waveformData": None,
                     "isPlaceholder": False,
-                    "url": f"file:///{Path(sfx_file).as_posix()}",
-                    "originalUrl": f"{base_asset_url}/{Path(sfx_file).name}" if base_asset_url else "",
+                    "url": sfx_http_url,
+                    "originalUrl": sfx_http_url,
                 })
                 track_sfx["clips"].append({
                     "id": f"clip_sfx_{shot_id}",
