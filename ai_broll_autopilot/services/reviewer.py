@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from google import genai
@@ -163,8 +164,9 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
                 "-v", "quiet",
                 str(out_frame)
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd)
-            await proc.wait()
+            res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+                logger.warning(f"FFmpeg frame extract error: {res.stderr}")
             if out_frame.exists():
                 frame_files.append(str(out_frame))
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -268,8 +269,9 @@ class Matcher:
             str(montage_output)
         ])
 
-        proc = await asyncio.create_subprocess_exec(*cmd)
-        await proc.wait()
+        res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            logger.error(f"FFmpeg montage error: {res.stderr}")
 
         if montage_output.exists() and montage_output.stat().st_size > 1000:
             logger.info(f"Assembled {len(acquired_micro_clips)}-clip rapid montage: {montage_output.name} ({total_duration}s)")

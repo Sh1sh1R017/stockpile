@@ -38,15 +38,13 @@ class CollageBridge:
                     "--api-key", Config.GEMINI_API_KEY,
                 ]
 
-                proc = await asyncio.create_subprocess_exec(*cmd)
                 try:
-                    await asyncio.wait_for(proc.wait(), timeout=15.0)
+                    await asyncio.wait_for(
+                        asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=14),
+                        timeout=15.0
+                    )
                 except asyncio.TimeoutError:
                     logger.warning("Gemini Omni Flash API call timed out (>15s), using instant procedural collage fallback")
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
 
                 if out_p.exists() and out_p.stat().st_size > 1000:
                     logger.info(f"Collage B-roll generated via Omni Flash: {out_p.name}")
@@ -158,8 +156,9 @@ class CollageBridge:
                 "-v", "quiet",
                 str(out_p),
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd)
-            await proc.wait()
+            res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+                logger.warning(f"FFmpeg collage render error: {res.stderr}")
 
             if temp_frame.exists():
                 temp_frame.unlink()

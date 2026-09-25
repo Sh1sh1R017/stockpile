@@ -1502,8 +1502,9 @@ async def upload_custom_shot_clip(job_id: str, shot_id: str, file: UploadFile = 
         "-pix_fmt", "yuv420p", "-an", "-v", "warning",
         str(out_file)
     ]
-    proc = await asyncio.create_subprocess_exec(*cmd)
-    await proc.wait()
+    res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        logger.error(f"FFmpeg custom clip format error: {res.stderr}")
     raw_custom.unlink(missing_ok=True)
 
     if not out_file.exists():
