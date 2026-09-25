@@ -504,6 +504,117 @@ class OpenReelAdapter:
             "plan": plan_path,
         }
 
+    def update_edit_plan_from_openreel(
+        self,
+        edit_plan: EditPlan,
+        openreel_data: Dict[str, Any],
+    ) -> EditPlan:
+        """Synchronize user timeline edits from OpenReel Schema 1.2.0 back into Stockpile EditPlan.
+
+        Extracts updated shot start times, durations, and asset mappings from B-Roll track,
+        updated in/out points from A-roll track, subtitles, and text overlays.
+        """
+        proj = openreel_data.get("project", openreel_data)
+        timeline = proj.get("timeline", {})
+        tracks = timeline.get("tracks", [])
+
+        # 1. Update A-Roll (main video) interval & target duration
+        for trk in tracks:
+            if trk.get("id") == "track_video_main" or trk.get("role") == "dialogue":
+                clips = trk.get("clips", [])
+                if clips:
+                    main_clip = clips[0]
+                    in_pt = float(main_clip.get("inPoint", edit_plan.clip_interval.get("in_point", 0.0)))
+                    dur = float(main_clip.get("duration", edit_plan.target_duration))
+                    edit_plan.clip_interval["in_point"] = in_pt
+                    edit_plan.clip_interval["out_point"] = in_pt + dur
+                    edit_plan.target_duration = dur
+
+        # 2. Update B-Roll cutaway shots
+        broll_clips = []
+        for trk in tracks:
+            if trk.get("id") == "track_video_broll" or (trk.get("type") == "video" and trk.get("role") != "dialogue"):
+                broll_clips = trk.get("clips", [])
+                break
+
+        if broll_clips:
+            updated_shots = []
+            existing_shots_by_id = {s.get("shot_id"): s for s in edit_plan.shots}
+
+            for clip in broll_clips:
+                clip_id = clip.get("id", "")
+                st = float(clip.get("startTime", 0.0))
+                dur = float(clip.get("duration", 2.5))
+                end = st + dur
+                media_id = clip.get("mediaId", "")
+
+                matched_shot = None
+                for sid, s in existing_shots_by_id.items():
+                    if sid == clip_id or f"clip_{sid}" == clip_id or f"media_{sid}" == media_id:
+                        matched_shot = s.copy()
+                        break
+
+                if not matched_shot:
+                    matched_shot = {
+                        "shot_id": clip_id or f"broll_custom_{int(st*10)}",
+                        "visual_prompt": clip.get("name", "Custom B-Roll Cutaway"),
+                        "rationale": "User-added cutaway in OpenReel timeline",
+                    }
+
+                matched_shot["start_time"] = round(st, 3)
+                matched_shot["duration"] = round(dur, 3)
+                matched_shot["end_time"] = round(end, 3)
+
+                # Preserve transition info if modified in OpenReel
+                trans_list = trk.get("transitions", [])
+                for t in trans_list:
+                    if t.get("toClipId") == clip_id or t.get("fromClipId") == clip_id:
+                        matched_shot.setdefault("transition", {})["type"] = t.get("type", "crossfade")
+                        matched_shot["transition"]["duration"] = float(t.get("duration", 0.3))
+
+                updated_shots.append(matched_shot)
+
+            updated_shots.sort(key=lambda s: s.get("start_time", 0.0))
+            edit_plan.shots = updated_shots
+
+        # 3. Update Subtitles if present
+        openreel_subs = timeline.get("subtitles", [])
+        if openreel_subs:
+            subs = []
+            for sub in openreel_subs:
+                subs.append({
+                    "id": sub.get("id"),
+                    "start": float(sub.get("startTime", 0.0)),
+                    "end": float(sub.get("endTime", 0.0)),
+                    "text": sub.get("text", ""),
+                    "words": sub.get("words", []),
+                })
+            edit_plan.subtitles = subs
+
+        # 4. Update Text Overlays from textClips
+        text_clips = proj.get("textClips", [])
+        if text_clips:
+            overlays = []
+            for tc in text_clips:
+                overlays.append({
+                    "id": tc.get("id"),
+                    "text": tc.get("text", ""),
+                    "start_time": float(tc.get("startTime", 0.0)),
+                    "duration": float(tc.get("duration", 2.5)),
+                    "end_time": float(tc.get("startTime", 0.0)) + float(tc.get("duration", 2.5)),
+                    "behind_subject": bool(tc.get("behindSubject", False)),
+                    "style": tc.get("style", {}),
+                    "transform": tc.get("transform", {}),
+                    "animation": tc.get("animation", {}),
+                })
+            edit_plan.text_overlays = overlays
+
+        logger.info(
+            f"Updated EditPlan from OpenReel: {len(edit_plan.shots)} shots, "
+            f"{len(edit_plan.subtitles)} subtitles, duration={edit_plan.target_duration}s"
+        )
+        return edit_plan
+
 
 # Global adapter instance
 openreel_adapter = OpenReelAdapter()

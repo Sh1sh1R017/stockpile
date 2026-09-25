@@ -170,6 +170,8 @@ interface JobDetail extends JobSummary {
     summary: string;
     total_duration?: number;
     broll_shot_count?: number;
+    openreel_custom_edited?: boolean;
+    last_openreel_sync?: string;
     render_settings?: {
       subtitles_enabled?: boolean;
       subtitle_style?: string;
@@ -2177,6 +2179,17 @@ export default function StudioDashboard() {
 
               {/* OpenReel Suite Integration Row */}
               <div className="pt-2 border-t border-zinc-800/80 flex flex-col gap-2">
+                {selectedJob?.edit_plan?.openreel_custom_edited && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="font-semibold">OpenReel 2-Way Synced</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      {selectedJob.edit_plan.last_openreel_sync ? new Date(selectedJob.edit_plan.last_openreel_sync).toLocaleTimeString() : "Active"}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setEmbeddedOpenReelJob(selectedJob.job_id)}

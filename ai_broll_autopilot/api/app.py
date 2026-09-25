@@ -9,6 +9,8 @@ import json
 import logging
 import os
 import shutil
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
@@ -552,6 +554,80 @@ async def get_job_openreel_project(job_id: str):
         base_asset_url=base_asset_url,
     )
     return openreel_adapter.create_openreel_project(plan_obj, base_asset_url=base_asset_url)
+
+
+@app.api_route("/api/jobs/{job_id}/openreel-project", methods=["POST", "PUT"])
+async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
+    """Save user modifications from OpenReel Editor back into Stockpile.
+
+    Persists updated .oreel and project.json files, synchronizes shot timings,
+    subtitles, and text overlays in SQLite database, enabling re-rendering.
+    """
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
+    oreel_dir.mkdir(parents=True, exist_ok=True)
+    project_oreel = oreel_dir / f"{job.job_id}.oreel"
+    project_json = oreel_dir / "project.json"
+
+    # 1. Format payload conforming to Schema 1.2.0
+    project_obj = payload.get("project", payload)
+    save_data = {
+        "version": "1.2.0",
+        "project": project_obj,
+    }
+
+    # 2. Write to disk
+    with open(project_oreel, "w", encoding="utf-8") as f:
+        json.dump(save_data, f, indent=2)
+    with open(project_json, "w", encoding="utf-8") as f:
+        json.dump(save_data, f, indent=2)
+
+    # 3. Synchronize edit_plan in SQLite if job has one
+    if job.edit_plan and isinstance(job.edit_plan, dict):
+        plan_dict = job.edit_plan
+        plan_obj = EditPlan(
+            plan_id=f"plan_{job.job_id}",
+            title=plan_dict.get("title", f"Edit: {Path(job.source_filename).stem}"),
+            target_duration=float(plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0),
+            source_media={"path": job.source_file, "duration": float(plan_dict.get("total_duration") or 30.0), "title": job.source_filename},
+            clip_interval=plan_dict.get("clip_interval", {"in_point": 0.0, "out_point": 30.0}),
+            niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
+            style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
+            shots=plan_dict.get("shots", []),
+            text_overlays=plan_dict.get("text_overlays", []),
+            subtitles=plan_dict.get("subtitles", []),
+            zooms=plan_dict.get("zooms", []),
+            audio_cues=plan_dict.get("audio_cues", {}),
+        )
+
+        updated_plan = openreel_adapter.update_edit_plan_from_openreel(plan_obj, save_data)
+        updated_dict = updated_plan.to_dict()
+        # Mark with OpenReel edit tag
+        updated_dict["openreel_custom_edited"] = True
+        updated_dict["last_openreel_sync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        job.edit_plan = updated_dict
+        job.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        db.save_job(job)
+
+        return {
+            "status": "SAVED",
+            "job_id": job.job_id,
+            "shots_count": len(updated_plan.shots),
+            "target_duration": updated_plan.target_duration,
+            "subtitles_count": len(updated_plan.subtitles),
+            "text_overlays_count": len(updated_plan.text_overlays),
+            "message": "OpenReel edits saved and synchronized with Stockpile SQLite database.",
+        }
+
+    return {
+        "status": "SAVED",
+        "job_id": job.job_id,
+        "message": "OpenReel project file saved to disk.",
+    }
 
 
 @app.api_route("/api/jobs/{job_id}/assets/{asset_name:path}", methods=["GET", "HEAD"])

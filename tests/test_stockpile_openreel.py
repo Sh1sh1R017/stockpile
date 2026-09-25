@@ -295,3 +295,45 @@ def test_edit_quality_service():
     assert "safe_zone" in categories
     assert "audio" in categories
 
+
+def test_openreel_two_way_sync():
+    """Verify bidirectional synchronization of user timeline edits back into EditPlan."""
+    from ai_broll_autopilot.services.edit_director import EditPlan
+
+    plan = EditPlan(
+        plan_id="plan_sync_test",
+        title="Sync Test Plan",
+        target_duration=12.0,
+        source_media={"path": "test.mp4", "duration": 20.0},
+        clip_interval={"in_point": 1.0, "out_point": 13.0},
+        niche={"name": "Tech AI", "id": "tech_ai"},
+        style={"name": "Cyber Tech", "id": "cyber_tech"},
+        shots=[
+            {"shot_id": "shot_1", "start_time": 2.0, "duration": 3.0, "end_time": 5.0},
+            {"shot_id": "shot_2", "start_time": 7.0, "duration": 2.5, "end_time": 9.5},
+        ],
+        text_overlays=[],
+        subtitles=[],
+        zooms=[],
+        audio_cues={},
+    )
+
+    project = openreel_adapter.create_openreel_project(plan)
+
+    # Simulate user in OpenReel editor moving shot_1 from 2.0 to 3.5s and trimming shot_2 to 2.0s
+    for track in project["project"]["timeline"]["tracks"]:
+        if track["id"] == "track_video_broll":
+            track["clips"][0]["startTime"] = 3.5
+            track["clips"][0]["duration"] = 3.0
+            track["clips"][1]["startTime"] = 8.0
+            track["clips"][1]["duration"] = 2.0
+
+    updated_plan = openreel_adapter.update_edit_plan_from_openreel(plan, project)
+    assert updated_plan.shots[0]["start_time"] == 3.5
+    assert updated_plan.shots[0]["duration"] == 3.0
+    assert updated_plan.shots[0]["end_time"] == 6.5
+    assert updated_plan.shots[1]["start_time"] == 8.0
+    assert updated_plan.shots[1]["duration"] == 2.0
+    assert updated_plan.shots[1]["end_time"] == 10.0
+
+
