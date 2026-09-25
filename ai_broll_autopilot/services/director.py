@@ -60,12 +60,31 @@ class Director:
         learned_rules = feedback_engine.get_learned_instructions(full_transcript)
 
         import math
+        chosen_hook = custom_hook
 
-        # Target calculations based on campaign rules
-        target_broll_ratio = campaign.max_broll_ratio  # 0.33 for Curious Mike, 0.60 for Default
+        # Resolve active niche profile
+        from ai_broll_autopilot.niches import niche_registry
+        niche = None
+        if getattr(campaign, "niche_id", None):
+            niche = niche_registry.get_profile(campaign.niche_id)
+        if not niche or niche.id == "generic":
+            from ai_broll_autopilot.services.niche_detector import niche_detector
+            niche_res = niche_detector._detect_heuristic(full_transcript)
+            if niche_res and niche_res.niche_id != "generic":
+                niche = niche_registry.get_profile(niche_res.niche_id)
+            else:
+                niche = niche_registry.get_profile("generic")
+
+        # Target calculations based on campaign or niche rules
+        if campaign.id == "curious_mike":
+            target_broll_ratio = campaign.max_broll_ratio  # 0.33 for Curious Mike
+        else:
+            target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        target_shots = max(1, int(round(target_broll_seconds / 2.2)))
+        target_shots = max(1, min(6, int(round(target_broll_seconds / 2.2))))
+        allow_memes = bool(campaign.allow_ai_broll and getattr(niche.editing, "meme_cutaways", False))
 
         if campaign.id == "curious_mike":
             # Match curated moment if specified
@@ -140,73 +159,41 @@ Return ONLY a valid JSON object matching this schema:
   ]
 }}"""
         else:
-            director_prompt = f"""You are the Master AI Video Director for ultra-high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
+            niche_desc = f"{niche.name} ({niche.description})" if niche else "General Podcast & Video"
+            niche_keywords_hint = ", ".join(niche.visual_keywords[:8]) if niche else "focus, desk, laptop, discussion"
+
+            meme_instructions = ""
+            if allow_memes:
+                meme_instructions = """
+4. CONTEXTUAL MEME CUTAWAYS (OPTIONAL FOR HIGH-ENERGY COMEDY / STREAMER MOMENTS):
+   - You may designate up to 1-2 shots as "style": "meme" if a wild claim, rage outburst, or high-energy reaction occurs.
+   - For all other shots, use real stock footage ("style": "stockpile")."""
+
+            director_prompt = f"""You are the Master AI Video Director for high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
+CONTENT DOMAIN: {niche_desc}
+RELEVANT VISUAL THEMES: {niche_keywords_hint}
 
 MANDATORY DIRECTING OBJECTIVES:
-1. HIGH-VELOCITY ~60% B-ROLL TIMELINE COVERAGE (CRITICAL USER MANDATE):
+1. BALANCED PACING & CONTEXTUAL B-ROLL COVERAGE:
    - Total Video Duration: {video_duration:.2f} seconds.
-   - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (MUST BE ~60% of video).
-   - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds (approximately 40% of video).
-   - FAST-MOVING B-ROLL & SNAPPY PACING:
-     • TikTok/Reels/Shorts attention spans demand rapid visual stimulation!
-     • Generate EXACTLY {target_shots} rapid, snappy cuts (1.5s to 2.4s each, fast-moving B-roll).
-     • Streamer / creator reaction meme cutaways (Speed, CaseOh, Jynxzi) MUST be extra fast and punchy (1.4s to 2.0s at 1.25x+ speed).
-     • NEVER let any cutaway drag out longer than 2.5 seconds!
-   - RHYTHMIC TIMELINE DISTRIBUTION:
-     • Keep speaker on screen for the first 0.8s to 1.5s opening hook.
-     • Cut to fast-moving B-roll for 1.5s to 2.4s.
-     • Cut back to speaker face for 0.6s to 1.2s for quick connection or punchlines.
-     • Distribute shots evenly across the entire duration targeting ~{target_broll_seconds:.1f}s total B-roll.
+   - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
+   - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
+   - Generate {target_shots} rapid, snappy cuts (1.5s to 2.4s each).
+   - Keep speaker on screen for the first 0.8s to 1.5s opening hook.
+   - NEVER let any cutaway drag out longer than 2.5 seconds! Cut back to the speaker smoothly.
 
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
-   - The visuals MUST directly match and amplify the EXACT topic and words being spoken at each timestamp!
-   - Analyze the true subject matter of the transcript:
-     • FOCUS & DISCIPLINE: Deep focus at desk, writing on clipboard/checklist, intense concentration, athletic training.
-     • WINNING vs LOSING: Contrast triumph, finish line victory, high-fives ("winners focus") with mindless phone doomscrolling on couch ("losers don't").
-     • PARENT / MENTOR WISDOM: Father and son conversation, mentor guiding young student, warm wisdom.
-     • HABITS / CLIPBOARDS: Handwriting on clipboard, checking off items on daily checklist, desk workflow.
-     • BUSINESS & FINANCE: Bright modern office, charts, handshake, professional strategy.
-     • TECH & CODING: Modern code editor on screen, developer with headphones.
+   - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
+   - Select real, photogenic visual metaphors directly tied to the spoken words.
+   - For business, marketing, or tech: modern clean office, charts, hands on laptop/phone, analytics, presentation, whiteboard.
+   - For lifestyle, self-improvement: focused workout, runner, journaling, deep concentration, conversation.
    - STRICTLY FORBIDDEN:
-     • NEVER show someone getting fired, packing a cardboard box, or having computer rage UNLESS the speaker explicitly discusses job loss or computer crashes!
-     • DO NOT invent negative or irrelevant drama that contradicts the speaker's message.
+     • DO NOT invent negative or irrelevant drama (e.g. fired employee, computer rage) unless the speaker explicitly describes it!
+     • All visual shots must have "style": "stockpile" (real-world stock footage).
 
 3. OPTIMIZED STOCK FOOTAGE SEARCH PROMPTS:
-   - "search_prompt" MUST be 2 to 4 clean, photogenic keywords optimized for Pexels 4K stock video search.
-     Examples:
-     • "focused man writing desk"
-     • "runner winning finish line"
-     • "person scrolling smartphone couch"
-     • "father teaching son"
-     • "businessman checking clipboard"
- 4. FULLY AUTONOMOUS CONTEXTUAL MEME & CREATOR CUTAWAYS (MANDATORY UNIQUE MEMES FOR EVERY CLIP):
-    - CRITICAL HOOK MANDATE: Shot 1 ("broll_1") MUST ALWAYS BE A VIRAL MEME CUTAWAY ("style": "meme") starting within the first 1.0s–1.5s (duration 1.8s–2.2s) to immediately hook viewer attention and spark comment section engagement!
-    - USER MANDATE: The user NEVER wants to make memes manually. YOU (AI Director) MUST autonomously generate unique, viral, satirical meme cutaways tailored specifically to what the speaker says in this exact clip.
-    - MANDATORY: For videos >= 15s, designate at least 2 shots as "style": "meme" (Shot 1 is ALWAYS the first meme). For shorter clips, designate at least 1 shot (Shot 1) as "style": "meme".
-    - Familiar creator faces (IShowSpeed, CaseOh, Jynxzi, Johnny Sins, KiaraaKitty) capture 10x higher viewer retention and flood comment sections! Prioritize them whenever high emotion, hot takes, absurd claims, or punchlines occur.
-    - VIRAL ARCHETYPES & USAGE:
-      • "the_trusted_doctor": Johnny Sins specialist/hospital doctor cutaway. Use whenever an expert, specialist, doctor, medical advice, authority, therapy, or surgery is mentioned. Comment section MAGNET!
-        Captions: {{"caption": "The most experienced specialist for [speaker's topic]", "show_banner": true}}
-      • "ishowspeed_shock": Darren Watkins Jr (IShowSpeed) wide-eyed screaming shock & hype. Use for crazy claims, high energy, wild statements, mind-blowing stats!
-        Captions: {{"caption": "POV: Hearing [speaker's statement] for the first time", "show_banner": true}}
-      • "not_your_personal_pornstar": KiaraaKitty public streamer rage outburst. Use for ridiculous boundaries, audacity, cancelable moments, creepy questions, unhinged takes.
-        Captions: {{"caption": "Bro was not having it after hearing [context]", "show_banner": true}}
-      • "moms_kinda_homeless": Fortnite kid desperate plea. Use for absurd excuses, guilt trips, begging, financial desperation, lazy habits.
-        Captions: {{"caption": "The excuses people make when [context]", "show_banner": true}}
-      • "caseoh_rage": CaseOh furious headset mic rage & screaming. Use for bad mistakes, frustrating fails, outrage, calling someone out, getting roasted.
-        Captions: {{"caption": "POV: Hearing someone defend [mistake mentioned in clip]", "show_banner": true}}
-      • "jynxzi_freakout": Jynxzi controller slam & disbelief scream. Use for gaming, sudden shock, 'bro what' realization, clutch fails.
-        Captions: {{"caption": "Bro could not believe [context]", "show_banner": true}}
-      • "gigachad": Sigma grind, discipline, unshakeable confidence, victorious habit.
-        Captions: {{"caption": "Average [good habit/mindset] enjoyer", "show_banner": true}}
-      • "stepped_in_shit": For bad opinions, terrible takes, excuses, or toxic traps.
-        Captions: {{"shoe_text": "[Exact bad take mentioned in clip]"}}
-      • "drake": For contrasting a rejected bad option vs an accepted good option.
-        Captions: {{"top_text": "[Bad way speaker rejects]", "bottom_text": "[Good way speaker advocates]"}}
-      • "clown": For progressive foolish steps or clown logic.
-      • "hide_the_pain_harold": Strained smile, enduring awkwardness or inner panic.
-    - CRITICAL: Captions MUST be 100% UNIQUE, witty, and directly reactive to the exact words spoken in this specific clip. NEVER output generic captions like "IShowSpeed Moment" or "CaseOh Rage".
-    - For realistic scenes (workspace, athletics, mentor discussions), use "style": "stockpile".
+   - "search_prompt" MUST be 2 to 4 clean, photogenic keywords optimized for stock video search.
+{meme_instructions}
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT:
@@ -218,25 +205,24 @@ OUTPUT FORMAT:
 Return ONLY a valid JSON object matching this schema:
 {{
   "summary": "Short 1-sentence narrative arc summary",
+  "hook_text": "{chosen_hook or 'BOLD PUNCHY ALL-CAPS HOOK FROM TRANSCRIPT'}",
   "shots": [
     {{
       "shot_id": "broll_1",
       "start_time": 1.2,
       "end_time": 3.2,
       "duration": 2.0,
-      "style": "meme",
-      "meme_template": "the_trusted_doctor",
-      "meme_captions": {{"caption": "The most experienced specialist for this exact topic", "show_banner": true}},
+      "style": "stockpile",
       "dialogue_quote": "Exact spoken line from transcript",
-      "emotional_core": "Topic theme (e.g. Deep Focus, Victory, Bad Opinion)",
-      "visceral_human_metaphor": "Exact contextual scene or meme description",
+      "emotional_core": "Topic theme (e.g. Marketing Strategy, Deep Focus, Tech Innovation)",
+      "visceral_human_metaphor": "Realistic contextual scene matching the quote",
       "micro_prompts": [
-        "focused professional writing on desk notes",
-        "close up hands writing checklist with pen"
+        "marketer working on laptop with charts",
+        "close up hands typing on modern keyboard"
       ],
-      "search_prompt": "focused person writing desk",
+      "search_prompt": "digital marketing business strategy",
       "overlay_type": "cutaway",
-      "narrative_reason": "Compulsory viral hook cutaway in first 5 seconds to maximize viewer retention"
+      "narrative_reason": "Contextual visual amplification of spoken concept"
     }}
   ]
 }}"""
@@ -252,6 +238,10 @@ Return ONLY a valid JSON object matching this schema:
                     config=types.GenerateContentConfig(
                         temperature=0.3,
                         response_mime_type="application/json",
+                        http_options=types.HttpOptions(
+                            retry_options=types.HttpRetryOptions(attempts=1),
+                            timeout=15000
+                        ),
                     ),
                 )
                 raw_text = clean_json_string(response.text or "{}")
@@ -560,8 +550,17 @@ Return ONLY a valid JSON object matching this schema:
                 f"{search_prompt} action",
             ]
 
-            # In heuristic plan, memes only if campaign allows AI/meme B-roll
-            is_meme = (not is_curious_mike) and ((len(shots) == 0) or (len(shots) == 2 and video_duration >= 15.0))
+            # In heuristic plan, memes only if campaign allows AI/meme B-roll and niche enables memes
+            allow_heuristic_memes = bool(campaign and campaign.allow_ai_broll)
+            if campaign and getattr(campaign, "niche_id", None):
+                from ai_broll_autopilot.niches import niche_registry
+                n = niche_registry.get_profile(campaign.niche_id)
+                if not getattr(n.editing, "meme_cutaways", False):
+                    allow_heuristic_memes = False
+            else:
+                allow_heuristic_memes = False
+
+            is_meme = allow_heuristic_memes and ((len(shots) == 0) or (len(shots) == 2 and video_duration >= 15.0))
             if is_meme and len(shots) == 0:
                 start = 1.2
                 dur = min(2.2, max(1.5, dur))
@@ -604,8 +603,14 @@ Return ONLY a valid JSON object matching this schema:
                     if m.moment_id.lower() == curated_moment_id.lower():
                         resolved_hook = m.screen_hook
                         break
-            if not resolved_hook:
+            if not resolved_hook and len(campaign.curated_moments) > 0:
                 resolved_hook = campaign.curated_moments[0].screen_hook
+        if not resolved_hook:
+            if segments:
+                first_text = segments[0].get("text", "").strip()
+                resolved_hook = first_text[:45].upper() if first_text else "KEY TAKEAWAY"
+            else:
+                resolved_hook = "KEY TAKEAWAY"
 
         return {
             "total_duration": video_duration,

@@ -60,8 +60,8 @@ class Transcriber:
                 "-v", "quiet",
                 str(audio_temp)
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd)
-            await proc.wait()
+            import subprocess
+            await asyncio.to_thread(subprocess.run, cmd, check=True)
 
             if not audio_temp.exists() or audio_temp.stat().st_size == 0:
                 raise RuntimeError("Failed to extract audio from video")

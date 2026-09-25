@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from google import genai
+from google.genai import types
 
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.niches import niche_registry, NicheProfile
@@ -163,10 +164,28 @@ Respond ONLY with valid JSON matching this schema:
   "explanation": "<one sentence explanation of why this niche was selected>"
 }}"""
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-        )
+        models_to_try = [self.model_name] + [m for m in getattr(Config, "GEMINI_FALLBACK_MODELS", []) if m != self.model_name]
+        response = None
+        last_err = None
+        for model_cand in models_to_try:
+            try:
+                response = self.client.models.generate_content(
+                    model=model_cand,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        http_options=types.HttpOptions(
+                            retry_options=types.HttpRetryOptions(attempts=1),
+                            timeout=15000,
+                        )
+                    )
+                )
+                if response and response.text:
+                    break
+            except Exception as me:
+                last_err = me
+                continue
+        if not response or not response.text:
+            raise last_err or RuntimeError("No response from Gemini")
 
         raw_json = _clean_json_str(response.text)
         data = json.loads(raw_json)
@@ -343,10 +362,28 @@ Extract the structural elements and return ONLY JSON matching:
   "tone": "<conversational | energetic | controversial | educational | humorous>"
 }}"""
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-        )
+        models_to_try = [self.model_name] + [m for m in getattr(Config, "GEMINI_FALLBACK_MODELS", []) if m != self.model_name]
+        response = None
+        last_err = None
+        for model_cand in models_to_try:
+            try:
+                response = self.client.models.generate_content(
+                    model=model_cand,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        http_options=types.HttpOptions(
+                            retry_options=types.HttpRetryOptions(attempts=1),
+                            timeout=15000,
+                        )
+                    )
+                )
+                if response and response.text:
+                    break
+            except Exception as me:
+                last_err = me
+                continue
+        if not response or not response.text:
+            raise last_err or RuntimeError("No response from Gemini")
 
         raw_json = _clean_json_str(response.text)
         data = json.loads(raw_json)

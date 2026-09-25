@@ -4,6 +4,7 @@ Translates speech transcripts, niche content profiles, and visual style preferen
 into structured edit plans compatible with OpenReel.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -12,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from google import genai
+from google.genai import types
 
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.niches import niche_registry, NicheProfile
@@ -266,10 +268,30 @@ Respond ONLY with valid JSON matching:
   }}
 }}"""
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-        )
+        models_to_try = [self.model_name] + [m for m in getattr(Config, "GEMINI_FALLBACK_MODELS", []) if m != self.model_name]
+        response = None
+        last_err = None
+        for model_cand in models_to_try:
+            try:
+                def _call_model(cand=model_cand):
+                    return self.client.models.generate_content(
+                        model=cand,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            http_options=types.HttpOptions(
+                                retry_options=types.HttpRetryOptions(attempts=1),
+                                timeout=10000,
+                            )
+                        )
+                    )
+                response = await asyncio.to_thread(_call_model)
+                if response and response.text:
+                    break
+            except Exception as me:
+                last_err = me
+                continue
+        if not response or not response.text:
+            raise last_err or RuntimeError("No response from Gemini")
 
         raw_json = _clean_json_str(response.text)
         return json.loads(raw_json)

@@ -202,10 +202,22 @@ Respond ONLY with valid JSON array of objects matching:
   }}
 ]"""
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-        )
+        models_to_try = [self.model_name] + [m for m in getattr(Config, "GEMINI_FALLBACK_MODELS", []) if m != self.model_name]
+        response = None
+        last_err = None
+        for model_cand in models_to_try:
+            try:
+                response = self.client.models.generate_content(
+                    model=model_cand,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    break
+            except Exception as me:
+                last_err = me
+                continue
+        if not response or not response.text:
+            raise last_err or RuntimeError("No response from Gemini")
 
         raw_json = _clean_json_str(response.text)
         data = json.loads(raw_json)

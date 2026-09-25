@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from ai_broll_autopilot.config import Config
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -142,13 +143,19 @@ Or if no sound effect fits:
             contents.append(prompt)
 
             resp = self.client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model=Config.GEMINI_MODEL,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.2
+                    temperature=0.2,
+                    http_options=types.HttpOptions(
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                        timeout=5000
+                    )
                 )
             )
+            if not resp or not resp.text:
+                return None
             data = json.loads(resp.text)
             sel_id = data.get("selected_id")
             if sel_id is not None:

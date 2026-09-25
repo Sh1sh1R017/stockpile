@@ -28,18 +28,18 @@ class JobState(str, enum.Enum):
 # Valid state transitions
 VALID_TRANSITIONS = {
     JobState.QUEUED: [JobState.INGESTING, JobState.CANCELLED, JobState.FAILED],
-    JobState.INGESTING: [JobState.TRANSCRIBING, JobState.FAILED, JobState.CANCELLED],
-    JobState.TRANSCRIBING: [JobState.DIRECTING, JobState.FAILED, JobState.CANCELLED],
-    JobState.DIRECTING: [JobState.MATCHING, JobState.FAILED, JobState.CANCELLED],
-    JobState.MATCHING: [JobState.PLANNING, JobState.FAILED, JobState.CANCELLED],
-    JobState.PLANNING: [JobState.RENDERING, JobState.FAILED, JobState.CANCELLED],
-    JobState.RENDERING: [JobState.REVIEWING, JobState.FAILED, JobState.CANCELLED],
-    JobState.REVIEWING: [JobState.UPLOADING, JobState.REPAIRING, JobState.COMPLETED, JobState.FAILED],
-    JobState.REPAIRING: [JobState.RENDERING, JobState.FAILED, JobState.CANCELLED],
-    JobState.UPLOADING: [JobState.COMPLETED, JobState.FAILED],
-    JobState.COMPLETED: [],
-    JobState.FAILED: [JobState.QUEUED],  # Can retry
-    JobState.CANCELLED: [JobState.QUEUED],  # Can retry
+    JobState.INGESTING: [JobState.TRANSCRIBING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.TRANSCRIBING: [JobState.DIRECTING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.DIRECTING: [JobState.MATCHING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.MATCHING: [JobState.PLANNING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.PLANNING: [JobState.RENDERING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.RENDERING: [JobState.REVIEWING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.REVIEWING: [JobState.UPLOADING, JobState.REPAIRING, JobState.COMPLETED, JobState.FAILED, JobState.INGESTING],
+    JobState.REPAIRING: [JobState.RENDERING, JobState.FAILED, JobState.CANCELLED, JobState.INGESTING],
+    JobState.UPLOADING: [JobState.COMPLETED, JobState.FAILED, JobState.INGESTING],
+    JobState.COMPLETED: [JobState.QUEUED, JobState.INGESTING, JobState.DIRECTING, JobState.MATCHING, JobState.RENDERING],
+    JobState.FAILED: [JobState.QUEUED, JobState.INGESTING, JobState.DIRECTING, JobState.MATCHING, JobState.RENDERING],  # Can retry
+    JobState.CANCELLED: [JobState.QUEUED, JobState.INGESTING],  # Can retry
 }
 
 
@@ -103,6 +103,8 @@ class Job:
         self.updated_at = utc_now_iso()
         if error is not None:
             self.error_message = error
+        elif target_state in (JobState.COMPLETED, JobState.INGESTING, JobState.QUEUED):
+            self.error_message = None
         if progress is not None:
             self.progress = progress
 

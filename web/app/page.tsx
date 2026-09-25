@@ -272,6 +272,7 @@ export default function StudioDashboard() {
   // OpenReel Integration State
   const [isOpenReelExporting, setIsOpenReelExporting] = useState<boolean>(false);
   const [openReelModalData, setOpenReelModalData] = useState<any>(null);
+  const [embeddedOpenReelJob, setEmbeddedOpenReelJob] = useState<string | null>(null);
 
   // Campaigns & Curated Moments State
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
@@ -2174,6 +2175,52 @@ export default function StudioDashboard() {
                 )}
               </div>
 
+              {/* OpenReel Suite Integration Row */}
+              <div className="pt-2 border-t border-zinc-800/80 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setEmbeddedOpenReelJob(selectedJob.job_id)}
+                    title="Launch live multi-track OpenReel video editor inside this dashboard"
+                    className="flex-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white text-[12px] font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-950/30 hover:scale-[1.01]"
+                  >
+                    <Sparkles className="w-4 h-4 text-emerald-200 animate-pulse" />
+                    <span>Launch OpenReel Studio</span>
+                  </button>
+                  <a
+                    href={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(selectedJob.job_id)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open OpenReel in a dedicated browser tab"
+                    className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 text-[11px] font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Popout Tab</span>
+                  </a>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/export/openreel`}
+                    download={`${selectedJob.filename.replace(/\.[^/.]+$/, "")}.oreel`}
+                    title="Download native OpenReel Schema 1.2.0 project file (.oreel)"
+                    className="flex-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                    OpenReel .oreel
+                  </a>
+                  <a
+                    href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/qc-report`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="View 5-Factor Quality Control and Safe Zone Audit Report"
+                    className="flex-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[11px] font-semibold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                    AI QC Audit
+                  </a>
+                </div>
+              </div>
+
               {/* NLE & ZIP Export Action Row (Inspired by Rotodraft Suite) */}
               <div className="pt-2 border-t border-zinc-800/80 flex items-center gap-2">
                 <a
@@ -3805,6 +3852,49 @@ export default function StudioDashboard() {
               >
                 Done
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EMBEDDED OPENREEL STUDIO MODAL */}
+      {embeddedOpenReelJob && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col p-2 sm:p-4">
+          <div className="bg-zinc-900 border border-emerald-500/40 rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950">
+              <div className="flex items-center gap-2">
+                <Film className="w-5 h-5 text-emerald-400" />
+                <span className="font-bold text-sm text-white">OpenReel Video Editor</span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
+                  Schema 1.2.0 • Non-Destructive Multi-Track
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(embeddedOpenReelJob)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
+                  title="Open in standalone tab"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Popout Tab
+                </a>
+                <button
+                  onClick={() => setEmbeddedOpenReelJob(null)}
+                  className="text-zinc-400 hover:text-white p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 w-full bg-zinc-950 relative">
+              <iframe
+                src={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(embeddedOpenReelJob)}`}
+                className="w-full h-full border-0"
+                allow="camera; microphone; display-capture; clipboard-read; clipboard-write; web-share"
+                title="OpenReel Editor"
+              />
             </div>
           </div>
         </div>

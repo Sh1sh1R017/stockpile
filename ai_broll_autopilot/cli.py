@@ -308,6 +308,64 @@ async def cmd_export_openreel(args):
     ))
 
 
+def cmd_qc(args):
+    """Run Quality Control audit on an edit_plan.json or job."""
+    from ai_broll_autopilot.services.qc_service import edit_quality_service
+    from ai_broll_autopilot.services.edit_director import EditPlan
+
+    target_path = Path(args.target).resolve()
+    if not target_path.exists():
+        console.print(f"[red]Error: File not found: {target_path}[/red]")
+        sys.exit(1)
+
+    with open(target_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    plan_data = data.get("edit_plan", data)
+    plan = EditPlan(
+        plan_id=plan_data.get("plan_id", "plan_qc"),
+        title=plan_data.get("title", "QC Target"),
+        target_duration=float(plan_data.get("target_duration") or plan_data.get("total_duration", 30.0)),
+        source_media=plan_data.get("source_media", {}),
+        clip_interval=plan_data.get("clip_interval", {"in_point": 0.0, "out_point": 30.0}),
+        niche=plan_data.get("niche", {}),
+        style=plan_data.get("style", {}),
+        shots=plan_data.get("shots", []),
+        text_overlays=plan_data.get("text_overlays", []),
+        subtitles=plan_data.get("subtitles", []),
+        zooms=plan_data.get("zooms", []),
+        audio_cues=plan_data.get("audio_cues", {}),
+    )
+
+    report = edit_quality_service.evaluate_edit_plan(plan)
+    status_str = "[bold green]PASSED[/bold green]" if report.passed else "[bold red]FAILED[/bold red]"
+    console.print(Panel(
+        f"[bold]Target:[/bold] {target_path.name}\n"
+        f"[bold]Quality Score:[/bold] {report.overall_score:.1f}/100 ({status_str})\n"
+        f"[bold]Checks Passed:[/bold] {sum(1 for c in report.checks if c.passed)}/{len(report.checks)}\n"
+        f"[bold]Warnings:[/bold] {len(report.warnings)}",
+        title="Stockpile Quality Control Audit",
+    ))
+
+    table = Table(title="Audit Checks Breakdown")
+    table.add_column("Check", style="cyan")
+    table.add_column("Category", style="magenta")
+    table.add_column("Status", style="bold")
+    table.add_column("Score", style="yellow")
+    table.add_column("Message", style="white")
+
+    for c in report.checks:
+        c_status = "[green]PASS[/green]" if c.passed else f"[{'yellow' if c.severity == 'warning' else 'red'}]{c.severity.upper()}[/{'yellow' if c.severity == 'warning' else 'red'}]"
+        table.add_row(
+            c.name,
+            c.category,
+            c_status,
+            f"{c.score * 100:.0f}%",
+            c.message,
+        )
+    console.print(table)
+
+
 def cmd_library(args):
     """Manage local B-Roll catalog."""
     subcmd = args.subcmd
@@ -467,10 +525,14 @@ def main():
     p_ge.add_argument("--hook", type=str, default=None, help="Custom hook title card text")
     p_ge.add_argument("--output-dir", type=str, default=None, help="Output folder for edit_plan.json")
 
-    # export-openreel command
-    p_eo = subparsers.add_parser("export-openreel", help="Export native OpenReel Schema 1.2.0 project (.oreel)")
+    # export-openreel / export-project command
+    p_eo = subparsers.add_parser("export-openreel", aliases=["export-project"], help="Export native OpenReel Schema 1.2.0 project (.oreel)")
     p_eo.add_argument("target", help="Path to video file OR edit_plan.json")
     p_eo.add_argument("--output-dir", type=str, default=None, help="Output directory for OpenReel files")
+
+    # qc command
+    p_qc = subparsers.add_parser("qc", help="Audit video edit plan for safe zones, readability, and pacing")
+    p_qc.add_argument("target", help="Path to edit_plan.json or job project manifest")
 
     # library command
     p_lib = subparsers.add_parser("library", help="Manage local-first B-roll catalog")
@@ -516,8 +578,10 @@ def main():
         asyncio.run(cmd_detect_clips(args))
     elif args.command == "generate-edit":
         asyncio.run(cmd_generate_edit(args))
-    elif args.command == "export-openreel":
+    elif args.command in ("export-openreel", "export-project"):
         asyncio.run(cmd_export_openreel(args))
+    elif args.command == "qc":
+        cmd_qc(args)
     elif args.command == "library":
         cmd_library(args)
     elif args.command == "run":

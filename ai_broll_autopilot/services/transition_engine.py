@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from ai_broll_autopilot.config import Config
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -127,14 +128,30 @@ Return ONLY a JSON list:
 ]
 """
 
-        resp = self.client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=[prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.2
-            )
-        )
+        models_to_try = [Config.GEMINI_MODEL] + [m for m in getattr(Config, "GEMINI_FALLBACK_MODELS", []) if m != Config.GEMINI_MODEL]
+        last_err = None
+        resp = None
+        for model_name in models_to_try:
+            try:
+                resp = self.client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                        http_options=types.HttpOptions(
+                            retry_options=types.HttpRetryOptions(attempts=1),
+                            timeout=6000
+                        )
+                    )
+                )
+                if resp and resp.text:
+                    break
+            except Exception as e:
+                last_err = e
+                continue
+        if not resp or not resp.text:
+            raise last_err or RuntimeError("No response from Gemini for transitions")
         recommendations = json.loads(resp.text)
         rec_map = {r["shot_id"]: r for r in recommendations if "shot_id" in r}
 

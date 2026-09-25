@@ -67,9 +67,11 @@ PROFILES = [
         description="Founder stories, startup growth, venture capital, pitching, and business strategy.",
         visual_keywords=[
             "founder", "startup", "office", "pitch", "whiteboard", "coding",
-            "product launch", "team meeting", "hustle", "laptop", "charts", "revenue"
+            "product launch", "team meeting", "hustle", "laptop", "charts", "revenue",
+            "marketing", "ads", "advertising", "ecommerce", "sales", "landing page",
+            "campaign", "meta", "funnel", "conversion", "digital marketing"
         ],
-        broll_categories=["office_collaboration", "pitch_meeting", "product_work", "data_charts", "founders"],
+        broll_categories=["office_collaboration", "pitch_meeting", "product_work", "data_charts", "founders", "marketing", "ecommerce"],
         preferred_energy="medium",
         editing=NicheEditingPreferences(
             pace="moderate",

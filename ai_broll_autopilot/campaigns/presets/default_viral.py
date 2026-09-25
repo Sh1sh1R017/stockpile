@@ -28,10 +28,11 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     preserve_dialogue_only=False,
 
     # Visual & B-roll rules
-    allow_ai_broll=True,
-    max_broll_ratio=0.60,
+    allow_ai_broll=False,
+    max_broll_ratio=0.45,
     max_cutaway_seconds=2.5,
     speed_multiplier=1.25,
+    niche_id="generic",
 
     # Watermark rules
     watermark_required=False,

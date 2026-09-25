@@ -22,6 +22,9 @@ from ai_broll_autopilot.services.video_sfx_analyzer import VideoSFXAnalyzer
 from ai_broll_autopilot.services.transition_engine import TransitionEngine
 from ai_broll_autopilot.services.subtitle_engine import SubtitleEngine
 from ai_broll_autopilot.services.bgm_engine import BGMEngine
+from ai_broll_autopilot.services.openreel_adapter import openreel_adapter
+from ai_broll_autopilot.services.edit_director import EditPlan
+from ai_broll_autopilot.services.qc_service import edit_quality_service
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +233,7 @@ class Orchestrator:
                 ass_subtitles_path=ass_path,
                 bgm_path=bgm_path,
                 bgm_volume=0.14,
-                upscale_hdr=False if campaign.id == "curious_mike" else True,
+                upscale_hdr=getattr(job, "upscale_hdr", False),
                 hdr_scale=1.0,
                 hdr_tone="vivid",
                 watermark_path=wm_path,
@@ -325,6 +328,39 @@ class Orchestrator:
                 logger.info(f"Generated Feedback Survey at: {survey_path.name}")
             except Exception as fe:
                 logger.warning(f"Could not generate feedback survey: {fe}")
+
+            # 8.6 Generate Native OpenReel Project Bundle (.oreel / project.json / manifest)
+            try:
+                openreel_dir = Path(delivery_res["final_video"]).parent / "openreel"
+                openreel_dir.mkdir(parents=True, exist_ok=True)
+                plan_dict = job.edit_plan or {}
+                source_meta = {
+                    "path": job.source_file,
+                    "duration": total_duration,
+                    "title": job.source_filename,
+                }
+                plan_obj = EditPlan(
+                    plan_id=f"plan_{job.job_id}",
+                    title=f"Edit: {Path(job.source_filename).stem}",
+                    target_duration=total_duration,
+                    source_media=source_meta,
+                    clip_interval={"in_point": 0.0, "out_point": total_duration},
+                    niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
+                    style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
+                    shots=plan_dict.get("shots", []),
+                    text_overlays=plan_dict.get("text_overlays", []),
+                    subtitles=plan_dict.get("subtitles", []),
+                    zooms=plan_dict.get("zooms", []),
+                    audio_cues=plan_dict.get("audio_cues", {}),
+                )
+                openreel_adapter.export_project_files(
+                    edit_plan=plan_obj,
+                    output_dir=openreel_dir,
+                    project_filename=f"{job.job_id}.oreel",
+                )
+                logger.info(f"Generated OpenReel Project Bundle at: {openreel_dir}")
+            except Exception as oreel_err:
+                logger.warning(f"Could not generate OpenReel project bundle: {oreel_err}")
 
             # 9. COMPLETED
             self._update_state(

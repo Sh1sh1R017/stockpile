@@ -491,6 +491,7 @@ CURIOUS_MIKE_CAMPAIGN = CampaignConfig(
     max_broll_ratio=0.33,
     max_cutaway_seconds=3.0,
     speed_multiplier=1.0,
+    niche_id="sports_basketball",
     
     # Frame Overlay & Framing rules - authentic torn paper cutout border
     frame_overlay_required=True,

@@ -20,6 +20,8 @@ from ai_broll_autopilot.services.clip_detector import clip_detector
 from ai_broll_autopilot.services.edit_director import edit_director
 from ai_broll_autopilot.services.openreel_adapter import openreel_adapter, OPENREEL_SCHEMA_VERSION
 from ai_broll_autopilot.services.broll_library import broll_library
+from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+from ai_broll_autopilot.services.qc_service import edit_quality_service
 
 
 def test_niches_and_styles_registered():
@@ -240,3 +242,56 @@ def test_broll_library_indexing_and_search():
     # Search generic
     results = broll_library.search_local("reaction", niche_id="generic")
     assert isinstance(results, list)
+
+
+def test_subject_isolation_and_behind_subject():
+    """Verify subject isolation layout and behindSubject OpenReel text overlay generation."""
+    # Test layout estimation
+    layout = subject_isolation_service.analyze_subject_layout("dummy_path.mp4")
+    assert layout["subject_present"] is True
+    assert 0.15 <= layout["recommended_text_y"] <= 0.40
+
+    # Test behindSubject TextClip construction
+    clip = subject_isolation_service.plan_behind_subject_overlay(
+        text="COLLIN SEXTON",
+        start_time=0.5,
+        duration=2.5,
+        font_family="Anton",
+        emphasis_color="#FFDD00",
+        animation_preset="pop",
+        subject_layout=layout,
+    )
+    assert clip["behindSubject"] is True
+    assert clip["text"] == "COLLIN SEXTON"
+    assert clip["animation"]["preset"] == "pop"
+    assert clip["style"]["fontFamily"] == "Anton"
+    assert clip["transform"]["position"]["y"] == layout["recommended_text_y"]
+    assert 0.0 <= clip["transform"]["position"]["x"] <= 1.0
+
+
+def test_edit_quality_service():
+    """Verify 5-metric Quality Control auditing and scoring."""
+    source_media = {
+        "path": "sample.mp4",
+        "duration": 20.0,
+    }
+    plan = asyncio.run(edit_director.plan_edit(
+        source_media=source_media,
+        transcript_segments=[
+            {"start": 0.0, "end": 4.0, "text": "This is an incredible moment."},
+            {"start": 4.0, "end": 10.0, "text": "We are breaking down the entire strategy right here."},
+        ],
+        in_point=0.0,
+        out_point=10.0,
+        niche_id="sports_basketball",
+        style_id="sports_editorial",
+    ))
+    report = edit_quality_service.evaluate_edit_plan(plan)
+    assert report.overall_score >= 70.0
+    assert len(report.checks) >= 5
+    categories = {c.category for c in report.checks}
+    assert "pacing" in categories
+    assert "typography" in categories
+    assert "safe_zone" in categories
+    assert "audio" in categories
+

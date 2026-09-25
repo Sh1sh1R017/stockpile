@@ -48,6 +48,7 @@ class CampaignConfig:
     max_broll_ratio: float = 0.60
     max_cutaway_seconds: float = 2.5
     speed_multiplier: float = 1.0
+    niche_id: Optional[str] = None
 
     # Frame Overlay & Framing rules
     frame_overlay_required: bool = False
@@ -100,6 +101,7 @@ class CampaignConfig:
             "allow_ai_broll": self.allow_ai_broll,
             "max_broll_ratio": self.max_broll_ratio,
             "max_cutaway_seconds": self.max_cutaway_seconds,
+            "niche_id": self.niche_id,
             "frame_overlay_required": self.frame_overlay_required,
             "frame_viewport": self.frame_viewport,
             "watermark_required": self.watermark_required,

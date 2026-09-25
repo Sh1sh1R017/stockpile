@@ -34,6 +34,7 @@ from ai_broll_autopilot.services.edit_director import edit_director, EditPlan
 from ai_broll_autopilot.services.openreel_adapter import openreel_adapter
 from ai_broll_autopilot.services.broll_library import broll_library, extract_media_metadata
 from ai_broll_autopilot.services.transcriber import Transcriber
+from ai_broll_autopilot.services.qc_service import edit_quality_service
 
 logger = logging.getLogger(__name__)
 
@@ -394,12 +395,13 @@ async def get_job_broll_thumb(job_id: str, shot_id: str):
             "-ss", "0.5",
             "-i", str(target_path),
             "-frames:v", "1",
+            "-update", "1",
             "-q:v", "2",
             str(thumb_path)
         ]
         try:
-            proc = await asyncio.create_subprocess_exec(*cmd)
-            await proc.wait()
+            import subprocess
+            await asyncio.to_thread(subprocess.run, cmd, capture_output=True, check=True)
         except Exception as e:
             logger.error(f"Failed to generate thumb for {shot_id}: {e}")
 
@@ -492,6 +494,181 @@ async def export_job_zip(job_id: str):
         media_type="application/zip",
         filename=f"package_{clean_name}.zip"
     )
+
+
+@app.get("/api/jobs/{job_id}/openreel-project")
+async def get_job_openreel_project(job_id: str):
+    """Retrieve native OpenReel Schema 1.2.0 project JSON for this job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check if pre-generated project exists in workspace
+    oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
+    project_oreel = oreel_dir / f"{job.job_id}.oreel"
+    project_json = oreel_dir / "project.json"
+
+    if project_oreel.exists():
+        try:
+            with open(project_oreel, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                items = data.get("project", {}).get("mediaLibrary", {}).get("items", [])
+                has_file_urls = any((item.get("url") or "").startswith("file:///") for item in items)
+                if not has_file_urls and items:
+                    return data
+        except Exception:
+            pass
+
+    # Convert on the fly from job.edit_plan
+    if not job.edit_plan:
+        raise HTTPException(status_code=400, detail="Job does not have an edit plan yet")
+
+    plan_dict = job.edit_plan
+    shots = plan_dict.get("shots", [])
+    total_dur = plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0
+
+    plan_obj = EditPlan(
+        plan_id=f"plan_{job.job_id}",
+        title=f"Edit: {Path(job.source_filename).stem}",
+        target_duration=float(total_dur),
+        source_media={"path": job.source_file, "duration": float(total_dur), "title": job.source_filename},
+        clip_interval={"in_point": 0.0, "out_point": float(total_dur)},
+        niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
+        style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
+        shots=shots,
+        text_overlays=plan_dict.get("text_overlays", []),
+        subtitles=plan_dict.get("subtitles", []),
+        zooms=plan_dict.get("zooms", []),
+        audio_cues=plan_dict.get("audio_cues", {}),
+    )
+
+    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{job.job_id}/assets"
+
+    oreel_dir.mkdir(parents=True, exist_ok=True)
+    openreel_adapter.export_project_files(
+        edit_plan=plan_obj,
+        output_dir=oreel_dir,
+        project_filename=f"{job.job_id}.oreel",
+        base_asset_url=base_asset_url,
+    )
+    return openreel_adapter.create_openreel_project(plan_obj, base_asset_url=base_asset_url)
+
+
+@app.api_route("/api/jobs/{job_id}/assets/{asset_name:path}", methods=["GET", "HEAD"])
+async def get_job_asset(job_id: str, asset_name: str):
+    """Serve media assets (source video, B-roll clips, audio, graphics) to OpenReel Editor."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    clean_asset = Path(asset_name).name
+
+    # 1. Main A-Roll source video
+    if clean_asset in ("source", "main", Path(job.source_filename).name):
+        if job.source_file and Path(job.source_file).exists():
+            return FileResponse(path=str(job.source_file), media_type="video/mp4", filename=clean_asset)
+
+    # 2. B-roll workspace directory
+    broll_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+    target = broll_dir / clean_asset
+    if target.exists():
+        return FileResponse(path=str(target), media_type="video/mp4", filename=clean_asset)
+
+    # Also check if asset_name matches any shot_id prefix in broll_dir
+    if broll_dir.exists():
+        for f in broll_dir.iterdir():
+            if f.is_file() and f.name.startswith(clean_asset):
+                return FileResponse(path=str(f), media_type="video/mp4", filename=f.name)
+
+    # 3. SFX or audio in workspace
+    sfx_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "sfx"
+    target = sfx_dir / clean_asset
+    if target.exists():
+        return FileResponse(path=str(target), media_type="audio/mpeg", filename=clean_asset)
+
+    # 4. Global static SFX
+    static_sfx = Path("ai_broll_autopilot/assets/sfx") / clean_asset
+    if static_sfx.exists():
+        return FileResponse(path=str(static_sfx), media_type="audio/mpeg", filename=clean_asset)
+
+    # 5. Direct workspace asset
+    target = Config.OUTPUT_DIR / "workspace" / job.job_id / clean_asset
+    if target.exists():
+        return FileResponse(path=str(target), filename=clean_asset)
+
+    raise HTTPException(status_code=404, detail=f"Asset '{asset_name}' not found for job {job_id}")
+
+
+@app.get("/api/jobs/{job_id}/export/openreel")
+async def export_job_openreel_file(job_id: str):
+    """Download OpenReel project bundle (.oreel) for direct opening in OpenReel."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
+    project_oreel = oreel_dir / f"{job.job_id}.oreel"
+
+    if not project_oreel.exists():
+        await get_job_openreel_project(job_id)
+
+    if not project_oreel.exists():
+        raise HTTPException(status_code=500, detail="Could not generate OpenReel project file")
+
+    clean_name = Path(job.source_filename).stem
+    return FileResponse(
+        path=str(project_oreel),
+        media_type="application/json",
+        filename=f"{clean_name}.oreel",
+    )
+
+
+@app.get("/api/jobs/{job_id}/openreel-manifest")
+async def get_job_openreel_manifest(job_id: str):
+    """Get project manifest detailing tracks, assets, and OpenReel import instructions."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    manifest_path = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel" / "project_manifest.json"
+    if not manifest_path.exists():
+        await get_job_openreel_project(job_id)
+
+    if manifest_path.exists():
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    raise HTTPException(status_code=404, detail="Manifest not found for job")
+
+
+@app.get("/api/jobs/{job_id}/qc-report")
+async def get_job_qc_report(job_id: str):
+    """Audit edit plan and return 5-point Quality Control report (pacing, safe zones, readability, audio)."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    plan_dict = job.edit_plan or {}
+    total_dur = plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0
+
+    plan_obj = EditPlan(
+        plan_id=f"plan_{job.job_id}",
+        title=f"Edit: {Path(job.source_filename).stem}",
+        target_duration=float(total_dur),
+        source_media={"path": job.source_file, "duration": float(total_dur)},
+        clip_interval={"in_point": 0.0, "out_point": float(total_dur)},
+        niche=plan_dict.get("niche", {}),
+        style=plan_dict.get("style", {}),
+        shots=plan_dict.get("shots", []),
+        text_overlays=plan_dict.get("text_overlays", []),
+        subtitles=plan_dict.get("subtitles", []),
+        zooms=plan_dict.get("zooms", []),
+        audio_cues=plan_dict.get("audio_cues", {}),
+    )
+
+    report = edit_quality_service.evaluate_edit_plan(plan_obj)
+    return report.to_dict()
+
 
 
 @app.delete("/api/jobs/{job_id}")

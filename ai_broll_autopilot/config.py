@@ -26,14 +26,11 @@ class Config:
 
     # AI & Models
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     GEMINI_FALLBACK_MODELS: List[str] = [
-        "gemini-flash-lite-latest",
-        "gemini-3.1-flash-lite",
+        "gemini-3.6-flash",
         "gemini-3-flash-preview",
         "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-3.6-flash",
     ]
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
 
