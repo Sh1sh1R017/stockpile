@@ -563,24 +563,50 @@ async def get_job_openreel_project(job_id: str):
 
         # ---- Collect B-roll files from workspace ----
         broll_workspace = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
-        broll_files: list[Path] = sorted(broll_workspace.glob("*.mp4")) if broll_workspace.exists() else []
+        broll_workspace.mkdir(parents=True, exist_ok=True)
+        broll_files: list[Path] = sorted(broll_workspace.glob("*.mp4"))
 
         # Build shot → broll file mapping from edit_plan
         plan_shots = job.edit_plan.get("shots", []) if job.edit_plan else []
-        # Match shots that have asset_path set, else try to match by index with broll files
         shot_broll_pairs = []
         for i, shot in enumerate(plan_shots):
             asset_path = shot.get("asset_path")
+            bfile = None
             if asset_path and Path(asset_path).exists():
                 bfile = Path(asset_path)
             elif i < len(broll_files):
                 bfile = broll_files[i]
             else:
-                bfile = None
+                # If cache was cleared or file missing, extract cutaway from final_video_path on demand
+                cand_name = Path(asset_path).name if asset_path else f"broll_{i+1}.mp4"
+                target = broll_workspace / cand_name
+                if not target.exists() and final_video_path and final_video_path.exists():
+                    st = float(shot.get("start_time", 0.0))
+                    dur = float(shot.get("duration", 2.0))
+                    cmd = ["ffmpeg", "-y", "-ss", str(st), "-i", str(final_video_path), "-t", str(dur), "-c", "copy", str(target)]
+                    try:
+                        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+                    except Exception:
+                        pass
+                if target.exists():
+                    bfile = target
+                else:
+                    bfile = target
+
+            # Also ensure thumbnail exists
+            if bfile and bfile.exists():
+                thumb_target = broll_workspace / f"{bfile.stem}_thumb.jpg"
+                if not thumb_target.exists():
+                    cmd = ["ffmpeg", "-y", "-ss", "0.5", "-i", str(bfile), "-frames:v", "1", "-update", "1", "-q:v", "2", str(thumb_target)]
+                    try:
+                        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+                    except Exception:
+                        pass
+
             shot_broll_pairs.append((shot, bfile))
 
-        # Also include any broll files not matched to a shot
-        matched_files = {p for _, p in shot_broll_pairs if p}
+        # Also include any extra broll files not matched to a shot
+        matched_files = {p for _, p in shot_broll_pairs if p and p.exists()}
         unmatched_broll = [f for f in broll_files if f not in matched_files]
 
         # ---- Build media library items ----
@@ -623,6 +649,7 @@ async def get_job_openreel_project(job_id: str):
             bname = bfile.name
             burl = f"{base_asset_url}/{urllib.parse.quote(bname)}"
             bthumb = f"{base_asset_url}/{urllib.parse.quote(bname)}/thumb"
+            fsize = bfile.stat().st_size if bfile.exists() else 0
             return {
                 "id": media_id,
                 "name": bname,
@@ -635,7 +662,7 @@ async def get_job_openreel_project(job_id: str):
                     "codec": "h264",
                     "sampleRate": 48000,
                     "channels": 2,
-                    "fileSize": bfile.stat().st_size,
+                    "fileSize": fsize,
                     "hasVideo": True,
                     "hasAudio": False,
                 },
@@ -648,14 +675,14 @@ async def get_job_openreel_project(job_id: str):
                 "url": burl,
                 "sourceFile": {
                     "name": bname,
-                    "size": bfile.stat().st_size,
+                    "size": fsize,
                     "lastModified": now_ms,
                 },
             }
 
         for i, (shot, bfile) in enumerate(shot_broll_pairs):
             if not bfile:
-                continue
+                bfile = broll_workspace / f"broll_{i+1}.mp4"
             shot_id = shot.get("shot_id", f"broll_{i+1}")
             media_id = f"media_broll_{i+1}"
             st = float(shot.get("start_time", 0.0))
@@ -1033,6 +1060,30 @@ async def get_job_asset(job_id: str, asset_name: str):
     broll_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
     if broll_dir.exists():
         target = broll_dir / clean_name
+        if not target.exists() and clean_name.endswith(".mp4"):
+            # On-demand recover/slice from final video
+            final_cand = None
+            for d in Config.OUTPUT_DIR.iterdir():
+                if d.is_dir() and job.job_id in d.name:
+                    finals = sorted(d.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if finals:
+                        final_cand = finals[0]
+                        break
+            if final_cand and job.edit_plan:
+                for idx, shot in enumerate(job.edit_plan.get("shots", [])):
+                    sid = shot.get("shot_id", f"broll_{idx+1}")
+                    s_asset = Path(shot.get("asset_path", "")).name
+                    if clean_name in (f"{sid}.mp4", f"broll_{idx+1}.mp4", s_asset):
+                        st = float(shot.get("start_time", 0.0))
+                        dur = float(shot.get("duration", 2.0))
+                        cmd = ["ffmpeg", "-y", "-ss", str(st), "-i", str(final_cand), "-t", str(dur), "-c", "copy", str(target)]
+                        try:
+                            import subprocess
+                            subprocess.run(cmd, capture_output=True)
+                        except Exception:
+                            pass
+                        break
+
         if target.exists():
             return FileResponse(path=str(target), media_type=_infer_mime(clean_name), filename=clean_name, content_disposition_type="inline")
         for f in broll_dir.iterdir():

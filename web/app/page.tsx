@@ -1736,13 +1736,12 @@ export default function StudioDashboard() {
 
                 {/* Open in OpenReel Button */}
                 <button
-                  onClick={handleExportToOpenReel}
-                  disabled={isOpenReelExporting}
+                  onClick={() => selectedJob && setEmbeddedOpenReelJob(selectedJob.job_id)}
                   className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02]"
-                  title="Export non-destructive multitrack project to OpenReel Schema 1.2.0 (.oreel)"
+                  title="Launch live multi-track OpenReel video editor inside this dashboard"
                 >
-                  <Film className={`w-3.5 h-3.5 ${isOpenReelExporting ? "animate-spin" : ""}`} />
-                  <span>{isOpenReelExporting ? "Exporting OpenReel..." : "🎬 Open in OpenReel"}</span>
+                  <Film className="w-3.5 h-3.5 text-indigo-200" />
+                  <span>🎬 Open in OpenReel</span>
                 </button>
               </div>
             </div>
