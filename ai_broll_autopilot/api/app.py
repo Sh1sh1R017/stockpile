@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -61,6 +61,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    return response
 
 # Shared instances
 db = Database()
