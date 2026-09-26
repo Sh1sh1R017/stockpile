@@ -3797,9 +3797,20 @@ export default function StudioDashboard() {
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setOpenReelModalData(null)}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all"
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs px-4 py-2 rounded-xl transition-all"
               >
-                Done
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const id = openReelModalData.project_id?.replace(/^proj_/, "") || selectedJob?.job_id;
+                  setOpenReelModalData(null);
+                  if (id) setEmbeddedOpenReelJob(id);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-emerald-950/40"
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>Launch in OpenReel Studio</span>
               </button>
             </div>
           </div>

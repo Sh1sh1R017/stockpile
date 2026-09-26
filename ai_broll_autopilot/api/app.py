@@ -2075,10 +2075,13 @@ async def rerender_job_video(job_id: str):
 
     raw_shots = job.edit_plan.get("shots", [])
 
-    # Compulsory check: ensure Shot 1 (first 5 seconds) is a meme cutaway and has a valid rendered video asset
+    from ai_broll_autopilot.campaigns.registry import campaign_registry
+    campaign = campaign_registry.get_campaign(getattr(job, "campaign_id", "default"))
+
+    # Compulsory check: ensure Shot 1 is a meme cutaway only if campaign permits AI/meme broll
     from ai_broll_autopilot.services.meme_engine import MemeEngine
     meme_engine = MemeEngine()
-    if raw_shots:
+    if raw_shots and campaign.allow_ai_broll:
         shot_0 = raw_shots[0]
         curr_p = str(shot_0.get("asset_path", "")).lower()
         if shot_0.get("style") != "meme" or not curr_p or "pexels" in curr_p or not os.path.exists(shot_0.get("asset_path", "")):
@@ -2153,11 +2156,27 @@ async def rerender_job_video(job_id: str):
         hdr_tone=hdr_tone
     )
 
-    # Also update final output video if exists
+    # Guarantee final output video path and master status
     if job.output_video_path:
         final_dest = Path(job.output_video_path)
         final_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(out_path, final_dest)
+    else:
+        final_dir = Config.OUTPUT_DIR / f"{job.job_id}_{Path(job.source_filename).stem}"
+        final_dir.mkdir(parents=True, exist_ok=True)
+        final_dest = final_dir / f"final_{Path(job.source_filename).stem}.mp4"
+        shutil.copy2(out_path, final_dest)
+        job.output_video_path = str(final_dest)
+
+    job.status = JobState.COMPLETED
+
+    # Refresh final thumbnail
+    final_thumb = work_dir / "final_thumb.jpg"
+    cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_dest), "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
+    try:
+        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+    except Exception:
+        pass
 
     db.save_job(job)
     return {
