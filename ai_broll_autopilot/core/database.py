@@ -52,6 +52,10 @@ class Database:
             except Exception:
                 pass
 
+            # Performance indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs (status)")
+
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS job_transitions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +171,43 @@ class Database:
                     (limit,)
                 )
             return [self._row_to_job(r) for r in cursor.fetchall()]
+
+    def list_job_summaries(self, limit: int = 50, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fast query returning lightweight summary dicts without parsing heavy JSON blobs."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cols = """
+                job_id, source_file, source_filename, status, progress,
+                created_at, updated_at, error_message, output_video_path,
+                drive_file_url, campaign_id
+            """
+            if status:
+                cursor.execute(
+                    f"SELECT {cols} FROM jobs WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                    (status, limit)
+                )
+            else:
+                cursor.execute(
+                    f"SELECT {cols} FROM jobs ORDER BY created_at DESC LIMIT ?",
+                    (limit,)
+                )
+            rows = cursor.fetchall()
+            summaries = []
+            for r in rows:
+                summaries.append({
+                    "job_id": r["job_id"],
+                    "source_file": r["source_file"],
+                    "source_filename": r["source_filename"],
+                    "status": r["status"],
+                    "progress": r["progress"] or 0.0,
+                    "created_at": r["created_at"],
+                    "updated_at": r["updated_at"],
+                    "error_message": r["error_message"],
+                    "output_video_path": r["output_video_path"],
+                    "drive_file_url": r["drive_file_url"],
+                    "campaign_id": r["campaign_id"] if "campaign_id" in r.keys() and r["campaign_id"] else "default",
+                })
+            return summaries
 
     def has_completed_job_for_file(self, filename: str) -> bool:
         with self._get_connection() as conn:

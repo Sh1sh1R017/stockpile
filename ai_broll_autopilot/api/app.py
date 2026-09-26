@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -47,6 +49,9 @@ app = FastAPI(
     version="1.0.0",
     description="Backend API for AI B-Roll Autopilot Studio",
 )
+
+# Enable GZip compression for responses > 1000 bytes
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Enable CORS for Next.js web frontend
 app.add_middleware(
@@ -198,31 +203,24 @@ async def get_stats():
 
 @app.get("/api/jobs")
 async def list_jobs(limit: int = 50):
-    """List all jobs with metadata and status."""
-    jobs = db.list_jobs(limit=limit)
+    """List all jobs with metadata and status using lightweight summary queries."""
+    summaries = db.list_job_summaries(limit=limit)
     res = []
-    for j in jobs:
-        # Check if output file exists
-        has_video = bool(j.output_video_path and Path(j.output_video_path).exists())
-
-        # Extract emotional summary if available
-        emotional_summary = None
-        if j.edit_plan and isinstance(j.edit_plan, dict):
-            emotional_summary = j.edit_plan.get("summary")
-
+    for s in summaries:
+        has_video = bool(s.get("output_video_path") and Path(s["output_video_path"]).exists())
         res.append({
-            "job_id": j.job_id,
-            "filename": j.source_filename,
-            "status": j.status.value,
-            "progress": j.progress,
-            "created_at": j.created_at,
-            "updated_at": j.updated_at,
-            "error_message": j.error_message,
+            "job_id": s["job_id"],
+            "filename": s["source_filename"],
+            "status": s["status"],
+            "progress": s["progress"],
+            "created_at": s["created_at"],
+            "updated_at": s["updated_at"],
+            "error_message": s["error_message"],
             "has_video": has_video,
-            "emotional_summary": emotional_summary,
-            "drive_file_url": j.drive_file_url,
-            "review_data": j.review_data,
-            "campaign_id": getattr(j, "campaign_id", "default"),
+            "emotional_summary": None,
+            "drive_file_url": s.get("drive_file_url"),
+            "review_data": None,
+            "campaign_id": s.get("campaign_id", "default"),
         })
     return res
 
@@ -963,23 +961,28 @@ async def get_job_asset(job_id: str, asset_name: str):
     # Handle Thumbnail requests
     if is_thumb:
         # 0. Final rendered video thumbnail
-        if clean_name in ("final", "final_render", "output"):
+        if clean_name in ("final", "final_render", "output") or (job.output_video_path and clean_name == Path(job.output_video_path).name):
             ws_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
             ws_dir.mkdir(parents=True, exist_ok=True)
             final_thumb = ws_dir / "final_thumb.jpg"
             if not final_thumb.exists():
-                # Find the final rendered file
-                for candidate_dir in Config.OUTPUT_DIR.iterdir():
-                    if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
-                        finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-                        if finals:
-                            cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(finals[0]),
-                                   "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
-                            try:
-                                await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-                            except Exception:
-                                pass
-                            break
+                final_video_file = None
+                if job.output_video_path and Path(job.output_video_path).exists():
+                    final_video_file = Path(job.output_video_path)
+                else:
+                    for candidate_dir in Config.OUTPUT_DIR.iterdir():
+                        if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
+                            finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                            if finals:
+                                final_video_file = finals[0]
+                                break
+                if final_video_file and final_video_file.exists():
+                    cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_video_file),
+                           "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
+                    try:
+                        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+                    except Exception as e:
+                        logger.warning(f"Failed to generate final thumb: {e}")
             if final_thumb.exists():
                 return FileResponse(path=str(final_thumb), media_type="image/jpeg",
                                     filename="final_thumb.jpg", content_disposition_type="inline")
@@ -991,7 +994,6 @@ async def get_job_asset(job_id: str, asset_name: str):
                 source_thumb.parent.mkdir(parents=True, exist_ok=True)
                 cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(job.source_file), "-frames:v", "1", "-update", "1", "-q:v", "2", str(source_thumb)]
                 try:
-                    import subprocess
                     await asyncio.to_thread(subprocess.run, cmd, capture_output=True, check=True)
                 except Exception as e:
                     logger.error(f"Failed to generate source thumb: {e}")
@@ -1014,7 +1016,6 @@ async def get_job_asset(job_id: str, asset_name: str):
                 thumb_target = broll_dir / f"{stem}_thumb.jpg"
                 cmd = ["ffmpeg", "-y", "-ss", "0.5", "-i", str(vid_cand), "-frames:v", "1", "-update", "1", "-q:v", "2", str(thumb_target)]
                 try:
-                    import subprocess
                     await asyncio.to_thread(subprocess.run, cmd, capture_output=True, check=True)
                     if thumb_target.exists():
                         return FileResponse(path=str(thumb_target), media_type="image/jpeg", filename=thumb_target.name, content_disposition_type="inline")
@@ -1025,10 +1026,11 @@ async def get_job_asset(job_id: str, asset_name: str):
 
     # Regular Asset requests
     # 0. Rendered final output video — what the AI editor produced (9:16 with face tracking, B-roll, captions baked in)
-    if clean_name in ("final", "final_render", "output"):
+    if clean_name in ("final", "final_render", "output") or (job.output_video_path and clean_name == Path(job.output_video_path).name):
+        if job.output_video_path and Path(job.output_video_path).exists():
+            return FileResponse(path=str(job.output_video_path), media_type="video/mp4", filename=Path(job.output_video_path).name, content_disposition_type="inline")
         # Find the rendered final file for this job
         job_out_dir = Config.OUTPUT_DIR / job.job_id if (Config.OUTPUT_DIR / job.job_id).exists() else None
-        # Also scan output root for dirs that start with job_id prefix
         if not job_out_dir:
             for d in Config.OUTPUT_DIR.iterdir():
                 if d.is_dir() and job.job_id in d.name:
@@ -1037,19 +1039,7 @@ async def get_job_asset(job_id: str, asset_name: str):
         if job_out_dir:
             final_candidates = sorted(job_out_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
             if final_candidates:
-                final_path = final_candidates[0]
-                if is_thumb:
-                    thumb_path = final_path.parent / f"{final_path.stem}_thumb.jpg"
-                    if not thumb_path.exists():
-                        cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_path), "-frames:v", "1", "-update", "1", "-q:v", "2", str(thumb_path)]
-                        try:
-                            await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-                        except Exception:
-                            pass
-                    if thumb_path.exists():
-                        return FileResponse(path=str(thumb_path), media_type="image/jpeg", filename=thumb_path.name, content_disposition_type="inline")
-                else:
-                    return FileResponse(path=str(final_path), media_type="video/mp4", filename=final_path.name, content_disposition_type="inline")
+                return FileResponse(path=str(final_candidates[0]), media_type="video/mp4", filename=final_candidates[0].name, content_disposition_type="inline")
 
     # 1. Main A-Roll source video
     if clean_name in ("source", "main", Path(job.source_filename).name):
