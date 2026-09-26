@@ -40,7 +40,7 @@ export const ShotCard: React.FC<ShotCardProps> = React.memo(
     const duration = (shot.end_time - shot.start_time) || 2.5;
 
     return (
-      <div className="bg-zinc-900/80 border border-zinc-800/90 hover:border-zinc-700/80 rounded-2xl p-5 space-y-3.5 shadow-xl transition-all">
+      <div className="bg-zinc-900/80 border border-zinc-800/90 hover:border-zinc-700/80 rounded-2xl p-5 space-y-3.5 shadow-xl transition-all content-auto">
         {/* Header Row */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

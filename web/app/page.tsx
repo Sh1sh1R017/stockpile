@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import {
   Upload,
@@ -327,19 +327,26 @@ export default function StudioDashboard() {
 
   const [isAutoGeneratingMeme, setIsAutoGeneratingMeme] = useState<Record<string, boolean>>({});
 
-  const handleAutoGenerateMeme = async (shotId: string) => {
-    if (!selectedJob) return;
+  const handleAutoGenerateMeme = useCallback(async (shotId: string) => {
+    const currentId = selectedJobIdRef.current;
+    if (!currentId) return;
     setIsAutoGeneratingMeme((prev) => ({ ...prev, [shotId]: true }));
     try {
       const res = await fetch(
-        `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/shots/${encodeURIComponent(shotId)}/auto-meme`,
+        `/api/jobs/${encodeURIComponent(currentId)}/shots/${encodeURIComponent(shotId)}/auto-meme`,
         { method: "POST" }
       );
       if (res.ok) {
         const data = await res.json();
         showToast(`AI generated unique meme: ${data.shot?.meme_template || "Meme"}!`);
-        const jres = await fetch(`/api/jobs/${encodeURIComponent(selectedJob.job_id)}`);
-        if (jres.ok) setSelectedJob(await jres.json());
+        const jres = await fetch(`/api/jobs/${encodeURIComponent(currentId)}`);
+        if (jres.ok) {
+          const updated = await jres.json();
+          setSelectedJob(updated);
+          if (jobDetailsCache.current) {
+            jobDetailsCache.current[currentId] = updated;
+          }
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         alert(`Auto-meme generation failed: ${err.detail || "Server error"}`);
@@ -349,7 +356,7 @@ export default function StudioDashboard() {
     } finally {
       setIsAutoGeneratingMeme((prev) => ({ ...prev, [shotId]: false }));
     }
-  };
+  }, []);
 
   const openMemeCustomizerForShot = (shot: ShotDetail) => {
     setMemeTargetShot(shot);
@@ -624,15 +631,16 @@ export default function StudioDashboard() {
     }
   };
 
-  const handleTrimShot = async (shotId: string, newStart: number, newEnd: number) => {
-    if (!selectedJobId) return;
+  const handleTrimShot = useCallback(async (shotId: string, newStart: number, newEnd: number) => {
+    const currentId = selectedJobIdRef.current;
+    if (!currentId) return;
     const clampedStart = Math.max(0, Math.round(newStart * 10) / 10);
     const clampedEnd = Math.max(clampedStart + 0.3, Math.round(newEnd * 10) / 10);
 
     setIsTrimming((prev) => ({ ...prev, [shotId]: true }));
     try {
       const res = await fetch(
-        `/api/jobs/${encodeURIComponent(selectedJobId)}/shots/${encodeURIComponent(shotId)}`,
+        `/api/jobs/${encodeURIComponent(currentId)}/shots/${encodeURIComponent(shotId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -645,15 +653,20 @@ export default function StudioDashboard() {
       if (res.ok) {
         const data = await res.json();
         showToast(`Trimmed Cutaway: ${clampedStart}s → ${clampedEnd}s`);
-        if (selectedJob && selectedJob.edit_plan) {
-          setSelectedJob({
-            ...selectedJob,
+        setSelectedJob((prev) => {
+          if (!prev || !prev.edit_plan) return prev;
+          const updated = {
+            ...prev,
             edit_plan: {
-              ...selectedJob.edit_plan,
+              ...prev.edit_plan,
               shots: data.shots,
             },
-          });
-        }
+          };
+          if (jobDetailsCache.current) {
+            jobDetailsCache.current[currentId] = updated;
+          }
+          return updated;
+        });
       } else {
         const err = await res.json().catch(() => ({}));
         showToast(`Trim failed: ${err.detail || "Invalid timestamp"}`);
@@ -663,28 +676,34 @@ export default function StudioDashboard() {
     } finally {
       setIsTrimming((prev) => ({ ...prev, [shotId]: false }));
     }
-  };
+  }, []);
 
-  const handleDeleteShot = async (shotId: string) => {
-    if (!selectedJobId) return;
+  const handleDeleteShot = useCallback(async (shotId: string) => {
+    const currentId = selectedJobIdRef.current;
+    if (!currentId) return;
     if (!confirm(`Are you sure you want to remove Cutaway ${shotId}?`)) return;
 
     try {
       const res = await fetch(
-        `/api/jobs/${encodeURIComponent(selectedJobId)}/shots/${encodeURIComponent(shotId)}`,
+        `/api/jobs/${encodeURIComponent(currentId)}/shots/${encodeURIComponent(shotId)}`,
         { method: "DELETE" }
       );
       if (res.ok) {
         showToast(`Removed Cutaway ${shotId}`);
-        if (selectedJob && selectedJob.edit_plan) {
-          setSelectedJob({
-            ...selectedJob,
+        setSelectedJob((prev) => {
+          if (!prev || !prev.edit_plan) return prev;
+          const updated = {
+            ...prev,
             edit_plan: {
-              ...selectedJob.edit_plan,
-              shots: selectedJob.edit_plan.shots.filter((s) => s.shot_id !== shotId),
+              ...prev.edit_plan,
+              shots: prev.edit_plan.shots.filter((s) => s.shot_id !== shotId),
             },
-          });
-        }
+          };
+          if (jobDetailsCache.current) {
+            jobDetailsCache.current[currentId] = updated;
+          }
+          return updated;
+        });
       } else {
         const err = await res.json().catch(() => ({}));
         alert(`Failed to delete cutaway: ${err.detail || "Server error"}`);
@@ -692,7 +711,7 @@ export default function StudioDashboard() {
     } catch (err) {
       alert("Error deleting cutaway: " + err);
     }
-  };
+  }, []);
 
   const openInsertCutawayAtTime = (targetTime?: number) => {
     const time = targetTime !== undefined ? targetTime : (masterVideoRef.current?.currentTime || 0);
@@ -744,16 +763,7 @@ export default function StudioDashboard() {
     }
   };
 
-  const openSwapModalForShot = (shot: ShotDetail) => {
-    setSwapTargetShot(shot);
-    setSwapTab("search");
-    const initQuery = shot.asset_title || shot.dialogue_quote || "focused professional";
-    setSwapSearchQuery(initQuery);
-    setShowSwapModal(true);
-    handleSearchStock(initQuery);
-  };
-
-  const handleSearchStock = async (query: string) => {
+  const handleSearchStock = useCallback(async (query: string) => {
     if (!query.trim()) return;
     setIsSearchingStock(true);
     try {
@@ -767,7 +777,16 @@ export default function StudioDashboard() {
     } finally {
       setIsSearchingStock(false);
     }
-  };
+  }, []);
+
+  const openSwapModalForShot = useCallback((shot: ShotDetail) => {
+    setSwapTargetShot(shot);
+    setSwapTab("search");
+    const initQuery = shot.asset_title || shot.dialogue_quote || "focused professional";
+    setSwapSearchQuery(initQuery);
+    setShowSwapModal(true);
+    handleSearchStock(initQuery);
+  }, [handleSearchStock]);
 
   const handleSelectStockCandidate = async (cand: StockVideoCandidate) => {
     if (!selectedJobId || !swapTargetShot) return;
@@ -990,12 +1009,12 @@ export default function StudioDashboard() {
   }, [selectedJobId, selectedJob?.status]);
 
   // Jump to specific cutaway in master video
-  const jumpToCutaway = (startTime: number) => {
+  const jumpToCutaway = useCallback((startTime: number) => {
     if (masterVideoRef.current) {
       masterVideoRef.current.currentTime = startTime;
       masterVideoRef.current.play().catch(() => {});
     }
-  };
+  }, []);
 
   // Single Clip File Upload Handler
   const handleFileUpload = async (file: File) => {
@@ -1267,11 +1286,11 @@ export default function StudioDashboard() {
                     </button>
                   </div>
 
-                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1 overscroll-contain">
                     {jobs.map((j) => (
                       <div
                         key={j.job_id}
-                        className={`p-2 rounded-xl text-xs flex items-center justify-between transition-colors group ${
+                        className={`p-2 rounded-xl text-xs flex items-center justify-between transition-colors group content-auto ${
                           j.job_id === selectedJobId
                             ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
                             : "hover:bg-zinc-800/90 text-zinc-300 border border-transparent"

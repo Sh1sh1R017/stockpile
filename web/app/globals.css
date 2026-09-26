@@ -32,3 +32,14 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+/* Rendering & Scrolling Performance Optimizations */
+.content-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 150px;
+}
+
+.will-change-transform {
+  will-change: transform;
+}
+
