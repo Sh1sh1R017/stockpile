@@ -4,7 +4,6 @@ import logging
 from typing import Dict, List, Optional
 from ai_broll_autopilot.campaigns.base import CampaignConfig
 from ai_broll_autopilot.campaigns.presets.default_viral import DEFAULT_VIRAL_CAMPAIGN
-from ai_broll_autopilot.campaigns.presets.curious_mike import CURIOUS_MIKE_CAMPAIGN
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,6 @@ class CampaignRegistry:
         self._campaigns: Dict[str, CampaignConfig] = {}
         # Register built-in campaigns
         self.register(DEFAULT_VIRAL_CAMPAIGN)
-        self.register(CURIOUS_MIKE_CAMPAIGN)
 
     def register(self, campaign: CampaignConfig):
         """Register a campaign preset."""

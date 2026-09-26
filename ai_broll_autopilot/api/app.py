@@ -82,7 +82,7 @@ class DriveConfigUpdate(BaseModel):
 
 class YouTubeJobRequest(BaseModel):
     url: str = Field(..., description="YouTube video or Shorts URL to download and process")
-    campaign_id: Optional[str] = Field("default", description="Target campaign preset (e.g. curious_mike or default)")
+    campaign_id: Optional[str] = Field("default", description="Target campaign preset ID (e.g. 'default')")
 
 
 class MemeGenerateRequest(BaseModel):

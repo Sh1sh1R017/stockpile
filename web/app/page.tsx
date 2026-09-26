@@ -278,7 +278,7 @@ export default function StudioDashboard() {
 
   // Campaigns & Curated Moments State
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("curious_mike");
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("default");
   const [showMomentsModal, setShowMomentsModal] = useState<boolean>(false);
   const [momentSearchQuery, setMomentSearchQuery] = useState<string>("");
   const [momentFilterAngle, setMomentFilterAngle] = useState<string>("all");
@@ -1272,26 +1272,23 @@ export default function StudioDashboard() {
               >
                 {campaigns.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.id === "curious_mike" ? "🎯 Curious Mike ($1.25/1k)" : `⚡ ${c.name}`}
+                    {c.name}
                   </option>
                 ))}
                 {campaigns.length === 0 && (
-                  <>
-                    <option value="curious_mike">🎯 Curious Mike ($1.25/1k)</option>
-                    <option value="default">⚡ Default Viral Shorts</option>
-                  </>
+                  <option value="default">⚡ Default Viral Shorts</option>
                 )}
               </select>
             </div>
-            {selectedCampaignId === "curious_mike" && (
+            {selectedCampaignId && campaigns.find((c) => c.id === selectedCampaignId)?.curated_moments?.length > 0 && (
               <button
                 type="button"
                 onClick={() => setShowMomentsModal(true)}
                 className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all"
-                title="Browse 50 pre-curated timestamped moments and 6 rules"
+                title="Browse curated moments and campaign rules"
               >
                 <Sparkles className="w-3 h-3 text-emerald-400" />
-                <span>50 Moments & Rules</span>
+                <span>Moments & Rules</span>
               </button>
             )}
           </div>
@@ -1445,83 +1442,32 @@ export default function StudioDashboard() {
           </div>
 
           {/* Active Campaign Rules Banner */}
-          {selectedCampaignId === "curious_mike" ? (
-            <div className="max-w-2xl mx-auto bg-gradient-to-r from-zinc-950 via-emerald-950/20 to-zinc-950 border border-emerald-500/30 rounded-3xl p-5 text-left shadow-xl space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-lg shadow-inner">
-                    🎯
-                  </div>
+          {(() => {
+            const activeCampaign = campaigns.find((c) => c.id === selectedCampaignId);
+            return (
+              <div className="max-w-2xl mx-auto bg-zinc-950/70 border border-zinc-800 rounded-2xl p-3.5 text-left flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-lg">⚡</span>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-white">Curious Mike Clipping Campaign</h3>
-                      <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
-                        $1.25 / 1k views • $7.5k Budget
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-400">
-                      Client: Michael Porter Jr. • Trae Young Episode • 2,000 views min to qualify ($2.50 - $300/clip)
+                    <h4 className="text-xs font-bold text-zinc-200">{activeCampaign?.name || "Default Viral Short-Form Preset"}</h4>
+                    <p className="text-[11px] text-zinc-400">
+                      {activeCampaign?.description || "High-velocity meme hooks, phonk BGM with voice ducking, Hormozi kinetic captions."}
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowMomentsModal(true)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-md shadow-emerald-600/25 transition-all flex items-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>50 Curated Moments & Rules</span>
-                </button>
+                {activeCampaign?.curated_moments?.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMomentsModal(true)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-md shadow-emerald-600/25 transition-all flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Curated Moments & Rules</span>
+                  </button>
+                )}
               </div>
-
-              {/* 6 Campaign Rules Checklist Badges */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-2 border-t border-zinc-800/80">
-                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
-                  <div className="text-[11px] font-bold text-emerald-400">Rule 1: Geo</div>
-                  <div className="text-[10px] text-zinc-400">40%+ US/CA/UK</div>
-                </div>
-                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
-                  <div className="text-[11px] font-bold text-emerald-400">Rule 2: Hook</div>
-                  <div className="text-[10px] text-zinc-400">1%+ Engagement</div>
-                </div>
-                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
-                  <div className="text-[11px] font-bold text-emerald-400">Rule 3: Real B-roll</div>
-                  <div className="text-[10px] text-zinc-400">0% AI Video (Max 33%)</div>
-                </div>
-                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
-                  <div className="text-[11px] font-bold text-emerald-400">Rule 4: Audio</div>
-                  <div className="text-[10px] text-zinc-400">Dialogue Only (No BGM)</div>
-                </div>
-                <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-2 text-center">
-                  <div className="text-[11px] font-bold text-emerald-400">Rule 5: Subtitles</div>
-                  <div className="text-[10px] text-zinc-400">Word-by-word Clean</div>
-                </div>
-                <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-xl p-2 text-center">
-                  <div className="text-[11px] font-bold text-emerald-300">Rule 6: Watermark</div>
-                  <div className="text-[10px] text-emerald-400 font-mono">YT: @mpj (100%)</div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="max-w-2xl mx-auto bg-zinc-950/70 border border-zinc-800 rounded-2xl p-3.5 text-left flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="text-lg">⚡</span>
-                <div>
-                  <h4 className="text-xs font-bold text-zinc-200">Default Viral Short-Form Preset</h4>
-                  <p className="text-[11px] text-zinc-400">
-                    High-velocity meme hooks (Speed, CaseOh, Jynxzi), phonk BGM with voice ducking, Hormozi kinetic captions.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedCampaignId("curious_mike")}
-                className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 shrink-0 underline"
-              >
-                Switch to Curious Mike Campaign →
-              </button>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Tab Selector: Upload File vs Import YouTube */}
           <div className="flex items-center justify-center gap-2 max-w-md mx-auto bg-zinc-950 p-1.5 rounded-2xl border border-zinc-800">
@@ -1745,20 +1691,12 @@ export default function StudioDashboard() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-bold text-white">Clipper Video Studio</h3>
-                    {selectedJob.campaign_id === "curious_mike" ? (
-                      <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        🎯 Curious Mike Compliant
-                      </span>
-                    ) : (
-                      <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
-                        Viral Ready
-                      </span>
-                    )}
+                    <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                      {selectedJob.campaign_id || "Default"}
+                    </span>
                   </div>
                   <p className="text-[11px] text-zinc-400">
-                    {selectedJob.campaign_id === "curious_mike"
-                      ? "YT: @mpj Watermark Burned • Subtitle Safe-Zone Offset • Pure Dialogue (No BGM) • Real Footage Only"
-                      : "Alex Hormozi kinetic word-highlights • Royalty-Free BGM library • Voice sidechain auto-ducking"}
+                    AI-directed B-roll cuts • Kinetic captions • Campaign-optimized edit
                   </p>
                 </div>
               </div>
@@ -3366,7 +3304,7 @@ export default function StudioDashboard() {
         </div>
       )}
 
-      {/* CURIOUS MIKE CAMPAIGN HUB & 50 CURATED MOMENTS MODAL */}
+      {/* CAMPAIGN HUB & CURATED MOMENTS MODAL */}
       {showMomentsModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-zinc-900 border border-emerald-500/40 rounded-3xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
@@ -3378,13 +3316,12 @@ export default function StudioDashboard() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-white">Curious Mike Campaign Hub</h3>
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
-                      $1.25 / 1k Views • $7,500 Budget
-                    </span>
+                    <h3 className="text-base font-bold text-white">
+                      {campaigns.find((c) => c.id === selectedCampaignId)?.name || "Campaign"} Hub
+                    </h3>
                   </div>
                   <p className="text-xs text-zinc-400">
-                    Host: Michael Porter Jr. (@curiousmike / @mpj) • Trae Young Episode • 2,000 views min to qualify
+                    {campaigns.find((c) => c.id === selectedCampaignId)?.description || "Campaign moments and rules"}
                   </p>
                 </div>
               </div>
@@ -3409,9 +3346,9 @@ export default function StudioDashboard() {
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>50 Curated Moments</span>
+                  <span>Curated Moments</span>
                   <span className="text-[10px] bg-emerald-800/80 px-1.5 py-0.2 rounded-full font-mono">
-                    {campaigns.find((c) => c.id === "curious_mike")?.curated_moments?.length || 50}
+                    {campaigns.find((c) => c.id === selectedCampaignId)?.curated_moments?.length || 0}
                   </span>
                 </button>
                 <button
@@ -3473,7 +3410,7 @@ export default function StudioDashboard() {
                   {/* Moments Cards Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                     {(
-                      campaigns.find((c) => c.id === "curious_mike")?.curated_moments || []
+                      campaigns.find((c) => c.id === selectedCampaignId)?.curated_moments || []
                     )
                       .filter((m) => {
                         if (momentFilterAngle !== "all") {
@@ -3651,7 +3588,7 @@ export default function StudioDashboard() {
             {/* Modal Footer */}
             <div className="p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
               <span className="text-xs text-zinc-500">
-                AI B-Roll Autopilot • Curious Mike Campaign Engine Active
+                AI B-Roll Autopilot • Campaign Engine Active
               </span>
               <button
                 onClick={() => setShowMomentsModal(false)}

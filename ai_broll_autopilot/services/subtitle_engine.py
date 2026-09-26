@@ -75,8 +75,8 @@ class SubtitleEngine:
             "uppercase": False,
             "words_per_group": 4,
         },
-        "curious_clean": {
-            "name": "Curious Mike Benchmark (Yellow Badge)",
+        "badge_clean": {
+            "name": "Yellow Badge Highlight",
             "active_color": "&H0014D5E9&",    # Bright Canary Yellow in BGR (&HAABBGGRR)
             "inactive_color": "&H00FFFFFF&",  # Pure crisp white
             "outline_color": "&H00000000&",   # Dark outline for legibility
@@ -217,7 +217,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     word_str = item["word"].upper() if cfg["uppercase"] else item["word"]
                     if idx == active_idx:
                         if is_box_badge:
-                            # Signature Curious Mike yellow filled badge with black text
+                            # Yellow filled badge with black text
                             formatted_words.append(
                                 f"{{\\1c&H00000000&\\3c{cfg['active_color']}\\bord20\\fscx104\\fscy104}} {word_str} "
                                 f"{{\\1c{cfg['inactive_color']}\\3c{cfg['outline_color']}\\bord{cfg['outline_width']}\\fscx100\\fscy100}}"

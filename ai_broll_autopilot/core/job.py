@@ -79,8 +79,7 @@ class Job:
     def create(cls, source_file_path: str, campaign_id: str = "default") -> "Job":
         path = Path(source_file_path)
         job_id = generate_job_id(prefix=path.stem[:12])
-        if campaign_id == "default" and "curious_mike" in path.name.lower():
-            campaign_id = "curious_mike"
+
         return cls(
             job_id=job_id,
             source_file=str(path.resolve()),

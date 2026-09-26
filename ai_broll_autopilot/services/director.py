@@ -76,100 +76,35 @@ class Director:
                 niche = niche_registry.get_profile("generic")
 
         # Target calculations based on campaign or niche rules
-        if campaign.id == "curious_mike":
-            target_broll_ratio = campaign.max_broll_ratio  # 0.33 for Curious Mike
-        else:
-            target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
 
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
         target_shots = max(1, min(6, int(round(target_broll_seconds / 2.2))))
         allow_memes = bool(campaign.allow_ai_broll and getattr(niche.editing, "meme_cutaways", False))
 
-        if campaign.id == "curious_mike":
-            # Match curated moment if specified
-            matched_moment = None
-            if curated_moment_id:
-                for m in campaign.curated_moments:
-                    if m.moment_id.lower() == curated_moment_id.lower():
-                        matched_moment = m
-                        break
+        # Match curated moment if specified (works for any campaign with curated_moments)
+        matched_moment = None
+        if curated_moment_id and hasattr(campaign, "curated_moments"):
+            for m in campaign.curated_moments:
+                if m.moment_id.lower() == curated_moment_id.lower():
+                    matched_moment = m
+                    break
 
-            chosen_hook = custom_hook or (matched_moment.screen_hook if matched_moment else None)
+        chosen_hook = custom_hook or (matched_moment.screen_hook if matched_moment else None)
 
-            director_prompt = f"""You are the Master AI Video Director for the CURIOUS MIKE podcast clipping campaign (hosted by Michael Porter Jr. @curiousmike / @mpj).
+        niche_desc = f"{niche.name} ({niche.description})" if niche else "General Podcast & Video"
+        niche_keywords_hint = ", ".join(niche.visual_keywords[:8]) if niche else "focus, desk, laptop, discussion"
 
-MANDATORY CAMPAIGN DIRECTING OBJECTIVES:
-1. FORMAT & SPEAKER COVERAGE (CRITICAL CAMPAIGN RULE):
-   - Format 1 (Straight Talking Head) or Format 2 (Talking Head + Real Sports B-Roll).
-   - NEVER cover the speaker for more than 1/3 (33%) of the video duration!
-   - Total Video Duration: {video_duration:.2f} seconds. Max B-roll duration: ~{target_broll_seconds:.1f}s total.
-   - The speaker's face and reactions MUST be on screen for at least 67% of the clip duration.
-   - Any cutaways MUST be short (1.0s to 2.5s each), cutting in directly on the spoken keyword (e.g. named player, arena, team, Knicks, Pat Bev, Jokic).
-   - Cut back to the speaker immediately.
-   - Generate at most {target_shots} focused, high-relevance cutaway(s).
-
-2. ZERO AI VIDEO POLICY (INSTANT REJECTION RULE):
-   - STRICTLY NO AI-generated video, AI avatars, cartoon memes, or fictional visuals.
-   - All visual B-roll MUST be real footage (NBA basketball highlights, press conferences, arena footage, or training).
-   - "style" MUST be "stockpile".
-
-3. HOOK REQUIREMENT:
-   - Provide a bold, punchy, all-caps screen hook in "hook_text" (e.g. "HE REALLY SAID THIS ABOUT KNICKS FANS").
-   {f'Target Hook: "{chosen_hook}"' if chosen_hook else ''}
-
-4. LEVEL 3 LARGE TYPOGRAPHIC EMPHASIS GRAPHICS:
-   - Identify 2 to 4 high-impact keywords, player names, or punchy phrases (e.g., "COLLIN\\nSEXTON", "JAYLEN\\nHANDS", "TOOK THAT\\nPERSONAL") spoken in the clip.
-   - Format: 1-3 uppercase words, stacked with \\n.
-   - Color: "yellow" for player names/rankings/facts, "pink" for dramatic hot-takes/climax phrases.
-   - Duration: 1.0 to 1.4 seconds.
-
-VIDEO DURATION: {video_duration:.2f} seconds
-TIMESTAMPED TRANSCRIPT:
-{formatted_segments}
-
-OUTPUT FORMAT:
-Return ONLY a valid JSON object matching this schema:
-{{
-  "summary": "Short 1-sentence description of the moment",
-  "hook_text": "{chosen_hook or 'TRAE DID NOT HOLD BACK'}",
-  "text_emphasis_graphics": [
-    {{
-      "text": "COLLIN\\nSEXTON",
-      "start_time": 0.6,
-      "duration": 1.2,
-      "color": "yellow"
-    }}
-  ],
-  "shots": [
-    {{
-      "shot_id": "broll_1",
-      "start_time": 2.5,
-      "end_time": 4.5,
-      "duration": 2.0,
-      "style": "stockpile",
-      "dialogue_quote": "Exact spoken line from transcript",
-      "emotional_core": "NBA rivalry or basketball discussion",
-      "visceral_human_metaphor": "Real basketball action or arena atmosphere",
-      "micro_prompts": ["nba basketball game action", "basketball arena court crowd"],
-      "search_prompt": "nba basketball game",
-      "overlay_type": "cutaway",
-      "narrative_reason": "Contextual sports illustration on keyword"
-    }}
-  ]
-}}"""
-        else:
-            niche_desc = f"{niche.name} ({niche.description})" if niche else "General Podcast & Video"
-            niche_keywords_hint = ", ".join(niche.visual_keywords[:8]) if niche else "focus, desk, laptop, discussion"
-
-            meme_instructions = ""
-            if allow_memes:
-                meme_instructions = """
+        meme_instructions = ""
+        if allow_memes:
+            meme_instructions = """
 4. CONTEXTUAL MEME CUTAWAYS (OPTIONAL FOR HIGH-ENERGY COMEDY / STREAMER MOMENTS):
    - You may designate up to 1-2 shots as "style": "meme" if a wild claim, rage outburst, or high-energy reaction occurs.
    - For all other shots, use real stock footage ("style": "stockpile")."""
 
-            director_prompt = f"""You are the Master AI Video Director for high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
+        director_prompt = f"""You are the Master AI Video Director for high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
+CAMPAIGN: {campaign.name}
 CONTENT DOMAIN: {niche_desc}
 RELEVANT VISUAL THEMES: {niche_keywords_hint}
 
@@ -185,15 +120,13 @@ MANDATORY DIRECTING OBJECTIVES:
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
    - Select real, photogenic visual metaphors directly tied to the spoken words.
-   - For business, marketing, or tech: modern clean office, charts, hands on laptop/phone, analytics, presentation, whiteboard.
-   - For lifestyle, self-improvement: focused workout, runner, journaling, deep concentration, conversation.
    - STRICTLY FORBIDDEN:
-     • DO NOT invent negative or irrelevant drama (e.g. fired employee, computer rage) unless the speaker explicitly describes it!
-     • All visual shots must have "style": "stockpile" (real-world stock footage).
+     • DO NOT invent negative or irrelevant drama unless the speaker explicitly describes it!
+     • All visual shots must have "style": "stockpile" (real-world stock footage) unless memes are allowed.
+{meme_instructions}
 
 3. OPTIMIZED STOCK FOOTAGE SEARCH PROMPTS:
    - "search_prompt" MUST be 2 to 4 clean, photogenic keywords optimized for stock video search.
-{meme_instructions}
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT:
@@ -214,13 +147,13 @@ Return ONLY a valid JSON object matching this schema:
       "duration": 2.0,
       "style": "stockpile",
       "dialogue_quote": "Exact spoken line from transcript",
-      "emotional_core": "Topic theme (e.g. Marketing Strategy, Deep Focus, Tech Innovation)",
+      "emotional_core": "Topic theme",
       "visceral_human_metaphor": "Realistic contextual scene matching the quote",
       "micro_prompts": [
-        "marketer working on laptop with charts",
-        "close up hands typing on modern keyboard"
+        "relevant search term 1",
+        "relevant search term 2"
       ],
-      "search_prompt": "digital marketing business strategy",
+      "search_prompt": "contextual search keywords",
       "overlay_type": "cutaway",
       "narrative_reason": "Contextual visual amplification of spoken concept"
     }}
@@ -246,7 +179,7 @@ Return ONLY a valid JSON object matching this schema:
                 )
                 raw_text = clean_json_string(response.text or "{}")
                 plan_data = json.loads(raw_text)
-                min_shots = 1 if campaign.id == "curious_mike" else 2
+                min_shots = 1 if campaign.max_broll_ratio <= 0.35 else 2
                 if plan_data and "shots" in plan_data and len(plan_data["shots"]) >= min_shots:
                     break
             except Exception as model_err:
@@ -390,7 +323,7 @@ Return ONLY a valid JSON object matching this schema:
                 total_broll_time = sum(s["duration"] for s in clean_shots)
                 coverage_pct = round((total_broll_time / video_duration) * 100, 1)
 
-            # Clamp coverage if campaign enforces max_broll_ratio (e.g. Curious Mike <= 33%)
+            # Clamp coverage if campaign enforces max_broll_ratio
             if not campaign.allow_ai_broll and coverage_pct > (campaign.max_broll_ratio * 100):
                 logger.info(f"Clamping B-roll coverage ({coverage_pct}%) to campaign limit {campaign.max_broll_ratio*100}%...")
                 max_total_sec = video_duration * campaign.max_broll_ratio
@@ -412,8 +345,8 @@ Return ONLY a valid JSON object matching this schema:
                 total_broll_time = sum(s["duration"] for s in clean_shots)
                 coverage_pct = round((total_broll_time / video_duration) * 100, 1)
 
-            # 2. If still below 55% and there is an uncovered window at the end or in a wide gap, add a contextual shot (Default campaign only)
-            if campaign.allow_ai_broll and campaign.id != "curious_mike" and coverage_pct < 56.0 and segments:
+            # 2. If still below 55% and there is an uncovered window at the end or in a wide gap, add a contextual shot
+            if campaign.allow_ai_broll and coverage_pct < 56.0 and segments:
                 last_shot_end = clean_shots[-1]["end_time"] if clean_shots else 1.0
                 if (video_duration - last_shot_end) >= 3.0:
                     start = round(last_shot_end + 0.6, 2)
@@ -446,23 +379,8 @@ Return ONLY a valid JSON object matching this schema:
                         total_broll_time = sum(s["duration"] for s in clean_shots)
                         coverage_pct = round((total_broll_time / video_duration) * 100, 1)
 
-            if campaign.id == "curious_mike":
-                # Ensure all shots are strictly real basketball footage (no corporate stock, no memes)
-                for s in clean_shots:
-                    s["style"] = "stockpile"
-                    sp = s.get("search_prompt", "").lower()
-                    if not any(k in sp for k in ("basketball", "nba", "court", "hoop", "dunk", "guard", "sexton", "hands")):
-                        s["search_prompt"] = f"basketball player {s.get('search_prompt', 'game action')}"
-                # Enforce Curious Mike 33% max B-roll rule (max 3 punchy cuts)
-                if len(clean_shots) > 3:
-                    clean_shots = clean_shots[:3]
-                total_broll_time = sum(s["duration"] for s in clean_shots)
-                coverage_pct = round((total_broll_time / video_duration) * 100, 1)
-
             # Preserve or detect Level 3 typographic emphasis graphics
             emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
-            if not emphasis_graphics and campaign and campaign.id == "curious_mike":
-                emphasis_graphics = self._detect_curious_mike_emphasis(segments, video_duration)
 
             plan_result = {
                 "total_duration": video_duration,
@@ -495,11 +413,11 @@ Return ONLY a valid JSON object matching this schema:
     ) -> Dict[str, Any]:
         """Deterministic fallback edit plan ensuring campaign constraints and contextual keywords."""
         shots = []
-        is_curious_mike = bool(campaign and campaign.id == "curious_mike")
         target_ratio = campaign.max_broll_ratio if campaign else Config.TARGET_BROLL_RATIO
         target_broll_dur = video_duration * target_ratio
         shot_dur = 2.0
-        num_shots = max(1, min(2, int(round(target_broll_dur / shot_dur)))) if is_curious_mike else max(3, int(round(target_broll_dur / shot_dur)))
+        is_low_broll = campaign and campaign.max_broll_ratio <= 0.35
+        num_shots = max(1, min(2, int(round(target_broll_dur / shot_dur)))) if is_low_broll else max(3, int(round(target_broll_dur / shot_dur)))
 
         # Distribute shots across available segments
         step = max(1, len(segments) // (num_shots + 1)) if segments else 1
@@ -520,10 +438,7 @@ Return ONLY a valid JSON object matching this schema:
             seg_text = seg.get("text", "").lower()
 
             # Contextual keyword detection
-            if is_curious_mike:
-                search_prompt = "nba basketball player court"
-                emotional_core = "NBA Basketball Conversation"
-            elif any(w in seg_text for w in ["focus", "disciplin", "work", "habit", "lesson"]):
+            if any(w in seg_text for w in ["focus", "disciplin", "work", "habit", "lesson"]):
                 search_prompt = "focused person writing desk"
                 emotional_core = "Deep Focus and Discipline"
             elif any(w in seg_text for w in ["win", "winner", "success", "goal", "champion"]):
@@ -593,8 +508,6 @@ Return ONLY a valid JSON object matching this schema:
         coverage_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0
 
         emphasis_graphics = []
-        if campaign and campaign.id == "curious_mike":
-            emphasis_graphics = self._detect_curious_mike_emphasis(segments, video_duration)
 
         resolved_hook = custom_hook
         if not resolved_hook and campaign and campaign.curated_moments:
@@ -624,12 +537,12 @@ Return ONLY a valid JSON object matching this schema:
             "text_emphasis_graphics": emphasis_graphics,
         }
 
-    def _detect_curious_mike_emphasis(
+    def _detect_emphasis_graphics(
         self,
         segments: List[Dict[str, Any]],
         video_duration: float
     ) -> List[Dict[str, Any]]:
-        """Detect signature Level 3 typographic emphasis moments for Curious Mike."""
+        """Detect Level 3 typographic emphasis moments from transcript keywords."""
         emphasis_list = []
         last_t = -10.0
 

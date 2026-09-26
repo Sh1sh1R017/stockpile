@@ -147,7 +147,7 @@ class TimelineEngine:
             current_layer = framed_layer
 
         # -------------------------------------------------------------
-        # 3. Campaign Watermark Overlay (e.g. YT: @mpj for Curious Mike)
+        # 3. Campaign Watermark Overlay
         # -------------------------------------------------------------
         if watermark_stream_idx is not None:
             wm_in = f"[{watermark_stream_idx}:v]"

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -191,8 +192,9 @@ class Renderer:
         ])
 
         logger.info(f"Executing FFmpeg render command ({len(shots)} video overlays, {len(audio_sfx_list)} audio SFX)...")
-        proc = await asyncio.create_subprocess_exec(*cmd)
-        await proc.wait()
+        res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            logger.error(f"FFmpeg rendering error: {res.stderr}")
 
         if not out_p.exists() or out_p.stat().st_size == 0:
             raise RuntimeError(f"FFmpeg rendering failed: output file not created at {out_p}")

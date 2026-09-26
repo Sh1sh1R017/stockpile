@@ -1,5 +1,5 @@
 """Podcast Frame Engine generating authentic torn-paper framing, duotone hook headers,
-and safe-zone watermarking matching the Curious Mike / MPJ benchmark.
+and safe-zone watermarking for vertical short-form video.
 """
 
 import logging
@@ -65,7 +65,7 @@ class PodcastFrameEngine:
     def __init__(self, template_path: Optional[str] = None):
         default_tpl = (
             Path(__file__).resolve().parent.parent.parent
-            / "assets" / "campaigns" / "curious_mike" / "curious_mike_torn_paper_frame.png"
+            / "assets" / "frame_template.png"
         )
         self.template_path = Path(template_path) if template_path else default_tpl
 
@@ -128,9 +128,9 @@ class PodcastFrameEngine:
                 # The climax words on line 2 (e.g. HIGH SCHOOL?) are Hot Pink
                 color = PINK
 
-            # Typography casing matching Curious Mike benchmark:
+            # Typography casing:
             # - Pink climax words are always UPPERCASE (e.g. HIGH SCHOOL?, RIVALRY., GUY.)
-            # - Entities are Title Case (or UPPERCASE for acronyms like MPJ, NBA)
+            # - Entities are Title Case (or UPPERCASE for acronyms like NBA)
             # - Neutral words are Mixed Case / Sentence case
             punct_match = re.search(r"([^\w\s']+)$", w)
             punct = punct_match.group(1) if punct_match else ""
