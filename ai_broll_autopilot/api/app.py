@@ -935,6 +935,28 @@ async def get_job_asset(job_id: str, asset_name: str):
 
     # Handle Thumbnail requests
     if is_thumb:
+        # 0. Final rendered video thumbnail
+        if clean_name in ("final", "final_render", "output"):
+            ws_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
+            ws_dir.mkdir(parents=True, exist_ok=True)
+            final_thumb = ws_dir / "final_thumb.jpg"
+            if not final_thumb.exists():
+                # Find the final rendered file
+                for candidate_dir in Config.OUTPUT_DIR.iterdir():
+                    if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
+                        finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                        if finals:
+                            cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(finals[0]),
+                                   "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
+                            try:
+                                await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+                            except Exception:
+                                pass
+                            break
+            if final_thumb.exists():
+                return FileResponse(path=str(final_thumb), media_type="image/jpeg",
+                                    filename="final_thumb.jpg", content_disposition_type="inline")
+
         # 1. A-Roll source thumb
         if clean_name in ("source", "main", Path(job.source_filename).name):
             source_thumb = Config.OUTPUT_DIR / "workspace" / job.job_id / "source_thumb.jpg"
