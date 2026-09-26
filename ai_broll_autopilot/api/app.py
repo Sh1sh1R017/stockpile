@@ -504,16 +504,166 @@ async def export_job_zip(job_id: str):
 
 @app.get("/api/jobs/{job_id}/openreel-project")
 async def get_job_openreel_project(job_id: str):
-    """Retrieve native OpenReel Schema 1.2.0 project JSON for this job."""
+    """Retrieve native OpenReel Schema 1.2.0 project JSON for this job.
+
+    If the job has been rendered, the OpenReel project is built around the
+    final 9:16 render (with face tracking, B-roll, captions all baked in),
+    so the user sees exactly what the AI produced and can fine-tune on top.
+    If not yet rendered, falls back to the raw source + edit plan approach.
+    """
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Check if pre-generated project exists in workspace
+    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id)}/assets"
     oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
-    project_oreel = oreel_dir / f"{job.job_id}.oreel"
-    project_json = oreel_dir / "project.json"
 
+    # ----------------------------------------------------------------
+    # 1. Find the final rendered video (9:16 AI-edited output)
+    # ----------------------------------------------------------------
+    final_video_path: Path | None = None
+    for candidate_dir in Config.OUTPUT_DIR.iterdir():
+        if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
+            finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if finals:
+                final_video_path = finals[0]
+                break
+
+    if final_video_path and final_video_path.exists():
+        # ----------------------------------------------------------------
+        # 2a. RENDERED MODE — load the baked 9:16 video as the single clip
+        # ----------------------------------------------------------------
+        import subprocess, time as _time, uuid as _uuid
+
+        final_name = final_video_path.name
+        final_url = f"{base_asset_url}/final"
+        final_thumb_url = f"{base_asset_url}/final/thumb"
+
+        # Get actual duration from ffprobe
+        final_dur = float(job.edit_plan.get("total_duration", 30.0)) if job.edit_plan else 30.0
+        try:
+            probe = await asyncio.to_thread(
+                subprocess.run,
+                ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(final_video_path)],
+                capture_output=True, text=True
+            )
+            import json as _json
+            probe_data = _json.loads(probe.stdout or "{}")
+            for stream in probe_data.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    dur_str = stream.get("duration") or probe_data.get("format", {}).get("duration", "")
+                    if dur_str:
+                        final_dur = float(dur_str)
+                    break
+        except Exception:
+            pass
+
+        now_ms = int(_time.time() * 1000)
+        proj_id = f"proj_{job.job_id[:12]}"
+        title = f"AI Edit: {Path(job.source_filename).stem}"
+
+        project = {
+            "id": proj_id,
+            "name": title,
+            "createdAt": now_ms,
+            "modifiedAt": now_ms,
+            "settings": {
+                "width": 1080,
+                "height": 1920,
+                "fps": 30,
+                "frameRate": 30,
+                "sampleRate": 48000,
+                "channels": 2,
+            },
+            "timeline": {
+                "duration": final_dur,
+                "tracks": [
+                    {
+                        "id": "track_video_main",
+                        "name": "AI Edit (9:16)",
+                        "type": "video",
+                        "role": "dialogue",
+                        "mode": "standard",
+                        "hidden": False,
+                        "muted": False,
+                        "locked": False,
+                        "solo": False,
+                        "transitions": [],
+                        "clips": [
+                            {
+                                "id": "clip_final_render",
+                                "mediaId": "media_final_render",
+                                "trackId": "track_video_main",
+                                "startTime": 0.0,
+                                "duration": final_dur,
+                                "inPoint": 0.0,
+                                "outPoint": final_dur,
+                                "effects": [],
+                                "audioEffects": [],
+                                "transform": {
+                                    "position": {"x": 0.5, "y": 0.5},
+                                    "scale": {"x": 1.0, "y": 1.0},
+                                    "rotation": 0,
+                                    "anchor": {"x": 0.5, "y": 0.5},
+                                    "opacity": 1.0,
+                                    "fitMode": "contain",
+                                },
+                                "volume": 1.0,
+                                "keyframes": [],
+                            }
+                        ],
+                    }
+                ],
+                "subtitles": [],
+                "markers": [],
+            },
+            "mediaLibrary": {
+                "items": [
+                    {
+                        "id": "media_final_render",
+                        "name": final_name,
+                        "type": "video",
+                        "metadata": {
+                            "duration": final_dur,
+                            "width": 1080,
+                            "height": 1920,
+                            "frameRate": 30,
+                            "codec": "h264",
+                            "sampleRate": 48000,
+                            "channels": 2,
+                            "fileSize": final_video_path.stat().st_size,
+                            "hasVideo": True,
+                            "hasAudio": True,
+                        },
+                        "fileHandle": None,
+                        "blob": None,
+                        "thumbnailUrl": final_thumb_url,
+                        "waveformData": None,
+                        "isPlaceholder": False,
+                        "originalUrl": final_url,
+                        "url": final_url,
+                        "sourceFile": {
+                            "name": final_name,
+                            "size": final_video_path.stat().st_size,
+                            "lastModified": now_ms,
+                        },
+                    }
+                ]
+            },
+            "textClips": [],
+            "shapeClips": [],
+            "svgClips": [],
+            "stickerClips": [],
+            "capabilities": ["tracks-universal", "behind-subject"],
+        }
+
+        return {"version": "1.2.0", "project": project}
+
+    # ----------------------------------------------------------------
+    # 2b. DRAFT MODE — job not rendered yet, use raw source + edit plan
+    # ----------------------------------------------------------------
+    # Check for a cached project
+    project_oreel = oreel_dir / f"{job.job_id}.oreel"
     if project_oreel.exists():
         try:
             with open(project_oreel, "r", encoding="utf-8") as f:
@@ -521,36 +671,31 @@ async def get_job_openreel_project(job_id: str):
                 items = data.get("project", {}).get("mediaLibrary", {}).get("items", [])
                 has_file_urls = any((item.get("url") or "").startswith("file:///") for item in items)
                 has_space_urls = any(" " in (item.get("url") or "") for item in items)
-                has_missing_thumbs = any(not item.get("thumbnailUrl") for item in items if item.get("type") == "video")
-                if not has_file_urls and not has_space_urls and not has_missing_thumbs and items:
+                if not has_file_urls and not has_space_urls and items:
                     return data
         except Exception:
             pass
 
-    # Convert on the fly from job.edit_plan
     if not job.edit_plan:
-        raise HTTPException(status_code=400, detail="Job does not have an edit plan yet")
+        raise HTTPException(status_code=400, detail="Job has no edit plan and no rendered output yet")
 
     plan_dict = job.edit_plan
-    shots = plan_dict.get("shots", [])
     total_dur = plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0
 
     plan_obj = EditPlan(
         plan_id=f"plan_{job.job_id}",
-        title=f"Edit: {Path(job.source_filename).stem}",
+        title=f"Draft: {Path(job.source_filename).stem}",
         target_duration=float(total_dur),
         source_media={"path": job.source_file, "duration": float(total_dur), "title": job.source_filename},
         clip_interval={"in_point": 0.0, "out_point": float(total_dur)},
         niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
         style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
-        shots=shots,
+        shots=plan_dict.get("shots", []),
         text_overlays=plan_dict.get("text_overlays", []),
         subtitles=plan_dict.get("subtitles", []),
         zooms=plan_dict.get("zooms", []),
         audio_cues=plan_dict.get("audio_cues", {}),
     )
-
-    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id)}/assets"
 
     oreel_dir.mkdir(parents=True, exist_ok=True)
     openreel_adapter.export_project_files(
@@ -704,6 +849,33 @@ async def get_job_asset(job_id: str, asset_name: str):
         raise HTTPException(status_code=404, detail=f"Thumbnail for asset '{asset_name}' not found")
 
     # Regular Asset requests
+    # 0. Rendered final output video — what the AI editor produced (9:16 with face tracking, B-roll, captions baked in)
+    if clean_name in ("final", "final_render", "output"):
+        # Find the rendered final file for this job
+        job_out_dir = Config.OUTPUT_DIR / job.job_id if (Config.OUTPUT_DIR / job.job_id).exists() else None
+        # Also scan output root for dirs that start with job_id prefix
+        if not job_out_dir:
+            for d in Config.OUTPUT_DIR.iterdir():
+                if d.is_dir() and job.job_id in d.name:
+                    job_out_dir = d
+                    break
+        if job_out_dir:
+            final_candidates = sorted(job_out_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if final_candidates:
+                final_path = final_candidates[0]
+                if is_thumb:
+                    thumb_path = final_path.parent / f"{final_path.stem}_thumb.jpg"
+                    if not thumb_path.exists():
+                        cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_path), "-frames:v", "1", "-update", "1", "-q:v", "2", str(thumb_path)]
+                        try:
+                            await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+                        except Exception:
+                            pass
+                    if thumb_path.exists():
+                        return FileResponse(path=str(thumb_path), media_type="image/jpeg", filename=thumb_path.name, content_disposition_type="inline")
+                else:
+                    return FileResponse(path=str(final_path), media_type="video/mp4", filename=final_path.name, content_disposition_type="inline")
+
     # 1. Main A-Roll source video
     if clean_name in ("source", "main", Path(job.source_filename).name):
         if job.source_file and Path(job.source_file).exists():
