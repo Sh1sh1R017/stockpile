@@ -65,12 +65,18 @@ class Director:
         # Resolve active niche profile
         from ai_broll_autopilot.niches import niche_registry
         niche = None
-        if getattr(campaign, "niche_id", None):
+        if getattr(campaign, "niche_id", None) and campaign.niche_id != "generic":
             niche = niche_registry.get_profile(campaign.niche_id)
         if not niche or niche.id == "generic":
             from ai_broll_autopilot.services.niche_detector import niche_detector
             niche_res = niche_detector._detect_heuristic(full_transcript)
-            if niche_res and niche_res.niche_id != "generic":
+            # Require high confidence (>= 0.75) and multiple distinct keywords to override generic default
+            if (
+                niche_res
+                and niche_res.niche_id != "generic"
+                and niche_res.confidence >= 0.75
+                and len(niche_res.detected_keywords) >= 3
+            ):
                 niche = niche_registry.get_profile(niche_res.niche_id)
             else:
                 niche = niche_registry.get_profile("generic")
@@ -93,8 +99,12 @@ class Director:
 
         chosen_hook = custom_hook or (matched_moment.screen_hook if matched_moment else None)
 
-        niche_desc = f"{niche.name} ({niche.description})" if niche else "General Podcast & Video"
-        niche_keywords_hint = ", ".join(niche.visual_keywords[:8]) if niche else "focus, desk, laptop, discussion"
+        if niche and niche.id != "generic":
+            niche_desc = f"{niche.name} ({niche.description})"
+            niche_keywords_hint = ", ".join(niche.visual_keywords[:8])
+        else:
+            niche_desc = "General Video & Podcast (General dialogue, stories, real-world events, discussions)"
+            niche_keywords_hint = "real-world context matching spoken dialogue literally (people, places, objects, actions)"
 
         meme_instructions = ""
         if allow_memes:
@@ -120,6 +130,11 @@ MANDATORY DIRECTING OBJECTIVES:
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
    - Select real, photogenic visual metaphors directly tied to the spoken words.
+   - ABSOLUTE PROHIBITION ON UNRELATED SPORTS / BASKETBALL:
+     • DO NOT default to sports, basketball, courts, athletes, hoops, or jerseys unless the dialogue explicitly talks about sports or basketball!
+     • If the dialogue is about military, guns, danger, or borders: show dramatic real-world security, checkpoints, documents, or conflict scenes.
+     • If the dialogue is about work, business, science, legal, family, or travel: show those exact real-world scenes.
+     • NEVER substitute basketball or athletic scenes for unrelated narrative themes!
    - STRICTLY FORBIDDEN:
      • DO NOT invent negative or irrelevant drama unless the speaker explicitly describes it!
      • All visual shots must have "style": "stockpile" (real-world stock footage) unless memes are allowed.
@@ -540,10 +555,14 @@ Return ONLY a valid JSON object matching this schema:
     def _detect_emphasis_graphics(
         self,
         segments: List[Dict[str, Any]],
-        video_duration: float
+        video_duration: float,
+        campaign_id: str = "default",
     ) -> List[Dict[str, Any]]:
         """Detect Level 3 typographic emphasis moments from transcript keywords."""
         emphasis_list = []
+        if campaign_id != "curious_mike":
+            return emphasis_list
+
         last_t = -10.0
 
         target_triggers = [
@@ -590,7 +609,7 @@ Return ONLY a valid JSON object matching this schema:
                         last_t = match_time
                         break
 
-        # Fallback if no triggers found
+        # Fallback for curious_mike only if no triggers found
         if not emphasis_list and video_duration >= 10.0:
             emphasis_list.append({
                 "text": "HIGH SCHOOL\nRANKINGS",

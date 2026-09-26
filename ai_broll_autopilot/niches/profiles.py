@@ -10,13 +10,12 @@ PROFILES = [
         parent_niche="sports",
         description="Basketball podcasts, games, tournaments, player interviews, and analysis.",
         visual_keywords=[
-            "basketball", "court", "nba", "dunk", "shot", "arena", "hoop",
-            "crossover", "defense", "coach", "bench", "crowd", "buzzer beater",
-            "training", "highlight", "jersey", "gym"
+            "basketball", "nba", "slam dunk", "basketball court", "basketball hoop",
+            "crossover dribble", "buzzer beater", "three-pointer", "free throw", "rebound",
+            "jump shot", "layup", "basketball jersey", "basketball game", "nba finals"
         ],
         broll_categories=[
-            "game_action", "player_reaction", "crowd", "celebration",
-            "training", "interview", "arena", "coach", "fans"
+            "basketball_game", "nba_highlights", "slam_dunk", "basketball_training"
         ],
         preferred_energy="high",
         editing=NicheEditingPreferences(
@@ -42,10 +41,10 @@ PROFILES = [
         parent_niche="sports",
         description="General athletics, competitions, athletic training, and sports commentary.",
         visual_keywords=[
-            "athlete", "stadium", "field", "competition", "training", "workout",
-            "coach", "team", "celebration", "trophy", "fans", "running", "play"
+            "athletics", "stadium match", "sports competition", "athletic training", "workout session",
+            "sports trophy", "olympics", "marathon runner", "track and field"
         ],
-        broll_categories=["action", "reaction", "stadium", "training", "fans", "celebration"],
+        broll_categories=["sports_action", "stadium_match", "athletic_training", "sports_trophy"],
         preferred_energy="high",
         editing=NicheEditingPreferences(
             pace="fast",

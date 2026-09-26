@@ -261,7 +261,7 @@ Respond ONLY with valid JSON matching this schema:
 
         sorted_scores = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
 
-        if not sorted_scores or sorted_scores[0]["score"] == 0:
+        if not sorted_scores or sorted_scores[0]["score"] < 6 or len(sorted_scores[0]["matched_keywords"]) < 2:
             generic_profile = niche_registry.get_profile("generic")
             return NicheDetectionResult(
                 niche_id="generic",

@@ -160,7 +160,7 @@ class PodcastFrameEngine:
         self,
         hook_text: str,
         output_path: Path,
-        watermark_text: str = "YT: @mpj"
+        watermark_text: str = ""
     ) -> Path:
         """Create a complete composite 1080x1920 overlay PNG."""
         output_path = Path(output_path)
