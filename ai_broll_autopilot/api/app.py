@@ -531,15 +531,15 @@ async def get_job_openreel_project(job_id: str):
 
     if final_video_path and final_video_path.exists():
         # ----------------------------------------------------------------
-        # 2a. RENDERED MODE — load the baked 9:16 video as the single clip
+        # 2a. RENDERED MODE — final 9:16 render on track 1 + B-roll on track 2
         # ----------------------------------------------------------------
-        import subprocess, time as _time, uuid as _uuid
+        import subprocess, time as _time
 
         final_name = final_video_path.name
         final_url = f"{base_asset_url}/final"
         final_thumb_url = f"{base_asset_url}/final/thumb"
 
-        # Get actual duration from ffprobe
+        # Get actual duration via ffprobe
         final_dur = float(job.edit_plan.get("total_duration", 30.0)) if job.edit_plan else 30.0
         try:
             probe = await asyncio.to_thread(
@@ -547,8 +547,7 @@ async def get_job_openreel_project(job_id: str):
                 ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(final_video_path)],
                 capture_output=True, text=True
             )
-            import json as _json
-            probe_data = _json.loads(probe.stdout or "{}")
+            probe_data = json.loads(probe.stdout or "{}")
             for stream in probe_data.get("streams", []):
                 if stream.get("codec_type") == "video":
                     dur_str = stream.get("duration") or probe_data.get("format", {}).get("duration", "")
@@ -561,6 +560,201 @@ async def get_job_openreel_project(job_id: str):
         now_ms = int(_time.time() * 1000)
         proj_id = f"proj_{job.job_id[:12]}"
         title = f"AI Edit: {Path(job.source_filename).stem}"
+
+        # ---- Collect B-roll files from workspace ----
+        broll_workspace = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+        broll_files: list[Path] = sorted(broll_workspace.glob("*.mp4")) if broll_workspace.exists() else []
+
+        # Build shot → broll file mapping from edit_plan
+        plan_shots = job.edit_plan.get("shots", []) if job.edit_plan else []
+        # Match shots that have asset_path set, else try to match by index with broll files
+        shot_broll_pairs = []
+        for i, shot in enumerate(plan_shots):
+            asset_path = shot.get("asset_path")
+            if asset_path and Path(asset_path).exists():
+                bfile = Path(asset_path)
+            elif i < len(broll_files):
+                bfile = broll_files[i]
+            else:
+                bfile = None
+            shot_broll_pairs.append((shot, bfile))
+
+        # Also include any broll files not matched to a shot
+        matched_files = {p for _, p in shot_broll_pairs if p}
+        unmatched_broll = [f for f in broll_files if f not in matched_files]
+
+        # ---- Build media library items ----
+        media_items = [
+            {
+                "id": "media_final_render",
+                "name": final_name,
+                "type": "video",
+                "metadata": {
+                    "duration": final_dur,
+                    "width": 1080,
+                    "height": 1920,
+                    "frameRate": 30,
+                    "codec": "h264",
+                    "sampleRate": 48000,
+                    "channels": 2,
+                    "fileSize": final_video_path.stat().st_size,
+                    "hasVideo": True,
+                    "hasAudio": True,
+                },
+                "fileHandle": None,
+                "blob": None,
+                "thumbnailUrl": final_thumb_url,
+                "waveformData": None,
+                "isPlaceholder": False,
+                "originalUrl": final_url,
+                "url": final_url,
+                "sourceFile": {
+                    "name": final_name,
+                    "size": final_video_path.stat().st_size,
+                    "lastModified": now_ms,
+                },
+            }
+        ]
+
+        broll_track_clips = []
+        broll_markers = []
+
+        def _broll_media_item(bfile: Path, media_id: str, shot_dur: float) -> dict:
+            bname = bfile.name
+            burl = f"{base_asset_url}/{urllib.parse.quote(bname)}"
+            bthumb = f"{base_asset_url}/{urllib.parse.quote(bname)}/thumb"
+            return {
+                "id": media_id,
+                "name": bname,
+                "type": "video",
+                "metadata": {
+                    "duration": shot_dur,
+                    "width": 1920,
+                    "height": 1080,
+                    "frameRate": 30,
+                    "codec": "h264",
+                    "sampleRate": 48000,
+                    "channels": 2,
+                    "fileSize": bfile.stat().st_size,
+                    "hasVideo": True,
+                    "hasAudio": False,
+                },
+                "fileHandle": None,
+                "blob": None,
+                "thumbnailUrl": bthumb,
+                "waveformData": None,
+                "isPlaceholder": False,
+                "originalUrl": burl,
+                "url": burl,
+                "sourceFile": {
+                    "name": bname,
+                    "size": bfile.stat().st_size,
+                    "lastModified": now_ms,
+                },
+            }
+
+        for i, (shot, bfile) in enumerate(shot_broll_pairs):
+            if not bfile:
+                continue
+            shot_id = shot.get("shot_id", f"broll_{i+1}")
+            media_id = f"media_broll_{i+1}"
+            st = float(shot.get("start_time", 0.0))
+            dur = float(shot.get("duration", 2.0))
+
+            media_items.append(_broll_media_item(bfile, media_id, dur))
+
+            broll_track_clips.append({
+                "id": f"clip_{shot_id}",
+                "mediaId": media_id,
+                "trackId": "track_video_broll",
+                "startTime": st,
+                "duration": dur,
+                "inPoint": 0.0,
+                "outPoint": dur,
+                "effects": [],
+                "audioEffects": [],
+                "transform": {
+                    "position": {"x": 0.5, "y": 0.5},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                    "fitMode": "cover",
+                },
+                "volume": 0.0,
+                "keyframes": [],
+                "metadata": {
+                    "searchQuery": shot.get("search_prompt", ""),
+                    "rationale": shot.get("narrative_reason", ""),
+                    "dialogueQuote": shot.get("dialogue_quote", ""),
+                },
+            })
+
+            broll_markers.append({
+                "id": f"marker_broll_{i+1}",
+                "time": st,
+                "label": f"B-Roll {i+1}: {shot.get('search_prompt', shot_id)}",
+                "color": "#F59E0B",
+            })
+
+        # Add any unmatched broll files to media library only (no timeline clip)
+        for j, bfile in enumerate(unmatched_broll):
+            media_id = f"media_broll_extra_{j+1}"
+            media_items.append(_broll_media_item(bfile, media_id, 3.0))
+
+        # ---- Build tracks ----
+        tracks = [
+            {
+                "id": "track_video_main",
+                "name": "🎬 AI Edit (9:16) — Face Tracked",
+                "type": "video",
+                "role": "dialogue",
+                "mode": "standard",
+                "hidden": False,
+                "muted": False,
+                "locked": True,   # Lock the main render so user doesn't accidentally move it
+                "solo": False,
+                "transitions": [],
+                "clips": [
+                    {
+                        "id": "clip_final_render",
+                        "mediaId": "media_final_render",
+                        "trackId": "track_video_main",
+                        "startTime": 0.0,
+                        "duration": final_dur,
+                        "inPoint": 0.0,
+                        "outPoint": final_dur,
+                        "effects": [],
+                        "audioEffects": [],
+                        "transform": {
+                            "position": {"x": 0.5, "y": 0.5},
+                            "scale": {"x": 1.0, "y": 1.0},
+                            "rotation": 0,
+                            "anchor": {"x": 0.5, "y": 0.5},
+                            "opacity": 1.0,
+                            "fitMode": "contain",
+                        },
+                        "volume": 1.0,
+                        "keyframes": [],
+                    }
+                ],
+            }
+        ]
+
+        if broll_track_clips:
+            tracks.append({
+                "id": "track_video_broll",
+                "name": "✂️ B-Roll Cuts (Swap / Reposition)",
+                "type": "video",
+                "role": "general",
+                "mode": "standard",
+                "hidden": False,
+                "muted": True,
+                "locked": False,
+                "solo": False,
+                "transitions": [],
+                "clips": broll_track_clips,
+            })
 
         project = {
             "id": proj_id,
@@ -577,79 +771,11 @@ async def get_job_openreel_project(job_id: str):
             },
             "timeline": {
                 "duration": final_dur,
-                "tracks": [
-                    {
-                        "id": "track_video_main",
-                        "name": "AI Edit (9:16)",
-                        "type": "video",
-                        "role": "dialogue",
-                        "mode": "standard",
-                        "hidden": False,
-                        "muted": False,
-                        "locked": False,
-                        "solo": False,
-                        "transitions": [],
-                        "clips": [
-                            {
-                                "id": "clip_final_render",
-                                "mediaId": "media_final_render",
-                                "trackId": "track_video_main",
-                                "startTime": 0.0,
-                                "duration": final_dur,
-                                "inPoint": 0.0,
-                                "outPoint": final_dur,
-                                "effects": [],
-                                "audioEffects": [],
-                                "transform": {
-                                    "position": {"x": 0.5, "y": 0.5},
-                                    "scale": {"x": 1.0, "y": 1.0},
-                                    "rotation": 0,
-                                    "anchor": {"x": 0.5, "y": 0.5},
-                                    "opacity": 1.0,
-                                    "fitMode": "contain",
-                                },
-                                "volume": 1.0,
-                                "keyframes": [],
-                            }
-                        ],
-                    }
-                ],
+                "tracks": tracks,
                 "subtitles": [],
-                "markers": [],
+                "markers": broll_markers,
             },
-            "mediaLibrary": {
-                "items": [
-                    {
-                        "id": "media_final_render",
-                        "name": final_name,
-                        "type": "video",
-                        "metadata": {
-                            "duration": final_dur,
-                            "width": 1080,
-                            "height": 1920,
-                            "frameRate": 30,
-                            "codec": "h264",
-                            "sampleRate": 48000,
-                            "channels": 2,
-                            "fileSize": final_video_path.stat().st_size,
-                            "hasVideo": True,
-                            "hasAudio": True,
-                        },
-                        "fileHandle": None,
-                        "blob": None,
-                        "thumbnailUrl": final_thumb_url,
-                        "waveformData": None,
-                        "isPlaceholder": False,
-                        "originalUrl": final_url,
-                        "url": final_url,
-                        "sourceFile": {
-                            "name": final_name,
-                            "size": final_video_path.stat().st_size,
-                            "lastModified": now_ms,
-                        },
-                    }
-                ]
-            },
+            "mediaLibrary": {"items": media_items},
             "textClips": [],
             "shapeClips": [],
             "svgClips": [],
