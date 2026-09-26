@@ -1280,7 +1280,7 @@ export default function StudioDashboard() {
                 )}
               </select>
             </div>
-            {selectedCampaignId && campaigns.find((c) => c.id === selectedCampaignId)?.curated_moments?.length > 0 && (
+            {(campaigns.find((c) => c.id === selectedCampaignId)?.curated_moments?.length ?? 0) > 0 && (
               <button
                 type="button"
                 onClick={() => setShowMomentsModal(true)}
@@ -1455,7 +1455,7 @@ export default function StudioDashboard() {
                     </p>
                   </div>
                 </div>
-                {activeCampaign?.curated_moments?.length > 0 && (
+                {(activeCampaign?.curated_moments?.length ?? 0) > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowMomentsModal(true)}
