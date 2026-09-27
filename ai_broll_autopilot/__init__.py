@@ -1,3 +1,3 @@
-﻿"""AI B-Roll Autopilot — Production-Grade Automated Video Editing Platform."""
+"""AI B-Roll Autopilot — Production-Grade Automated Video Editing Platform."""
 
-__version__ = "1.0.0"
+__version__ = "0.0.0"
