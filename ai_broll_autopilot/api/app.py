@@ -53,19 +53,21 @@ app = FastAPI(
 # Enable GZip compression for responses > 1000 bytes
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Enable CORS for Next.js web frontend
+# Enable CORS for Next.js web frontend and OpenReel editor
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all for development and flexible Azure deployment
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "ETag"],
 )
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    response.headers["Accept-Ranges"] = "bytes"
     return response
 
 # Shared instances
@@ -304,7 +306,13 @@ async def get_job_detail(job_id: str):
 @app.get("/api/jobs/{job_id}/video")
 async def get_job_video(job_id: str):
     """Stream the final rendered MP4 video file with HTTP Range support."""
-    job = db.get_job(job_id)
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -326,6 +334,9 @@ async def get_job_video(job_id: str):
     if not vpath or not vpath.exists():
         raise HTTPException(status_code=404, detail="Video file missing on disk")
 
+    from ai_broll_autopilot.services.media_validator import media_validator
+    media_validator.validate(vpath, auto_remedy=True)
+
     return FileResponse(
         path=str(vpath),
         media_type="video/mp4",
@@ -337,7 +348,13 @@ async def get_job_video(job_id: str):
 @app.get("/api/jobs/{job_id}/broll/{shot_id}")
 async def get_job_broll_asset(job_id: str, shot_id: str):
     """Stream an individual B-roll cutaway video clip for standalone preview."""
-    job = db.get_job(job_id)
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -515,25 +532,36 @@ async def get_job_openreel_project(job_id: str):
     so the user sees exactly what the AI produced and can fine-tune on top.
     If not yet rendered, falls back to the raw source + edit plan approach.
     """
-    job = db.get_job(job_id)
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id)}/assets"
+    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id, safe='~()*!._-')}/assets"
     oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
 
     # ----------------------------------------------------------------
     # 1. Find the final rendered video (9:16 AI-edited output)
     # ----------------------------------------------------------------
     final_video_path: Path | None = None
-    for candidate_dir in Config.OUTPUT_DIR.iterdir():
-        if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
-            finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if finals:
-                final_video_path = finals[0]
-                break
+    if job.output_video_path and Path(job.output_video_path).exists():
+        final_video_path = Path(job.output_video_path)
+    else:
+        for candidate_dir in Config.OUTPUT_DIR.iterdir():
+            if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
+                finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if finals:
+                    final_video_path = finals[0]
+                    break
 
     if final_video_path and final_video_path.exists():
+        from ai_broll_autopilot.services.media_validator import media_validator
+        media_validator.validate(final_video_path, auto_remedy=True)
         # ----------------------------------------------------------------
         # 2a. RENDERED MODE — final 9:16 render on track 1 + B-roll on track 2
         # ----------------------------------------------------------------
@@ -779,7 +807,7 @@ async def get_job_openreel_project(job_id: str):
                 "type": "video",
                 "role": "general",
                 "mode": "standard",
-                "hidden": False,
+                "hidden": True,  # Hidden by default so Track 1 (AI master render) plays smoothly on native hardware player without multi-layer collision
                 "muted": True,
                 "locked": False,
                 "solo": False,
@@ -941,7 +969,13 @@ async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
 @app.api_route("/api/jobs/{job_id}/assets/{asset_name:path}", methods=["GET", "HEAD"])
 async def get_job_asset(job_id: str, asset_name: str):
     """Serve media assets (source video, B-roll clips, audio, graphics, thumbnails) to OpenReel Editor."""
-    job = db.get_job(job_id)
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -986,7 +1020,7 @@ async def get_job_asset(job_id: str, asset_name: str):
                     cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_video_file),
                            "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
                     try:
-                        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+                        subprocess.run(cmd, capture_output=True, check=True)
                     except Exception as e:
                         logger.warning(f"Failed to generate final thumb: {e}")
             if final_thumb.exists():
@@ -1033,19 +1067,30 @@ async def get_job_asset(job_id: str, asset_name: str):
     # Regular Asset requests
     # 0. Rendered final output video — what the AI editor produced (9:16 with face tracking, B-roll, captions baked in)
     if clean_name in ("final", "final_render", "output") or (job.output_video_path and clean_name == Path(job.output_video_path).name):
+        final_video_file = None
         if job.output_video_path and Path(job.output_video_path).exists():
-            return FileResponse(path=str(job.output_video_path), media_type="video/mp4", filename=Path(job.output_video_path).name, content_disposition_type="inline")
-        # Find the rendered final file for this job
-        job_out_dir = Config.OUTPUT_DIR / job.job_id if (Config.OUTPUT_DIR / job.job_id).exists() else None
-        if not job_out_dir:
-            for d in Config.OUTPUT_DIR.iterdir():
-                if d.is_dir() and job.job_id in d.name:
-                    job_out_dir = d
-                    break
-        if job_out_dir:
-            final_candidates = sorted(job_out_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if final_candidates:
-                return FileResponse(path=str(final_candidates[0]), media_type="video/mp4", filename=final_candidates[0].name, content_disposition_type="inline")
+            final_video_file = Path(job.output_video_path)
+        else:
+            job_out_dir = Config.OUTPUT_DIR / job.job_id if (Config.OUTPUT_DIR / job.job_id).exists() else None
+            if not job_out_dir:
+                for d in Config.OUTPUT_DIR.iterdir():
+                    if d.is_dir() and job.job_id in d.name:
+                        job_out_dir = d
+                        break
+            if job_out_dir:
+                final_candidates = sorted(job_out_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if final_candidates:
+                    final_video_file = final_candidates[0]
+
+        if final_video_file and final_video_file.exists():
+            from ai_broll_autopilot.services.media_validator import media_validator
+            media_validator.validate(final_video_file, auto_remedy=True)
+            return FileResponse(
+                path=str(final_video_file),
+                media_type="video/mp4",
+                filename=final_video_file.name,
+                content_disposition_type="inline"
+            )
 
     # 1. Main A-Roll source video
     if clean_name in ("source", "main", Path(job.source_filename).name):
@@ -1074,7 +1119,6 @@ async def get_job_asset(job_id: str, asset_name: str):
                         dur = float(shot.get("duration", 2.0))
                         cmd = ["ffmpeg", "-y", "-ss", str(st), "-i", str(final_cand), "-t", str(dur), "-c", "copy", str(target)]
                         try:
-                            import subprocess
                             subprocess.run(cmd, capture_output=True)
                         except Exception:
                             pass

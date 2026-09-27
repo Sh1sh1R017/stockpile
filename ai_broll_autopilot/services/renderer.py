@@ -181,6 +181,10 @@ class Renderer:
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
+            "-ar", "48000",
+            "-ac", "2",
+            "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart",
         ])
         if base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])
@@ -199,7 +203,14 @@ class Renderer:
         if not out_p.exists() or out_p.stat().st_size == 0:
             raise RuntimeError(f"FFmpeg rendering failed: output file not created at {out_p}")
 
-        logger.info(f"Render completed successfully: {out_p.name} ({out_p.stat().st_size / 1024 / 1024:.2f} MB)")
+        # Validate and enforce media compliance for browser and OpenReel playback
+        from ai_broll_autopilot.services.media_validator import media_validator
+        val_res = media_validator.validate(out_p, auto_remedy=True)
+        if not val_res.is_valid:
+            logger.error(f"Rendered video failed media validation: {val_res.errors}")
+            raise RuntimeError(f"Media validation failed for {out_p.name}: {', '.join(val_res.errors)}")
+
+        logger.info(f"Render completed successfully: {out_p.name} ({out_p.stat().st_size / 1024 / 1024:.2f} MB, faststart={val_res.has_faststart})")
 
         if upscale_hdr:
             hdr_out_p = out_p.with_name(f"{out_p.stem}_hdr10.mp4")
@@ -216,6 +227,7 @@ class Renderer:
                     processing_scale=Config.HDR_PROCESSING_SCALE
                 )
                 if hdr_out_p.exists() and hdr_out_p.stat().st_size > 0:
+                    media_validator.validate(hdr_out_p, auto_remedy=True)
                     logger.info(f"SDR2HDR upscaling succeeded: {hdr_out_p.name} ({hdr_out_p.stat().st_size / 1024 / 1024:.2f} MB)")
                     return str(hdr_out_p)
             except Exception as e:
@@ -229,10 +241,17 @@ class Renderer:
             "ffmpeg", "-y", "-i", str(base_p),
             "-vf", f"scale={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1",
             "-c:v", "libx264", "-preset", "veryfast", "-threads", "0", "-crf", str(Config.VIDEO_CRF),
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
+            "-ar", "48000", "-ac", "2",
+            "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart",
             "-v", "warning",
             str(out_p)
         ]
         proc = await asyncio.create_subprocess_exec(*cmd)
         await proc.wait()
+
+        from ai_broll_autopilot.services.media_validator import media_validator
+        media_validator.validate(out_p, auto_remedy=True)
         return str(out_p)
