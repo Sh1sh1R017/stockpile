@@ -229,7 +229,7 @@ Return ONLY a valid JSON object matching this schema:
                     break
 
                 style = shot.get("style", "stockpile").lower()
-                if not campaign.allow_ai_broll or style not in ("stockpile", "collage", "meme"):
+                if not campaign.allow_ai_broll or style not in ("stockpile", "meme"):
                     style = "stockpile"
 
                 # Fast-paced short-form duration: 1.4s to 2.4s (snappy cuts)

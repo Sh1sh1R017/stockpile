@@ -153,30 +153,29 @@ class Matcher:
 
         # 4. If not cached or resolved from Pexels, acquire asset based on style
         if not asset_path:
-            if style == "collage":
-                out_path = job_cache_dir / f"{shot_id}_collage.mp4"
-                asset_path = await self.collage_bridge.generate_collage_clip(
-                    prompt, str(out_path), duration=int(min(5, max(3, target_duration)))
+            # Stockpile pipeline: check if rapid-fire micro-cut montage is requested
+            micro_prompts = shot.get("micro_prompts", [])
+            if Config.RAPID_FIRE_MONTAGE_ENABLED and len(micro_prompts) > 1:
+                asset_path = await self._build_rapid_montage(
+                    micro_prompts, target_duration, job_cache_dir, shot_id
                 )
             else:
-                # Stockpile pipeline: check if rapid-fire micro-cut montage is requested
-                micro_prompts = shot.get("micro_prompts", [])
-                if Config.RAPID_FIRE_MONTAGE_ENABLED and len(micro_prompts) > 1:
-                    asset_path = await self._build_rapid_montage(
-                        micro_prompts, target_duration, job_cache_dir, shot_id
-                    )
-                else:
-                    asset_path = await self._acquire_stockpile_clip(
-                        prompt, job_cache_dir, shot_id, max_clip_duration=target_duration
-                    )
+                asset_path = await self._acquire_stockpile_clip(
+                    prompt, job_cache_dir, shot_id, max_clip_duration=target_duration
+                )
 
-        # 5. If stockpile acquisition failed, automatically fallback to procedural collage
+        # 5. If stockpile acquisition failed, try clean real-world Pexels stock footage
         if not asset_path or not Path(asset_path).exists():
-            logger.info(f"Stockpile footage unavailable for [{shot_id}] ('{prompt}'). Falling back to procedural collage...")
-            out_path = job_cache_dir / f"{shot_id}_collage.mp4"
-            asset_path = await self.collage_bridge.generate_collage_clip(
-                prompt, str(out_path), duration=int(min(5, max(3, target_duration)))
+            logger.info(f"Stockpile footage unavailable for [{shot_id}] ('{prompt}'). Trying Pexels stock video fallback...")
+            p_fallback = job_cache_dir / f"{shot_id}_pexels_fallback.mp4"
+            asset_path = await pexels_service.search_and_download(
+                prompt, p_fallback, duration=target_duration, orientation="portrait"
             )
+            if asset_path and Path(asset_path).exists():
+                logger.info(f"Resolved clean Pexels stock footage for [{shot_id}]: {Path(asset_path).name}")
+            else:
+                logger.info(f"No clean stock footage found for [{shot_id}] ('{prompt}'); preserving clean A-roll speaker footage.")
+                asset_path = None
 
         if asset_path and Path(asset_path).exists():
             shot["asset_path"] = str(Path(asset_path).resolve())
@@ -331,8 +330,8 @@ class Matcher:
                     break
 
             if not results:
-                logger.warning(f"No YouTube results found for: '{prompt}'")
-                return await self._acquire_clean_collage_fallback(prompt, target_dir, shot_id, max_clip_duration)
+                logger.warning(f"No YouTube results found for: '{prompt}'. Trying Pexels stock fallback.")
+                return await self._acquire_pexels_fallback(prompt, target_dir, shot_id, max_clip_duration)
 
             # Evaluate with Gemini (strict clean, no watermarks, emotional resonance)
             try:
@@ -370,8 +369,8 @@ class Matcher:
                     scored = [ScoredVideo(r.video_id, 8 - idx, r) for idx, r in enumerate(clean_results)]
 
             if not scored:
-                logger.warning(f"No clean stockpile candidates found for '{prompt}'. Falling back to procedural collage.")
-                return await self._acquire_clean_collage_fallback(prompt, target_dir, shot_id, max_clip_duration)
+                logger.warning(f"No clean stockpile candidates found for '{prompt}'. Trying Pexels stock fallback.")
+                return await self._acquire_pexels_fallback(prompt, target_dir, shot_id, max_clip_duration)
 
             # Candidate Retry Loop: download and run aggressive watermark scanner
             download_duration = max_clip_duration or Config.MAX_CLIP_DURATION_SECONDS
@@ -402,22 +401,20 @@ class Matcher:
                 logger.info(f"[VERIFIED CLEAN] 100% clean footage for [{shot_id}]: {Path(downloaded).name}")
                 return downloaded
 
-            # If all candidates failed watermark scan, fallback to procedural collage
-            logger.warning(f"All {max_attempts} candidates for '{prompt}' failed watermark scan. Falling back to procedural collage.")
-            return await self._acquire_clean_collage_fallback(prompt, target_dir, shot_id, max_clip_duration)
+            # If all candidates failed watermark scan, fallback to clean Pexels footage
+            logger.warning(f"All {max_attempts} candidates for '{prompt}' failed watermark scan. Trying Pexels stock fallback.")
+            return await self._acquire_pexels_fallback(prompt, target_dir, shot_id, max_clip_duration)
 
         except Exception as e:
             logger.error(f"Stockpile acquisition failed for '{prompt}': {e}", exc_info=True)
-            return await self._acquire_clean_collage_fallback(prompt, target_dir, shot_id, max_clip_duration)
+            return await self._acquire_pexels_fallback(prompt, target_dir, shot_id, max_clip_duration)
 
-    async def _acquire_clean_collage_fallback(
+    async def _acquire_pexels_fallback(
         self, prompt: str, target_dir: Path, shot_id: str, max_clip_duration: Optional[float] = None
     ) -> Optional[str]:
-        """Fallback to guaranteed 100% clean procedural paper-collage animation."""
+        """Clean real-world stock video fallback via Pexels."""
         dur = max_clip_duration or Config.MAX_CLIP_DURATION_SECONDS
-        return await self.collage_bridge.create_broll_clip(
-            prompt=prompt,
-            duration=dur,
-            output_dir=target_dir,
-            filename=f"{shot_id}_clean_collage.mp4"
+        p_out = target_dir / f"{shot_id}_pexels.mp4"
+        return await pexels_service.search_and_download(
+            prompt, p_out, duration=dur, orientation="portrait"
         )
