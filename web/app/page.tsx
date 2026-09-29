@@ -669,6 +669,7 @@ export default function StudioDashboard() {
           }
           return updated;
         });
+        await handleRerenderMaster();
       } else {
         const err = await res.json().catch(() => ({}));
         showToast(`Trim failed: ${err.detail || "Invalid timestamp"}`);
@@ -691,7 +692,7 @@ export default function StudioDashboard() {
         { method: "DELETE" }
       );
       if (res.ok) {
-        showToast(`Removed Cutaway ${shotId}`);
+        showToast(`Removed Cutaway ${shotId} — re-rendering exact EditPlan...`);
         setSelectedJob((prev) => {
           if (!prev || !prev.edit_plan) return prev;
           const updated = {
