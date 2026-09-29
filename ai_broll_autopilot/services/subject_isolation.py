@@ -320,7 +320,8 @@ class SubjectIsolationService:
 
                 if face_rect:
                     mask = self.generate_person_matte(fitted, face_rect)
-                    if not np.any(mask):
+                    coverage = float(np.mean(mask)) / 255.0
+                    if coverage < 0.01 or coverage > 0.92:
                         mask = last_mask
                 else:
                     # Reuse the last valid foreground mask when face detection misses
