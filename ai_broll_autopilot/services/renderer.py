@@ -44,6 +44,8 @@ class Renderer:
         behind_subject_ass_path: str = None,
         subject_matte_path: str = None,
         layout_mode: str = None,
+        source_start_time: float = 0.0,
+        render_duration: float = None,
     ) -> str:
         """Render the composite video with B-roll cutaway overlays, dynamic transitions,
         kinetic subtitles, frame overlay mask, watermark branding, and mixed audio SFX with ducked background music.
@@ -160,9 +162,13 @@ class Renderer:
             f"behind_subject_matte={bool(subject_matte_path)}"
         )
 
-        # Build FFmpeg command inputs
-        # Input 0: Base video
-        cmd = ["ffmpeg", "-y", "-i", str(base_p)]
+        # Build FFmpeg command inputs.
+        # Child shorts can seek into a long-form source while keeping the
+        # canonical EditPlan pointed at the original raw source.
+        cmd = ["ffmpeg", "-y"]
+        if source_start_time and source_start_time > 0:
+            cmd.extend(["-ss", f"{float(source_start_time):.3f}"])
+        cmd.extend(["-i", str(base_p)])
 
         # Inputs 1 .. len(shots): B-roll video streams
         for shot in shots:
@@ -285,7 +291,9 @@ class Renderer:
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
         ])
-        if base_dur and base_dur > 0:
+        if render_duration is not None and render_duration > 0:
+            cmd.extend(["-t", f"{float(render_duration):.3f}"])
+        elif base_dur and base_dur > 0:
             cmd.extend(["-t", f"{base_dur:.3f}"])
         else:
             cmd.append("-shortest")
