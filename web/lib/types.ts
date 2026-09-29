@@ -133,6 +133,7 @@ export interface JobDetail extends JobSummary {
       subtitles_enabled?: boolean;
       subtitle_style?: string;
       subtitle_position?: string;
+      subtitles_behind_subject?: boolean;
       bgm_track_id?: string;
       bgm_volume?: number;
       bgm_ducking?: boolean;
