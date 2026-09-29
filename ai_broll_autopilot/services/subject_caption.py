@@ -47,7 +47,7 @@ def annotate_segments_for_subject_captions(
         seg_text = _text(segment)
 
         match_index = None
-        if index < len(subtitles):
+        if index < len(subtitles) and index in unused:
             candidate = subtitles[index]
             cand_start, cand_end = _time_range(candidate)
             if (
