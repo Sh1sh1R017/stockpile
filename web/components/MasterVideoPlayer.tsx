@@ -259,7 +259,7 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
           <div className="flex items-center justify-between px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-[11px]">
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="font-semibold">OpenReel 2-Way Synced</span>
+              <span className="font-semibold">Timeline Synced</span>
             </div>
             <span className="text-[10px] text-zinc-400 font-mono">
               {selectedJob.edit_plan.last_openreel_sync
@@ -272,17 +272,17 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
           <button
             type="button"
             onClick={() => onLaunchOpenReel(selectedJob.job_id)}
-            title="Launch live multi-track OpenReel video editor inside this dashboard"
+            title="Launch the editable timeline inside this dashboard"
             className="flex-1 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white text-[12px] font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-950/30 hover:scale-[1.01]"
           >
             <Sparkles className="w-4 h-4 text-emerald-200 animate-pulse" />
-            <span>Launch OpenReel Studio</span>
+            <span>Launch Timeline Editor</span>
           </button>
           <a
             href={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(selectedJob.job_id)}`}
             target="_blank"
             rel="noopener noreferrer"
-            title="Open OpenReel in a dedicated browser tab"
+            title="Open the Timeline Editor in a dedicated browser tab"
             className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 text-[11px] font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -294,11 +294,11 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
           <a
             href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/export/openreel`}
             download={`${selectedJob.filename.replace(/\.[^/.]+$/, "")}.oreel`}
-            title="Download native OpenReel Schema 1.2.0 project file (.oreel)"
+            title="Download the editable project file"
             className="flex-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
           >
             <Layers className="w-3.5 h-3.5 text-emerald-400" />
-            OpenReel .oreel
+            Editable Project
           </a>
           <a
             href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/qc-report`}
