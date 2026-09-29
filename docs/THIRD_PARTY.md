@@ -35,9 +35,15 @@ The applicable Apache License 2.0 is available in the upstream repository's `LIC
 
 ## Editable timeline integration
 
-Stockpile also integrates with an editable timeline/editor environment through its timeline adapter and project representation. The end-user feature is branded simply as **Timeline Editor** in the Stockpile UI.
+**OpenReel Video**  
+Repository: https://github.com/Augani/openreel-video  
+License: MIT
 
-The technical integration remains provider-specific internally so that the public product surface is stable and the implementation can evolve without changing user terminology.
+Stockpile integrates with the editable browser timeline through a dedicated adapter and project representation. The end-user feature is branded simply as **Timeline Editor** in the Stockpile UI.
+
+Stockpile-specific integration code remains behind internal service boundaries so the public product surface is stable and can evolve independently of the upstream editor.
+
+The exact upstream fork/version used for a deployment should be recorded when distributing a bundled editor build.
 
 ## Attribution policy
 
