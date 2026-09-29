@@ -105,9 +105,13 @@ class SubtitleEngine:
         hook_duration: Optional[float] = None,
         suppress_hook: bool = False,
         text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
+        motion_profile: str = "word-pop",
     ) -> Path:
         """Generate an .ass file with kinetic active-word highlighting and optional Level 3 emphasis graphics."""
         cfg = self.PRESETS.get(style_preset.lower(), self.PRESETS["hormozi"])
+        motion = (motion_profile or "word-pop").lower()
+        if motion not in {"word-pop", "bounce", "typewriter", "focus", "scramble", "slide-up"}:
+            motion = "word-pop"
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -223,9 +227,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                                 f"{{\\1c{cfg['inactive_color']}\\3c{cfg['outline_color']}\\bord{cfg['outline_width']}\\fscx100\\fscy100}}"
                             )
                         else:
-                            # Highlighted active word with scale pop
+                            # Motion profiles are rendered with native ASS transforms so
+                            # they work without a browser-side animation runtime.
+                            if motion == "bounce":
+                                effect = f"{{\\c{cfg['active_color']}\\fscx112\\fscy112\\t(0,90,\\fscx100\\fscy100)\\t(90,180,\\fscx108\\fscy108)}}"
+                            elif motion == "slide-up":
+                                effect = f"{{\\c{cfg['active_color']}\\fscx100\\fscy100\\t(0,140,\\fscy108)}}"
+                            elif motion == "focus":
+                                effect = f"{{\\c{cfg['active_color']}\\fscx110\\fscy110\\blur0}}"
+                            elif motion == "typewriter":
+                                effect = f"{{\\c{cfg['active_color']}\\fscx100\\fscy100\\t(0,100,\\fscx104\\fscy104)}}"
+                            elif motion == "scramble":
+                                effect = f"{{\\c{cfg['active_color']}\\fscx106\\fscy106\\t(0,100,\\fscx100\\fscy100)}}"
+                            else:
+                                effect = f"{{\\c{cfg['active_color']}\\fscx108\\fscy108}}"
                             formatted_words.append(
-                                f"{{\\c{cfg['active_color']}\\fscx108\\fscy108}}{word_str}{{\\c{cfg['inactive_color']}\\fscx100\\fscy100}}"
+                                f"{effect}{word_str}{{\\c{cfg['inactive_color']}\\fscx100\\fscy100}}"
                             )
                     else:
                         formatted_words.append(word_str)
