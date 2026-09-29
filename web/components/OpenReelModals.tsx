@@ -24,7 +24,7 @@ export const OpenReelExportModal: React.FC<OpenReelExportModalProps> = ({
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div className="flex items-center gap-2">
             <Film className="w-5 h-5 text-indigo-400" />
-            <h3 className="font-bold text-sm text-white">OpenReel Project Exported (.oreel)</h3>
+            <h3 className="font-bold text-sm text-white">Editable Project Exported</h3>
           </div>
           <button
             type="button"
@@ -36,7 +36,7 @@ export const OpenReelExportModal: React.FC<OpenReelExportModalProps> = ({
         </div>
 
         <div className="space-y-3 text-xs text-zinc-300">
-          <p>Your edit plan has been compiled into a native OpenReel Schema 1.2.0 non-destructive multitrack project.</p>
+          <p>Your edit plan has been compiled into a non-destructive multitrack project for the Timeline Editor.</p>
 
           <div className="bg-black/60 rounded-xl p-3 border border-zinc-800 space-y-1 font-mono text-[11px]">
             <div className="text-indigo-300 font-bold">Files Generated:</div>
@@ -46,10 +46,10 @@ export const OpenReelExportModal: React.FC<OpenReelExportModalProps> = ({
           </div>
 
           <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 text-[11px] space-y-1">
-            <div className="font-bold text-indigo-200">How to open in OpenReel Editor:</div>
+            <div className="font-bold text-indigo-200">How to open in the Timeline Editor:</div>
             <ol className="list-decimal list-inside space-y-1 text-zinc-300">
-              <li>Start OpenReel web app (<code className="text-indigo-300">pnpm --filter @openreel/web dev</code>).</li>
-              <li>In OpenReel, select <strong>File → Open Project</strong> and choose the <code className="text-indigo-300">project.oreel</code> file.</li>
+              <li>Start the Timeline Editor application used by your Stockpile setup.</li>
+              <li>In the Timeline Editor, choose <strong>File → Open Project</strong> and select the exported project file.</li>
               <li>All timeline tracks (Speaker A-Roll, B-Roll cutaways, subtitles, and audio) remain 100% editable!</li>
             </ol>
           </div>
@@ -74,7 +74,7 @@ export const OpenReelExportModal: React.FC<OpenReelExportModalProps> = ({
             className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-emerald-950/40"
           >
             <Film className="w-3.5 h-3.5" />
-            <span>Launch in OpenReel Studio</span>
+            <span>Launch Timeline Editor</span>
           </button>
         </div>
       </div>
@@ -99,7 +99,7 @@ export const EmbeddedOpenReelModal: React.FC<EmbeddedOpenReelModalProps> = ({
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950">
           <div className="flex items-center gap-2">
             <Film className="w-5 h-5 text-emerald-400" />
-            <span className="font-bold text-sm text-white">OpenReel Video Editor</span>
+            <span className="font-bold text-sm text-white">Timeline Editor</span>
             <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
               Schema 1.2.0 • Non-Destructive Multi-Track
             </span>
@@ -129,7 +129,7 @@ export const EmbeddedOpenReelModal: React.FC<EmbeddedOpenReelModalProps> = ({
             src={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(embeddedOpenReelJob)}`}
             className="w-full h-full border-0"
             allow="camera; microphone; display-capture; clipboard-read; clipboard-write; web-share"
-            title="OpenReel Editor"
+            title="Timeline Editor"
           />
         </div>
       </div>
