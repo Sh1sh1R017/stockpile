@@ -1018,7 +1018,7 @@ async def upload_video(
     # Avoid overwriting directly with duplicate name
     if target_file.exists():
         stem = Path(file.filename).stem
-        target_file = Config.INPUT_DIR / f"{stem}_{int(asyncio.get_event_loop().time())}{ext}"
+        target_file = Config.INPUT_DIR / f"{stem}_{int(time.time())}{ext}"
 
     # Write file chunk by chunk
     with open(target_file, "wb") as buffer:

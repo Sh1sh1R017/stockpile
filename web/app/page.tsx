@@ -1047,7 +1047,11 @@ export default function StudioDashboard() {
         fetchData();
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert(`Upload failed: ${errData.detail || "Please ensure the file is a valid video (MP4, MOV, MKV, WebM)."}`);
+        if (res.status >= 500) {
+          alert(`Upload failed (Server error ${res.status}): ${errData.detail || "The server was temporarily unreachable. Please try again."}`);
+        } else {
+          alert(`Upload failed: ${errData.detail || "Please ensure the file is a valid video (MP4, MOV, MKV, WebM)."}`);
+        }
       }
     } catch (err) {
       alert("Error uploading video: " + err);
