@@ -2425,12 +2425,172 @@ class OpenShortsRequest(BaseModel):
     auto_hook: bool = True
     confirm_rights: bool = False
 
+class ShortEditRequest(BaseModel):
+    start: float = Field(..., ge=0.0)
+    end: float = Field(..., gt=0.0)
+    title: str = Field("Edited Short", max_length=160)
+    caption_style: str = Field("razor_pop")
+    caption_motion: str = Field("word-pop")
+    subtitles_behind_subject: bool = True
+
+
+class OpenShortsBatchEditRequest(BaseModel):
+    candidates: List[Dict[str, Any]]
+    batch_id: Optional[str] = None
+    caption_style: str = Field("razor_pop")
+    caption_motion: str = Field("word-pop")
+    subtitles_behind_subject: bool = True
+
+
 class CaptionMotionRequest(BaseModel):
     profile: str = "word-pop"
 
 
 
 
+
+
+@app.post("/api/jobs/{job_id}/shorts/edit")
+async def create_single_stockpile_short(job_id: str, req: ShortEditRequest):
+    """Queue one known interval for the full Stockpile editing pipeline."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    try:
+        duration = get_video_duration(job.source_file)
+        start = float(req.start)
+        end = min(float(req.end), duration)
+        if end <= start:
+            raise ValueError("End time must be greater than start time")
+        child_id = await orchestrator.enqueue_short_edit(
+            parent_job_id=job_id,
+            start=start,
+            end=end,
+            title=req.title,
+            source="manual",
+            caption_style=req.caption_style,
+            caption_motion=req.caption_motion,
+            subtitles_behind_subject=req.subtitles_behind_subject,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    batch_id = f"single_{child_id}"
+    child = db.get_job(child_id)
+    if child and child.edit_plan:
+        wf = child.edit_plan.get("workflow", {})
+        wf["batch_id"] = batch_id
+        child.edit_plan["workflow"] = wf
+        db.save_job(child)
+
+    return {
+        "status": "queued",
+        "job_id": job_id,
+        "child_job_id": child_id,
+        "batch_id": batch_id,
+    }
+
+
+@app.post("/api/jobs/{job_id}/openshorts/edits")
+async def create_openshorts_stockpile_edits(job_id: str, req: OpenShortsBatchEditRequest):
+    """Turn selected OpenShorts candidates into independent Stockpile child edits."""
+    parent = db.get_job(job_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    import uuid
+    batch_id = req.batch_id or f"batch_{uuid.uuid4().hex[:10]}"
+    valid_candidates = []
+    from ai_broll_autopilot.services.shorts_workflow import normalize_clip_candidate
+
+    for index, raw in enumerate(req.candidates):
+        candidate = normalize_clip_candidate(raw, index=index)
+        if candidate:
+            valid_candidates.append(candidate)
+
+    if not valid_candidates:
+        raise HTTPException(status_code=400, detail="No valid clip candidates were supplied")
+
+    if len(valid_candidates) > 15:
+        valid_candidates = valid_candidates[:15]
+
+    edits = []
+    for candidate in valid_candidates:
+        try:
+            child_id = await orchestrator.enqueue_short_edit(
+                parent_job_id=job_id,
+                start=candidate["start"],
+                end=candidate["end"],
+                title=candidate["title"],
+                source="openshorts",
+                batch_id=batch_id,
+                candidate_id=candidate["id"],
+                caption_style=req.caption_style,
+                caption_motion=req.caption_motion,
+                subtitles_behind_subject=req.subtitles_behind_subject,
+            )
+            edits.append({
+                "job_id": child_id,
+                "title": candidate["title"],
+                "status": "QUEUED",
+                "progress": 0.0,
+                "source": "openshorts",
+                "start": candidate["start"],
+                "end": candidate["end"],
+                "batch_id": batch_id,
+            })
+        except ValueError as exc:
+            edits.append({
+                "title": candidate["title"],
+                "status": "FAILED",
+                "progress": 0.0,
+                "source": "openshorts",
+                "start": candidate["start"],
+                "end": candidate["end"],
+                "batch_id": batch_id,
+                "error": str(exc),
+            })
+
+    return {
+        "status": "queued",
+        "job_id": job_id,
+        "batch_id": batch_id,
+        "edits": edits,
+    }
+
+
+@app.get("/api/jobs/{job_id}/shorts")
+async def list_stockpile_child_shorts(job_id: str, batch_id: Optional[str] = None):
+    """List independent short edits generated from a parent long-form job."""
+    parent = db.get_job(job_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    edits = []
+    for child in db.list_jobs(limit=300):
+        workflow = (child.edit_plan or {}).get("workflow", {}) if child.edit_plan else {}
+        if workflow.get("parent_job_id") != job_id:
+            continue
+        if batch_id and workflow.get("batch_id") != batch_id:
+            continue
+        interval = workflow.get("source_interval", {})
+        edits.append({
+            "job_id": child.job_id,
+            "title": workflow.get("title") or child.source_filename,
+            "status": child.status.value,
+            "progress": child.progress,
+            "output_video_path": child.output_video_path,
+            "drive_file_url": child.drive_file_url,
+            "source": workflow.get("source", "manual"),
+            "start": float(interval.get("start", 0.0)),
+            "end": float(interval.get("end", 0.0)),
+            "batch_id": workflow.get("batch_id"),
+            "candidate_id": workflow.get("candidate_id"),
+            "error": child.error_message,
+        })
+    edits.sort(key=lambda item: (item.get("start", 0.0), item["job_id"]))
+    return {"job_id": job_id, "batch_id": batch_id, "edits": edits}
 
 
 @app.post("/api/jobs/{job_id}/openshorts")
