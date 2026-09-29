@@ -96,6 +96,34 @@ export const CreatorWorkflowPanel: React.FC<CreatorWorkflowPanelProps> = ({
   }, [totalDuration]);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadCachedShorts = async () => {
+      try {
+        const response = await fetch(
+          `/api/jobs/${encodeURIComponent(jobId)}/openshorts/candidates`
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled || !data.clips?.length) return;
+        setCandidates(data.clips);
+        setOpenShortsJobId(data.openshorts_job_id || null);
+        setOpenShortsStatus(data.status || "completed");
+        setSelectedCandidates(
+          data.clips
+            .slice(0, Math.min(targetClips, data.clips.length))
+            .map((candidate: Candidate) => candidate.index)
+        );
+      } catch {
+        // Cached discovery is optional; never block the editor.
+      }
+    };
+    loadCachedShorts();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+ 
+  useEffect(() => {
     if (!openShortsJobId) return;
     let cancelled = false;
     let timer: number | null = null;
