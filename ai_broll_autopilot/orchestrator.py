@@ -5,7 +5,7 @@ import json
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.core.database import Database
@@ -95,7 +95,7 @@ class Orchestrator:
         self,
         source_video: str,
         edit_plan: Dict[str, Any],
-        transcript_segments: list[Dict[str, Any]],
+        transcript_segments: List[Dict[str, Any]],
         work_dir: Path,
         style_preset: str,
         position: str,
@@ -103,8 +103,8 @@ class Orchestrator:
         hook_text: Optional[str] = None,
         hook_duration: Optional[float] = None,
         suppress_hook: bool = False,
-        text_emphasis_events: Optional[list[Dict[str, Any]]] = None,
-    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Prepare normal/behind-subject caption layers and a reusable subject matte."""
         subtitles = edit_plan.get("subtitles", []) if edit_plan else []
         render_settings = edit_plan.get("render_settings", {}) if edit_plan else {}
