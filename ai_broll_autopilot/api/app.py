@@ -40,6 +40,7 @@ from ai_broll_autopilot.services.openreel_adapter import openreel_adapter
 from ai_broll_autopilot.services.broll_library import broll_library, extract_media_metadata
 from ai_broll_autopilot.services.transcriber import Transcriber
 from ai_broll_autopilot.services.qc_service import edit_quality_service
+from ai_broll_autopilot.services.openshorts_client import OpenShortsClient, OpenShortsError
 
 logger = logging.getLogger(__name__)
 
@@ -2156,6 +2157,124 @@ class LibraryIndexRequest(BaseModel):
     directory_path: str
     niche_id: Optional[str] = None
     tags: Optional[List[str]] = None
+
+
+class OpenShortsRequest(BaseModel):
+    target_clips: int = Field(5, ge=1, le=15)
+    clip_min_seconds: float = Field(15.0, ge=5.0, le=175.0)
+    clip_max_seconds: float = Field(60.0, ge=10.0, le=180.0)
+    captions: bool = True
+    auto_hook: bool = True
+    confirm_rights: bool = False
+
+
+
+
+@app.post("/api/jobs/{job_id}/openshorts")
+async def submit_job_to_openshorts(job_id: str, req: OpenShortsRequest):
+    """Send a long source video to OpenShorts for async multi-clip generation."""
+    if not req.confirm_rights:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirm that you own the video or have permission to process it.",
+        )
+    if req.clip_max_seconds < req.clip_min_seconds + 5:
+        raise HTTPException(
+            status_code=400,
+            detail="clip_max_seconds must be at least 5 seconds above clip_min_seconds.",
+        )
+
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.source_file or not Path(job.source_file).exists():
+        raise HTTPException(status_code=404, detail="Original source video is not available")
+
+    client = OpenShortsClient(Config.OPENSHORTS_API_URL, Config.OPENSHORTS_API_KEY)
+    if not client.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenShorts is not configured. Set OPENSHORTS_API_URL.",
+        )
+
+    try:
+        result = await client.submit_local_file(
+            Path(job.source_file),
+            target_clips=req.target_clips,
+            clip_min_seconds=req.clip_min_seconds,
+            clip_max_seconds=req.clip_max_seconds,
+            captions=req.captions,
+            auto_hook=req.auto_hook,
+        )
+    except OpenShortsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    job.edit_plan = job.edit_plan or {}
+    openshorts_jobs = job.edit_plan.setdefault("openshorts_jobs", [])
+    record = {
+        "provider": "openshorts",
+        "job_id": result.get("job_id"),
+        "status": result.get("status", "queued"),
+        "target_clips": req.target_clips,
+        "clip_min_seconds": req.clip_min_seconds,
+        "clip_max_seconds": req.clip_max_seconds,
+    }
+    openshorts_jobs.append(record)
+    db.save_job(job)
+
+    return {
+        "status": "queued",
+        "job_id": job_id,
+        "openshorts_job_id": result.get("job_id"),
+        "provider_response": result,
+    }
+
+
+@app.get("/api/jobs/{job_id}/openshorts/{openshorts_job_id}")
+async def get_openshorts_job_status(job_id: str, openshorts_job_id: str):
+    """Read OpenShorts status and expose completed clip URLs to Stockpile."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    client = OpenShortsClient(Config.OPENSHORTS_API_URL, Config.OPENSHORTS_API_KEY)
+    if not client.enabled:
+        raise HTTPException(status_code=503, detail="OpenShorts is not configured")
+
+    try:
+        status = await client.get_status(openshorts_job_id)
+    except OpenShortsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    result = status.get("result") or {}
+    clips = result.get("clips") or []
+    normalized = []
+    for i, clip in enumerate(clips):
+        normalized.append({
+            "index": i,
+            "title": clip.get("title") or clip.get("video_title_for_youtube_short"),
+            "start": clip.get("start"),
+            "end": clip.get("end"),
+            "video_url": clip.get("video_url"),
+            "download_url": clip.get("download_url"),
+            "youtube_title": clip.get("video_title_for_youtube_short"),
+            "tiktok_description": clip.get("video_description_for_tiktok"),
+            "instagram_description": clip.get("video_description_for_instagram"),
+        })
+
+    for record in (job.edit_plan or {}).get("openshorts_jobs", []):
+        if record.get("job_id") == openshorts_job_id:
+            record["status"] = status.get("status")
+            record["clips"] = normalized
+    db.save_job(job)
+
+    return {
+        "job_id": job_id,
+        "openshorts_job_id": openshorts_job_id,
+        "status": status.get("status"),
+        "logs": (status.get("logs") or [])[-10:],
+        "clips": normalized,
+    }
 
 
 @app.get("/api/niches")
