@@ -427,6 +427,8 @@ class Orchestrator:
                 preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
                 frame_overlay_path=frame_overlay_path,
                 viewport=getattr(campaign, "frame_viewport", None),
+                source_start_time=source_start,
+                render_duration=short_duration,
             )
 
             # 7. REVIEWING & AUTO-REPAIR LOOP
@@ -666,8 +668,12 @@ class Orchestrator:
             self._update_state(job, JobState.RENDERING, progress=0.76, msg="Rendering kinetic captions and B-roll")
             rendered_video = work_dir / f"rendered_{job.source_filename}"
             normal_ass = work_dir / "razor_captions.ass"
+            normal_events = [
+                ev for ev in razor_events
+                if not ev.requires_behind_subject
+            ]
             razor_engine.generate_ass(
-                razor_events,
+                normal_events,
                 output_path=normal_ass,
                 style_preset=render_settings.get("caption_style") or campaign.subtitle_style,
                 position=getattr(campaign, "subtitle_position", "bottom"),
@@ -688,6 +694,11 @@ class Orchestrator:
                         subject_isolation_service.generate_person_matte_video,
                         job.source_file,
                         str(matte),
+                        8.0,
+                        540,
+                        960,
+                        source_start,
+                        short_duration,
                     )
                     if matte.exists():
                         behind_ass = str(behind_path.resolve())
