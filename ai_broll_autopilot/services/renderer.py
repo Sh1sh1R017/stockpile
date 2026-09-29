@@ -29,6 +29,8 @@ class Renderer:
         edit_plan: Dict[str, Any],
         output_path: str,
         ass_subtitles_path: str = None,
+        behind_subject_ass_path: str = None,
+        subject_matte_path: str = None,
         bgm_path: str = None,
         bgm_volume: float = 0.15,
         ducking_enabled: bool = True,
@@ -123,11 +125,25 @@ class Renderer:
             watermark_stream_idx = 1 + len(shots) + (1 if frame_overlay_stream_idx is not None else 0)
             cmd.extend(["-loop", "1", "-i", str(watermark_path)])
 
+        # Optional subject matte stream. This is a grayscale mask used only when
+        # behind-subject captions are requested.
+        subject_matte_stream_idx = None
+        if behind_subject_ass_path and subject_matte_path and os.path.exists(subject_matte_path):
+            subject_matte_stream_idx = (
+                1 + len(shots)
+                + (1 if frame_overlay_stream_idx is not None else 0)
+                + (1 if watermark_stream_idx is not None else 0)
+            )
+            cmd.extend(["-i", str(subject_matte_path)])
+        elif behind_subject_ass_path:
+            logger.warning("Behind-subject captions requested without a usable subject matte; falling back to normal caption burn-in.")
+
         # Audio inputs start index
         audio_inputs_start = (
             1 + len(shots)
             + (1 if frame_overlay_stream_idx is not None else 0)
             + (1 if watermark_stream_idx is not None else 0)
+            + (1 if subject_matte_stream_idx is not None else 0)
         )
 
         # Inputs audio_inputs_start .. : Audio SFX files
@@ -145,6 +161,8 @@ class Renderer:
             shots=shots,
             audio_sfx_list=audio_sfx_list,
             ass_subtitles_path=ass_subtitles_path,
+            behind_subject_ass_path=behind_subject_ass_path if subject_matte_stream_idx is not None else None,
+            subject_matte_stream_idx=subject_matte_stream_idx,
             bgm_stream_idx=bgm_stream_idx,
             bgm_volume=bgm_volume,
             ducking_enabled=ducking_enabled,
