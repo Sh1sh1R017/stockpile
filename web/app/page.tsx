@@ -131,6 +131,7 @@ export default function StudioDashboard() {
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
   const [subtitleStyle, setSubtitleStyle] = useState<string>("hormozi");
   const [subtitlePosition, setSubtitlePosition] = useState<string>("bottom");
+  const [subtitlesBehindSubject, setSubtitlesBehindSubject] = useState<boolean>(false);
   const [subtitleMotion, setSubtitleMotion] = useState<string>("word-pop");
   const [selectedBgmId, setSelectedBgmId] = useState<string>("chill_lofi");
   const [bgmVolume, setBgmVolume] = useState<number>(0.16);
@@ -524,6 +525,7 @@ export default function StudioDashboard() {
           subtitles_enabled: subtitlesEnabled,
           subtitle_style: subtitleStyle,
           subtitle_position: subtitlePosition,
+          subtitles_behind_subject: subtitlesBehindSubject,
           bgm_track_id: selectedBgmId === "none" ? null : selectedBgmId,
           bgm_volume: bgmVolume,
           bgm_ducking: bgmDucking,
@@ -980,6 +982,7 @@ export default function StudioDashboard() {
             if (rs.subtitles_enabled !== undefined) setSubtitlesEnabled(rs.subtitles_enabled);
             if (rs.subtitle_style) setSubtitleStyle(rs.subtitle_style);
             if (rs.subtitle_position) setSubtitlePosition(rs.subtitle_position);
+            if (rs.subtitles_behind_subject !== undefined) setSubtitlesBehindSubject(rs.subtitles_behind_subject);
             if (rs.caption_motion) setSubtitleMotion(rs.caption_motion);
             if (rs.bgm_track_id !== undefined) setSelectedBgmId(rs.bgm_track_id || "none");
             if (rs.bgm_volume !== undefined) setBgmVolume(rs.bgm_volume);
@@ -1836,6 +1839,27 @@ export default function StudioDashboard() {
                           Center
                         </button>
                       </div>
+                    </div>
+
+                    {/* Behind Subject */}
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <span className="text-[11px] text-zinc-400">Behind Subject:</span>
+                        <p className="text-[9px] text-zinc-600">Put captions behind the detected speaker when possible.</p>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs">
+                        <span className="text-[10px] text-zinc-500">{subtitlesBehindSubject ? "On" : "Off"}</span>
+                        <input
+                          type="checkbox"
+                          checked={subtitlesBehindSubject}
+                          onChange={(e) => {
+                            const enabled = e.target.checked;
+                            setSubtitlesBehindSubject(enabled);
+                            handleUpdateSettings({ subtitles_behind_subject: enabled });
+                          }}
+                          className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                        />
+                      </label>
                     </div>
                   </div>
                 )}
