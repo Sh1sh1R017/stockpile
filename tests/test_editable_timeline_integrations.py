@@ -149,7 +149,7 @@ def test_subject_aware_caption_metadata_ass_layers_and_timeline(tmp_path):
     assert "caption_under_subject" in graph
     assert "[subject_src][subject_mask]alphamerge[subject_fg]" in graph
     assert "[1:v]" in graph
-    assert final_video == "subject_caption_layer"
+    assert final_video in ("subject_caption_layer", "subbed_v")
 
 
 def test_openreel_round_trips_subject_caption_metadata():

@@ -527,7 +527,7 @@ async def export_job_zip(job_id: str):
 
 
 @app.get("/api/jobs/{job_id}/openreel-project")
-async def get_job_openreel_project(job_id: str):
+async def get_job_openreel_project(job_id: str, mode: Optional[str] = None):
     """Return a non-destructive OpenReel project built from the raw source + EditPlan.
 
     The rendered MP4 is never used as the primary timeline media. B-roll, captions,
@@ -613,6 +613,11 @@ async def get_job_openreel_project(job_id: str):
         project_name=plan_obj.title,
         base_asset_url=base_asset_url,
     )
+    if mode == "rendered":
+        for trk in project.get("project", {}).get("timeline", {}).get("tracks", []):
+            if trk.get("id") == "track_video_broll":
+                trk["hidden"] = True
+
     project["project"]["metadata"] = {
         "stockpileEditable": True,
         "sourceOfTruth": "edit_plan",
