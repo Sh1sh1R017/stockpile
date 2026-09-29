@@ -1864,23 +1864,8 @@ async def rerender_job_video(job_id: str):
     from ai_broll_autopilot.campaigns.registry import campaign_registry
     campaign = campaign_registry.get_campaign(getattr(job, "campaign_id", "default"))
 
-    # Compulsory check: ensure Shot 1 is a meme cutaway only if campaign permits AI/meme broll
-    from ai_broll_autopilot.services.meme_engine import MemeEngine
-    meme_engine = MemeEngine()
-    if raw_shots and campaign.allow_ai_broll:
-        shot_0 = raw_shots[0]
-        curr_p = str(shot_0.get("asset_path", "")).lower()
-        if shot_0.get("style") != "meme" or not curr_p or "pexels" in curr_p or not os.path.exists(shot_0.get("asset_path", "")):
-            logger.info(f"Rerender enforcing compulsory first 5s meme on [{shot_0.get('shot_id')}]...")
-            shot_0["style"] = "meme"
-            if float(shot_0.get("start_time", 0)) > 2.0:
-                shot_0["start_time"] = 1.2
-            shot_0["duration"] = min(2.2, max(1.5, float(shot_0.get("duration", 2.0))))
-            shot_0["end_time"] = round(shot_0["start_time"] + shot_0["duration"], 2)
-            shot_0 = MemeEngine.generate_unique_contextual_meme(shot_0, job.transcript_text or "", client=None)
-            shot_0 = meme_engine.create_meme_broll(shot_0, work_dir, duration=shot_0.get("duration", 2.0))
-            raw_shots[0] = shot_0
-            logger.info(f"Compulsory first 5s meme rendered: {shot_0.get('asset_path')}")
+    # Rerender is a pure function of the current EditPlan.
+    # Do not synthesize/reinsert deleted shots here; user timeline edits are authoritative.
 
     # Also guarantee any other meme shot in the plan has its video asset rendered
     for idx, s in enumerate(raw_shots):
@@ -1964,6 +1949,8 @@ async def rerender_job_video(job_id: str):
     except Exception:
         pass
 
+    job.edit_plan["render_stale"] = False
+    job.edit_plan["last_render_revision"] = int(job.edit_plan.get("edit_revision", 0))
     db.save_job(job)
     return {
         "status": "success",
