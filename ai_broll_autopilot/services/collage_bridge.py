@@ -17,6 +17,13 @@ class CollageBridge:
     def __init__(self):
         self.script_path = Config.COLLAGE_DIR / "scripts" / "generate_video.py"
 
+    async def create_broll_clip(
+        self, prompt: str, duration: float, output_dir: Path, filename: str
+    ) -> Optional[str]:
+        """Generate a procedural or Omni Flash collage B-roll clip in the specified directory."""
+        out_p = Path(output_dir) / filename
+        return await self.generate_collage_clip(prompt, str(out_p), duration=max(1, int(round(duration))))
+
     async def generate_collage_clip(self, prompt: str, output_path: str, duration: int = 4) -> Optional[str]:
         """Generate a paper-collage animation B-roll clip using Gemini Omni Flash or fallback."""
         out_p = Path(output_path)

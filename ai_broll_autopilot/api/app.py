@@ -1849,8 +1849,157 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
     return {"status": "success", "render_settings": settings}
 
 
+async def _execute_rerender_job(job_id: str) -> Dict[str, Any]:
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if not job.edit_plan or "shots" not in job.edit_plan:
+        raise HTTPException(status_code=400, detail="Job has no edit plan")
+
+    job.status = JobState.RENDERING
+    job.progress = 0.75
+    db.save_job(job)
+
+    try:
+        from ai_broll_autopilot.services.renderer import Renderer
+        from ai_broll_autopilot.services.transition_engine import TransitionEngine
+        from ai_broll_autopilot.services.bgm_engine import BGMEngine
+
+        renderer = Renderer()
+        trans_engine = TransitionEngine()
+        bgm_engine = BGMEngine()
+
+        work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
+        work_dir.mkdir(parents=True, exist_ok=True)
+        rendered_video = work_dir / f"rendered_{job.source_filename}"
+
+        raw_shots = job.edit_plan.get("shots", [])
+
+        from ai_broll_autopilot.campaigns.registry import campaign_registry
+        campaign = campaign_registry.get_campaign(getattr(job, "campaign_id", "default"))
+
+        # Rerender is a pure function of the current EditPlan.
+        # Do not synthesize/reinsert deleted shots here; user timeline edits are authoritative.
+
+        # Also guarantee any other meme shot in the plan has its video asset rendered
+        for idx, s in enumerate(raw_shots):
+            if s.get("style") == "meme":
+                s_asset = s.get("asset_path")
+                if not s_asset or not os.path.exists(s_asset) or "pexels" in str(s_asset).lower():
+                    s = meme_engine.create_meme_broll(s, work_dir, duration=s.get("duration", 2.0))
+                    raw_shots[idx] = s
+
+        # Plan transitions and stingers for shots
+        shots = await trans_engine.plan_transitions(raw_shots)
+        job.edit_plan["shots"] = shots
+        db.save_job(job)
+
+        settings = job.edit_plan.get("render_settings", {})
+        sub_enabled = settings.get("subtitles_enabled", True)
+        sub_style = settings.get("subtitle_style", "hormozi")
+        sub_pos = settings.get("subtitle_position", "bottom")
+        caption_motion = normalize_motion_profile(settings.get("caption_motion", "word-pop"))
+
+        ass_path = None
+        behind_subject_ass_path = None
+        subject_matte_path = None
+        if sub_enabled and job.transcript_segments:
+            ass_path, behind_subject_ass_path, subject_matte_path = await orchestrator._prepare_caption_render_assets(
+                source_video=job.source_file,
+                edit_plan=job.edit_plan,
+                transcript_segments=job.transcript_segments,
+                work_dir=work_dir,
+                style_preset=sub_style,
+                position=sub_pos,
+                custom_margin_v=getattr(campaign, "subtitle_margin_v", 280),
+                hook_text=None,
+                hook_duration=None,
+                suppress_hook=True,
+                text_emphasis_events=None,
+            )
+            caption_motion = job.edit_plan.get("render_settings", {}).get("caption_motion", caption_motion)
+
+        # Resolve BGM track
+        bgm_track_id = settings.get("bgm_track_id")
+        bgm_path = None
+        bgm_vol = float(settings.get("bgm_volume", 0.15))
+        ducking = bool(settings.get("bgm_ducking", True))
+        if bgm_track_id:
+            p = bgm_engine.get_track_path(bgm_track_id)
+            if p and p.exists():
+                bgm_path = str(p.resolve())
+
+        hdr_enabled = bool(settings.get("hdr_upscale_enabled", False))
+        hdr_scale = float(settings.get("hdr_output_scale", 1.0))
+        hdr_tone = str(settings.get("hdr_tone", "vivid"))
+
+        out_path = await renderer.render(
+            base_video=job.source_file,
+            edit_plan=job.edit_plan,
+            output_path=str(rendered_video),
+            ass_subtitles_path=ass_path,
+            behind_subject_ass_path=behind_subject_ass_path,
+            subject_matte_path=subject_matte_path,
+            bgm_path=bgm_path,
+            bgm_volume=bgm_vol,
+            ducking_enabled=ducking,
+            upscale_hdr=hdr_enabled,
+            hdr_scale=hdr_scale,
+            hdr_tone=hdr_tone
+        )
+
+        # Guarantee final output video path and master status
+        if job.output_video_path:
+            final_dest = Path(job.output_video_path)
+            final_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(out_path, final_dest)
+        else:
+            final_dir = Config.OUTPUT_DIR / f"{job.job_id}_{Path(job.source_filename).stem}"
+            final_dir.mkdir(parents=True, exist_ok=True)
+            final_dest = final_dir / f"final_{Path(job.source_filename).stem}.mp4"
+            shutil.copy2(out_path, final_dest)
+            job.output_video_path = str(final_dest)
+
+        job.status = JobState.COMPLETED
+        job.progress = 1.0
+
+        # Refresh final thumbnail
+        final_thumb = work_dir / "final_thumb.jpg"
+        cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_dest), "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
+        try:
+            await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+        except Exception:
+            pass
+
+        job.edit_plan["render_stale"] = False
+        rev = int(job.edit_plan.get("last_render_revision", 0)) + 1
+        job.edit_plan["last_render_revision"] = rev
+        db.save_job(job)
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "video_url": f"/api/jobs/{job_id}/video",
+            "file_size": Path(out_path).stat().st_size,
+            "subtitles_burned": bool(ass_path or behind_subject_ass_path),
+            "subtitles_behind_subject": bool(behind_subject_ass_path and subject_matte_path),
+            "bgm_applied": bool(bgm_path),
+            "hdr_enabled": hdr_enabled
+        }
+    except Exception as e:
+        logger.error(f"Re-render execution failed for job {job_id}: {e}", exc_info=True)
+        job.status = JobState.FAILED
+        job.error_message = str(e)
+        db.save_job(job)
+        raise
+
+
 @app.post("/api/jobs/{job_id}/rerender")
-async def rerender_job_video(job_id: str):
+async def rerender_job_video(
+    job_id: str,
+    background: bool = False,
+    background_tasks: BackgroundTasks = None
+):
     """Re-render the master composite video with updated shots, kinetic subtitles, and BGM auto-ducking."""
     job = db.get_job(job_id)
     if not job:
@@ -1859,128 +2008,22 @@ async def rerender_job_video(job_id: str):
     if not job.edit_plan or "shots" not in job.edit_plan:
         raise HTTPException(status_code=400, detail="Job has no edit plan")
 
-    from ai_broll_autopilot.services.renderer import Renderer
-    from ai_broll_autopilot.services.transition_engine import TransitionEngine
-    from ai_broll_autopilot.services.bgm_engine import BGMEngine
+    if background:
+        job.status = JobState.RENDERING
+        job.progress = 0.75
+        db.save_job(job)
+        if background_tasks:
+            background_tasks.add_task(_execute_rerender_job, job_id)
+        else:
+            asyncio.create_task(_execute_rerender_job(job_id))
+        return {
+            "status": "rendering",
+            "job_id": job_id,
+            "message": "Re-rendering master video in background"
+        }
 
-    renderer = Renderer()
-    trans_engine = TransitionEngine()
-    bgm_engine = BGMEngine()
+    return await _execute_rerender_job(job_id)
 
-    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
-    work_dir.mkdir(parents=True, exist_ok=True)
-    rendered_video = work_dir / f"rendered_{job.source_filename}"
-
-    raw_shots = job.edit_plan.get("shots", [])
-
-    from ai_broll_autopilot.campaigns.registry import campaign_registry
-    campaign = campaign_registry.get_campaign(getattr(job, "campaign_id", "default"))
-
-    # Rerender is a pure function of the current EditPlan.
-    # Do not synthesize/reinsert deleted shots here; user timeline edits are authoritative.
-
-    # Also guarantee any other meme shot in the plan has its video asset rendered
-    for idx, s in enumerate(raw_shots):
-        if s.get("style") == "meme":
-            s_asset = s.get("asset_path")
-            if not s_asset or not os.path.exists(s_asset) or "pexels" in str(s_asset).lower():
-                s = meme_engine.create_meme_broll(s, work_dir, duration=s.get("duration", 2.0))
-                raw_shots[idx] = s
-
-    # Plan transitions and stingers for shots
-    shots = await trans_engine.plan_transitions(raw_shots)
-    job.edit_plan["shots"] = shots
-    db.save_job(job)
-
-    settings = job.edit_plan.get("render_settings", {})
-    sub_enabled = settings.get("subtitles_enabled", True)
-    sub_style = settings.get("subtitle_style", "hormozi")
-    sub_pos = settings.get("subtitle_position", "bottom")
-    caption_motion = normalize_motion_profile(settings.get("caption_motion", "word-pop"))
-
-    ass_path = None
-    behind_subject_ass_path = None
-    subject_matte_path = None
-    if sub_enabled and job.transcript_segments:
-        ass_path, behind_subject_ass_path, subject_matte_path = await orchestrator._prepare_caption_render_assets(
-            source_video=job.source_file,
-            edit_plan=job.edit_plan,
-            transcript_segments=job.transcript_segments,
-            work_dir=work_dir,
-            style_preset=sub_style,
-            position=sub_pos,
-            custom_margin_v=getattr(campaign, "subtitle_margin_v", 280),
-            hook_text=None,
-            hook_duration=None,
-            suppress_hook=True,
-            text_emphasis_events=None,
-        )
-        caption_motion = job.edit_plan.get("render_settings", {}).get("caption_motion", caption_motion)
-
-    # Resolve BGM track
-    bgm_track_id = settings.get("bgm_track_id")
-    bgm_path = None
-    bgm_vol = float(settings.get("bgm_volume", 0.15))
-    ducking = bool(settings.get("bgm_ducking", True))
-    if bgm_track_id:
-        p = bgm_engine.get_track_path(bgm_track_id)
-        if p and p.exists():
-            bgm_path = str(p.resolve())
-
-    hdr_enabled = bool(settings.get("hdr_upscale_enabled", False))
-    hdr_scale = float(settings.get("hdr_output_scale", 1.0))
-    hdr_tone = str(settings.get("hdr_tone", "vivid"))
-
-    out_path = await renderer.render(
-        base_video=job.source_file,
-        edit_plan=job.edit_plan,
-        output_path=str(rendered_video),
-        ass_subtitles_path=ass_path,
-        behind_subject_ass_path=behind_subject_ass_path,
-        subject_matte_path=subject_matte_path,
-        bgm_path=bgm_path,
-        bgm_volume=bgm_vol,
-        ducking_enabled=ducking,
-        upscale_hdr=hdr_enabled,
-        hdr_scale=hdr_scale,
-        hdr_tone=hdr_tone
-    )
-
-    # Guarantee final output video path and master status
-    if job.output_video_path:
-        final_dest = Path(job.output_video_path)
-        final_dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(out_path, final_dest)
-    else:
-        final_dir = Config.OUTPUT_DIR / f"{job.job_id}_{Path(job.source_filename).stem}"
-        final_dir.mkdir(parents=True, exist_ok=True)
-        final_dest = final_dir / f"final_{Path(job.source_filename).stem}.mp4"
-        shutil.copy2(out_path, final_dest)
-        job.output_video_path = str(final_dest)
-
-    job.status = JobState.COMPLETED
-
-    # Refresh final thumbnail
-    final_thumb = work_dir / "final_thumb.jpg"
-    cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_dest), "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
-    try:
-        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-    except Exception:
-        pass
-
-    job.edit_plan["render_stale"] = False
-    job.edit_plan["last_render_revision"] = int(job.edit_plan.get("edit_revision", 0))
-    db.save_job(job)
-    return {
-        "status": "success",
-        "job_id": job_id,
-        "video_url": f"/api/jobs/{job_id}/video",
-        "file_size": Path(out_path).stat().st_size,
-        "subtitles_burned": bool(ass_path or behind_subject_ass_path),
-        "subtitles_behind_subject": bool(behind_subject_ass_path and subject_matte_path),
-        "bgm_applied": bool(bgm_path),
-        "hdr_enabled": hdr_enabled
-    }
 
 
 @app.post("/api/jobs/{job_id}/upscale-hdr")

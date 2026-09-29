@@ -141,7 +141,7 @@ Return ONLY a JSON list:
                         temperature=0.2,
                         http_options=types.HttpOptions(
                             retry_options=types.HttpRetryOptions(attempts=1),
-                            timeout=6000
+                            timeout=15000
                         )
                     )
                 )

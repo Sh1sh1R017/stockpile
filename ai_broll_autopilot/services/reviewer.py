@@ -98,7 +98,7 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
                         response_mime_type="application/json",
                         http_options=types.HttpOptions(
                             retry_options=types.HttpRetryOptions(attempts=1),
-                            timeout=8000
+                            timeout=15000
                         ),
                     ),
                 )

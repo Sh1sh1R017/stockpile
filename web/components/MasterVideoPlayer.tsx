@@ -144,8 +144,8 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
           className="max-h-[500px] w-auto rounded-xl shadow-lg aspect-[9/16]"
           src={
             viewingHdrVideo
-              ? `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/hdr-video`
-              : `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video`
+              ? `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/hdr-video?v=${selectedJob.edit_plan?.last_render_revision || 1}`
+              : `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video?v=${selectedJob.edit_plan?.last_render_revision || 1}`
           }
         >
           Your browser does not support the video tag.
