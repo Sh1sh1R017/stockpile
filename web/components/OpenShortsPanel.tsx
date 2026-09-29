@@ -46,12 +46,12 @@ export const OpenShortsPanel: React.FC<OpenShortsPanelProps> = ({ jobId }) => {
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "OpenShorts submission failed");
+      if (!response.ok) throw new Error(data.detail || "Clip generation failed");
       setExternalJobId(data.openshorts_job_id);
       setStatus("queued");
       setClips([]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "OpenShorts submission failed");
+      setError(e instanceof Error ? e.message : "Clip generation failed");
     } finally {
       setBusy(false);
     }
@@ -91,10 +91,10 @@ export const OpenShortsPanel: React.FC<OpenShortsPanelProps> = ({ jobId }) => {
         <div>
           <div className="flex items-center gap-2 text-sm font-bold text-zinc-100">
             <Film className="w-4 h-4 text-cyan-400" />
-            OpenShorts Long Video → Shorts
+            AI Clip Generator
           </div>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            Generate multiple 9:16 clips from the original long video.
+            Turn a long video into multiple ready-to-edit vertical clips.
           </p>
         </div>
         {status !== "idle" && (
