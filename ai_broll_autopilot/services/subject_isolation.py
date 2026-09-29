@@ -285,13 +285,14 @@ class SubjectIsolationService:
         height = max(2, int(processing_height))
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        writer = cv2.VideoWriter(str(dest), fourcc, fps / stride, (width, height), isColor=False)
+        writer = cv2.VideoWriter(str(dest), fourcc, fps / stride, (width, height), isColor=True)
         if not writer.isOpened():
             cap.release()
             raise RuntimeError(f"Could not create subject matte video: {dest}")
 
         frame_index = 0
         processed = 0
+        last_mask = np.zeros((height, width), dtype=np.uint8)
         try:
             while True:
                 ret, frame = cap.read()
@@ -319,12 +320,15 @@ class SubjectIsolationService:
 
                 if face_rect:
                     mask = self.generate_person_matte(fitted, face_rect)
+                    if not np.any(mask):
+                        mask = last_mask
                 else:
-                    # Conservative fallback: black means "no foreground". This preserves
-                    # caption readability instead of hiding the entire caption layer.
-                    mask = np.zeros((height, width), dtype=np.uint8)
+                    # Reuse the last valid foreground mask when face detection misses
+                    # a sampled frame; this avoids a visible caption/subject flicker.
+                    mask = last_mask
 
-                writer.write(mask)
+                last_mask = mask
+                writer.write(cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR))
                 processed += 1
                 frame_index += 1
         finally:
