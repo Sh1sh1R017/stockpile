@@ -318,6 +318,9 @@ class OpenReelAdapter:
                 "startTime": float(s.get("startTime", 0.0)),
                 "endTime": float(s.get("endTime", 0.0)),
                 "animationStyle": s.get("animationStyle", "word-highlight"),
+                "motionProfile": s.get("motionProfile", "word-pop"),
+                "motionRecipe": s.get("motionRecipe", "motion-anything:word-pop"),
+                "behindSubject": bool(s.get("behind_subject", s.get("behindSubject", False))),
                 "style": s.get("style", {
                     "fontFamily": edit_plan.style.get("font_family", "Montserrat"),
                     "fontSize": 54,
@@ -428,7 +431,7 @@ class OpenReelAdapter:
             "shapeClips": [],
             "svgClips": [],
             "stickerClips": [],
-            "capabilities": ["tracks-universal", "behind-subject"],
+            "capabilities": ["tracks-universal", "behind-subject", "subtitle-behind-subject"],
         }
 
         return {
@@ -589,9 +592,14 @@ class OpenReelAdapter:
             for sub in openreel_subs:
                 subs.append({
                     "id": sub.get("id"),
-                    "start": float(sub.get("startTime", 0.0)),
-                    "end": float(sub.get("endTime", 0.0)),
+                    "startTime": float(sub.get("startTime", sub.get("start", 0.0))),
+                    "endTime": float(sub.get("endTime", sub.get("end", 0.0))),
                     "text": sub.get("text", ""),
+                    "animationStyle": sub.get("animationStyle", "word-highlight"),
+                    "motionProfile": sub.get("motionProfile", "word-pop"),
+                    "motionRecipe": sub.get("motionRecipe", "motion-anything:word-pop"),
+                    "behind_subject": bool(sub.get("behindSubject", sub.get("behind_subject", False))),
+                    "style": sub.get("style", {}),
                     "words": sub.get("words", []),
                 })
             edit_plan.subtitles = subs
