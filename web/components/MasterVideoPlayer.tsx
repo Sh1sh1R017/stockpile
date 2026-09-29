@@ -221,14 +221,26 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
 
       {/* Action Buttons: Download + Delete Button */}
       <div className="flex items-center gap-2 pt-1">
-        <a
-          href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video`}
-          download={`final_${selectedJob.filename}`}
-          className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors border border-zinc-700/60"
-        >
-          <Download className="w-3.5 h-3.5 text-indigo-400" />
-          Download 9:16 Video
-        </a>
+        {selectedJob.status === "COMPLETED" && selectedJob.output_video_path ? (
+          <a
+            href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video`}
+            download={`final_${selectedJob.filename}`}
+            className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors border border-zinc-700/60"
+          >
+            <Download className="w-3.5 h-3.5 text-indigo-400" />
+            Download 9:16 Video
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            title="Video is still processing or failed to render"
+            className="flex-1 bg-zinc-850 text-zinc-500 text-xs font-semibold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 cursor-not-allowed border border-zinc-800/80 opacity-60"
+          >
+            <Download className="w-3.5 h-3.5 text-zinc-600" />
+            <span>Download Unavailable</span>
+          </button>
+        )}
 
         {/* Prominent Delete Button under Video Player */}
         <button

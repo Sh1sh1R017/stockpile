@@ -51,7 +51,14 @@ class Renderer:
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
-        shots: List[Dict[str, Any]] = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
+        shots: List[Dict[str, Any]] = [
+            s for s in edit_plan.get("shots", [])
+            if s.get("asset_path")
+            and os.path.exists(s["asset_path"])
+            and os.path.getsize(s["asset_path"]) > 1000
+            and not str(s["asset_path"]).endswith(".part")
+            and not str(s["asset_path"]).endswith(".ytdl")
+        ]
 
         # Gather all sound effects (transition stingers/whooshes + contextual Foley + Level 3 Graphic impacts)
         audio_sfx_list: List[Dict[str, Any]] = []
