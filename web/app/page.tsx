@@ -131,6 +131,7 @@ export default function StudioDashboard() {
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
   const [subtitleStyle, setSubtitleStyle] = useState<string>("hormozi");
   const [subtitlePosition, setSubtitlePosition] = useState<string>("bottom");
+  const [subtitleMotion, setSubtitleMotion] = useState<string>("word-pop");
   const [selectedBgmId, setSelectedBgmId] = useState<string>("chill_lofi");
   const [bgmVolume, setBgmVolume] = useState<number>(0.16);
   const [bgmDucking, setBgmDucking] = useState<boolean>(true);
@@ -978,6 +979,7 @@ export default function StudioDashboard() {
             if (rs.subtitles_enabled !== undefined) setSubtitlesEnabled(rs.subtitles_enabled);
             if (rs.subtitle_style) setSubtitleStyle(rs.subtitle_style);
             if (rs.subtitle_position) setSubtitlePosition(rs.subtitle_position);
+            if (rs.caption_motion) setSubtitleMotion(rs.caption_motion);
             if (rs.bgm_track_id !== undefined) setSelectedBgmId(rs.bgm_track_id || "none");
             if (rs.bgm_volume !== undefined) setBgmVolume(rs.bgm_volume);
             if (rs.bgm_ducking !== undefined) setBgmDucking(rs.bgm_ducking);
@@ -1764,6 +1766,42 @@ export default function StudioDashboard() {
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Caption Motion */}
+                    <div className="space-y-1 pt-1">
+                      <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                        Caption Motion
+                      </label>
+                      <select
+                        value={subtitleMotion}
+                        onChange={async (e) => {
+                          const profile = e.target.value;
+                          setSubtitleMotion(profile);
+                          try {
+                            const res = await fetch(
+                              `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/caption-motion`,
+                              {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ profile }),
+                              }
+                            );
+                            if (!res.ok) throw new Error("Motion update failed");
+                            showToast(`Caption motion: ${profile}`);
+                          } catch (err) {
+                            console.error("Failed to update caption motion:", err);
+                          }
+                        }}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-200 px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="word-pop">Word Pop</option>
+                        <option value="bounce">Bounce</option>
+                        <option value="typewriter">Typewriter</option>
+                        <option value="focus">True Focus</option>
+                        <option value="scramble">Text Scramble</option>
+                        <option value="slide-up">Slide Up</option>
+                      </select>
                     </div>
 
                     {/* Position Picker */}
