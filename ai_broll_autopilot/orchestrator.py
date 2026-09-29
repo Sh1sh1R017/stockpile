@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -115,6 +116,9 @@ class Orchestrator:
         child.transcript_text = parent.transcript_text
 
         from ai_broll_autopilot.services.shorts_workflow import workflow_record
+        parent_plan = parent.edit_plan or {}
+        parent_niche = (parent_plan.get("niche") or {}).get("id") or parent_plan.get("niche_id")
+        parent_style = (parent_plan.get("style") or {}).get("id") or parent_plan.get("style_id")
         child.edit_plan = {
             "workflow": workflow_record(
                 parent_job_id=parent_job_id,
@@ -127,6 +131,8 @@ class Orchestrator:
                 caption_style=caption_style,
                 caption_motion=caption_motion,
                 subtitles_behind_subject=subtitles_behind_subject,
+                niche_id=parent_niche,
+                style_id=parent_style,
             ),
         }
 
@@ -586,8 +592,8 @@ class Orchestrator:
             else:
                 self._update_state(job, JobState.TRANSCRIBING, progress=0.20, msg="Reusing parent transcript")
 
-            niche_id = ((job.edit_plan or {}).get("niche", {}) or {}).get("id") or getattr(campaign, "niche_id", None) or "generic"
-            style_id = ((job.edit_plan or {}).get("style", {}) or {}).get("id") or getattr(campaign, "subtitle_style", None) or "clean_podcast"
+            niche_id = workflow.get("niche_id") or ((job.edit_plan or {}).get("niche", {}) or {}).get("id") or getattr(campaign, "niche_id", None) or "generic"
+            style_id = workflow.get("style_id") or ((job.edit_plan or {}).get("style", {}) or {}).get("id") or "clean_podcast"
 
             self._update_state(job, JobState.DIRECTING, progress=0.35, msg="Building Stockpile edit for selected moment")
             normalized = {
