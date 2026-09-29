@@ -2647,6 +2647,26 @@ async def submit_job_to_openshorts(job_id: str, req: OpenShortsRequest):
     }
 
 
+@app.get("/api/jobs/{job_id}/openshorts/candidates")
+async def get_cached_openshorts_candidates(job_id: str):
+    """Return the most recent cached OpenShorts candidates without rerunning discovery."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    records = (job.edit_plan or {}).get("openshorts_jobs", []) if job.edit_plan else []
+    for record in reversed(records):
+        clips = record.get("clips") or []
+        if clips:
+            return {
+                "status": record.get("status", "completed"),
+                "openshorts_job_id": record.get("job_id"),
+                "clips": clips,
+                "cached": True,
+            }
+    return {"status": "idle", "openshorts_job_id": None, "clips": [], "cached": False}
+
+
 @app.get("/api/jobs/{job_id}/openshorts/{openshorts_job_id}")
 async def get_openshorts_job_status(job_id: str, openshorts_job_id: str):
     """Read OpenShorts status and expose completed clip URLs to Stockpile."""
