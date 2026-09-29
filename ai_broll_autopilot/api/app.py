@@ -525,12 +525,12 @@ async def export_job_zip(job_id: str):
 
 @app.get("/api/jobs/{job_id}/openreel-project")
 async def get_job_openreel_project(job_id: str):
-    """Retrieve native OpenReel Schema 1.2.0 project JSON for this job.
+    """Return a non-destructive OpenReel project built from the raw source + EditPlan.
 
-    If the job has been rendered, the OpenReel project is built around the
-    final 9:16 render (with face tracking, B-roll, captions all baked in),
-    so the user sees exactly what the AI produced and can fine-tune on top.
-    If not yet rendered, falls back to the raw source + edit plan approach.
+    The rendered MP4 is never used as the primary timeline media. B-roll, captions,
+    text overlays, zooms and audio cues remain independent timeline objects so deleting
+    a B-roll clip actually removes it from the composition instead of exposing a
+    second copy that was already baked into the final render.
     """
     clean_job_id = job_id
     while "%" in clean_job_id:
@@ -538,341 +538,56 @@ async def get_job_openreel_project(job_id: str):
         if unquoted == clean_job_id:
             break
         clean_job_id = unquoted
+
     job = db.get_job(job_id) or db.get_job(clean_job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id, safe='~()*!._-')}/assets"
-    oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
-
-    # ----------------------------------------------------------------
-    # 1. Find the final rendered video (9:16 AI-edited output)
-    # ----------------------------------------------------------------
-    final_video_path: Path | None = None
-    if job.output_video_path and Path(job.output_video_path).exists():
-        final_video_path = Path(job.output_video_path)
-    else:
-        for candidate_dir in Config.OUTPUT_DIR.iterdir():
-            if candidate_dir.is_dir() and job.job_id in candidate_dir.name:
-                finals = sorted(candidate_dir.glob("final_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if finals:
-                    final_video_path = finals[0]
-                    break
-
-    if final_video_path and final_video_path.exists():
-        from ai_broll_autopilot.services.media_validator import media_validator
-        media_validator.validate(final_video_path, auto_remedy=True)
-        # ----------------------------------------------------------------
-        # 2a. RENDERED MODE — final 9:16 render on track 1 + B-roll on track 2
-        # ----------------------------------------------------------------
-        import subprocess, time as _time
-
-        final_name = final_video_path.name
-        final_url = f"{base_asset_url}/final"
-        final_thumb_url = f"{base_asset_url}/final/thumb"
-
-        # Get actual duration via ffprobe
-        final_dur = float(job.edit_plan.get("total_duration", 30.0)) if job.edit_plan else 30.0
-        try:
-            probe = await asyncio.to_thread(
-                subprocess.run,
-                ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(final_video_path)],
-                capture_output=True, text=True
-            )
-            probe_data = json.loads(probe.stdout or "{}")
-            for stream in probe_data.get("streams", []):
-                if stream.get("codec_type") == "video":
-                    dur_str = stream.get("duration") or probe_data.get("format", {}).get("duration", "")
-                    if dur_str:
-                        final_dur = float(dur_str)
-                    break
-        except Exception:
-            pass
-
-        now_ms = int(_time.time() * 1000)
-        proj_id = f"proj_{job.job_id[:12]}"
-        title = f"AI Edit: {Path(job.source_filename).stem}"
-
-        # ---- Collect B-roll files from workspace ----
-        broll_workspace = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
-        broll_workspace.mkdir(parents=True, exist_ok=True)
-        broll_files: list[Path] = sorted(broll_workspace.glob("*.mp4"))
-
-        # Build shot → broll file mapping from edit_plan
-        plan_shots = job.edit_plan.get("shots", []) if job.edit_plan else []
-        shot_broll_pairs = []
-        for i, shot in enumerate(plan_shots):
-            asset_path = shot.get("asset_path")
-            bfile = None
-            if asset_path and Path(asset_path).exists():
-                bfile = Path(asset_path)
-            elif i < len(broll_files):
-                bfile = broll_files[i]
-            else:
-                # If cache was cleared or file missing, extract cutaway from final_video_path on demand
-                cand_name = Path(asset_path).name if asset_path else f"broll_{i+1}.mp4"
-                target = broll_workspace / cand_name
-                if not target.exists() and final_video_path and final_video_path.exists():
-                    st = float(shot.get("start_time", 0.0))
-                    dur = float(shot.get("duration", 2.0))
-                    cmd = ["ffmpeg", "-y", "-ss", str(st), "-i", str(final_video_path), "-t", str(dur), "-c", "copy", str(target)]
-                    try:
-                        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-                    except Exception:
-                        pass
-                if target.exists():
-                    bfile = target
-                else:
-                    bfile = target
-
-            # Also ensure thumbnail exists
-            if bfile and bfile.exists():
-                thumb_target = broll_workspace / f"{bfile.stem}_thumb.jpg"
-                if not thumb_target.exists():
-                    cmd = ["ffmpeg", "-y", "-ss", "0.5", "-i", str(bfile), "-frames:v", "1", "-update", "1", "-q:v", "2", str(thumb_target)]
-                    try:
-                        await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-                    except Exception:
-                        pass
-
-            shot_broll_pairs.append((shot, bfile))
-
-        # Also include any extra broll files not matched to a shot
-        matched_files = {p for _, p in shot_broll_pairs if p and p.exists()}
-        unmatched_broll = [f for f in broll_files if f not in matched_files]
-
-        # ---- Build media library items ----
-        media_items = [
-            {
-                "id": "media_final_render",
-                "name": final_name,
-                "type": "video",
-                "metadata": {
-                    "duration": final_dur,
-                    "width": 1080,
-                    "height": 1920,
-                    "frameRate": 30,
-                    "codec": "h264",
-                    "sampleRate": 48000,
-                    "channels": 2,
-                    "fileSize": final_video_path.stat().st_size,
-                    "hasVideo": True,
-                    "hasAudio": True,
-                },
-                "fileHandle": None,
-                "blob": None,
-                "thumbnailUrl": final_thumb_url,
-                "waveformData": None,
-                "isPlaceholder": False,
-                "originalUrl": final_url,
-                "url": final_url,
-                "sourceFile": {
-                    "name": final_name,
-                    "size": final_video_path.stat().st_size,
-                    "lastModified": now_ms,
-                },
-            }
-        ]
-
-        broll_track_clips = []
-        broll_markers = []
-
-        def _broll_media_item(bfile: Path, media_id: str, shot_dur: float) -> dict:
-            bname = bfile.name
-            burl = f"{base_asset_url}/{urllib.parse.quote(bname)}"
-            bthumb = f"{base_asset_url}/{urllib.parse.quote(bname)}/thumb"
-            fsize = bfile.stat().st_size if bfile.exists() else 0
-            return {
-                "id": media_id,
-                "name": bname,
-                "type": "video",
-                "metadata": {
-                    "duration": shot_dur,
-                    "width": 1920,
-                    "height": 1080,
-                    "frameRate": 30,
-                    "codec": "h264",
-                    "sampleRate": 48000,
-                    "channels": 2,
-                    "fileSize": fsize,
-                    "hasVideo": True,
-                    "hasAudio": False,
-                },
-                "fileHandle": None,
-                "blob": None,
-                "thumbnailUrl": bthumb,
-                "waveformData": None,
-                "isPlaceholder": False,
-                "originalUrl": burl,
-                "url": burl,
-                "sourceFile": {
-                    "name": bname,
-                    "size": fsize,
-                    "lastModified": now_ms,
-                },
-            }
-
-        for i, (shot, bfile) in enumerate(shot_broll_pairs):
-            if not bfile:
-                bfile = broll_workspace / f"broll_{i+1}.mp4"
-            shot_id = shot.get("shot_id", f"broll_{i+1}")
-            media_id = f"media_broll_{i+1}"
-            st = float(shot.get("start_time", 0.0))
-            dur = float(shot.get("duration", 2.0))
-
-            media_items.append(_broll_media_item(bfile, media_id, dur))
-
-            broll_track_clips.append({
-                "id": f"clip_{shot_id}",
-                "mediaId": media_id,
-                "trackId": "track_video_broll",
-                "startTime": st,
-                "duration": dur,
-                "inPoint": 0.0,
-                "outPoint": dur,
-                "effects": [],
-                "audioEffects": [],
-                "transform": {
-                    "position": {"x": 0.5, "y": 0.5},
-                    "scale": {"x": 1.0, "y": 1.0},
-                    "rotation": 0,
-                    "anchor": {"x": 0.5, "y": 0.5},
-                    "opacity": 1.0,
-                    "fitMode": "cover",
-                },
-                "volume": 0.0,
-                "keyframes": [],
-                "metadata": {
-                    "searchQuery": shot.get("search_prompt", ""),
-                    "rationale": shot.get("narrative_reason", ""),
-                    "dialogueQuote": shot.get("dialogue_quote", ""),
-                },
-            })
-
-            broll_markers.append({
-                "id": f"marker_broll_{i+1}",
-                "time": st,
-                "label": f"B-Roll {i+1}: {shot.get('search_prompt', shot_id)}",
-                "color": "#F59E0B",
-            })
-
-        # Add any unmatched broll files to media library only (no timeline clip)
-        for j, bfile in enumerate(unmatched_broll):
-            media_id = f"media_broll_extra_{j+1}"
-            media_items.append(_broll_media_item(bfile, media_id, 3.0))
-
-        # ---- Build tracks ----
-        tracks = [
-            {
-                "id": "track_video_main",
-                "name": "🎬 AI Edit (9:16) — Face Tracked",
-                "type": "video",
-                "role": "dialogue",
-                "mode": "standard",
-                "hidden": False,
-                "muted": False,
-                "locked": True,   # Lock the main render so user doesn't accidentally move it
-                "solo": False,
-                "transitions": [],
-                "clips": [
-                    {
-                        "id": "clip_final_render",
-                        "mediaId": "media_final_render",
-                        "trackId": "track_video_main",
-                        "startTime": 0.0,
-                        "duration": final_dur,
-                        "inPoint": 0.0,
-                        "outPoint": final_dur,
-                        "effects": [],
-                        "audioEffects": [],
-                        "transform": {
-                            "position": {"x": 0.5, "y": 0.5},
-                            "scale": {"x": 1.0, "y": 1.0},
-                            "rotation": 0,
-                            "anchor": {"x": 0.5, "y": 0.5},
-                            "opacity": 1.0,
-                            "fitMode": "contain",
-                        },
-                        "volume": 1.0,
-                        "keyframes": [],
-                    }
-                ],
-            }
-        ]
-
-        if broll_track_clips:
-            tracks.append({
-                "id": "track_video_broll",
-                "name": "✂️ B-Roll Cuts (Swap / Reposition)",
-                "type": "video",
-                "role": "general",
-                "mode": "standard",
-                "hidden": True,  # Hidden by default so Track 1 (AI master render) plays smoothly on native hardware player without multi-layer collision
-                "muted": True,
-                "locked": False,
-                "solo": False,
-                "transitions": [],
-                "clips": broll_track_clips,
-            })
-
-        project = {
-            "id": proj_id,
-            "name": title,
-            "createdAt": now_ms,
-            "modifiedAt": now_ms,
-            "settings": {
-                "width": 1080,
-                "height": 1920,
-                "fps": 30,
-                "frameRate": 30,
-                "sampleRate": 48000,
-                "channels": 2,
-            },
-            "timeline": {
-                "duration": final_dur,
-                "tracks": tracks,
-                "subtitles": [],
-                "markers": broll_markers,
-            },
-            "mediaLibrary": {"items": media_items},
-            "textClips": [],
-            "shapeClips": [],
-            "svgClips": [],
-            "stickerClips": [],
-            "capabilities": ["tracks-universal", "behind-subject"],
-        }
-
-        return {"version": "1.2.0", "project": project}
-
-    # ----------------------------------------------------------------
-    # 2b. DRAFT MODE — job not rendered yet, use raw source + edit plan
-    # ----------------------------------------------------------------
-    # Check for a cached project
-    project_oreel = oreel_dir / f"{job.job_id}.oreel"
-    if project_oreel.exists():
-        try:
-            with open(project_oreel, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                items = data.get("project", {}).get("mediaLibrary", {}).get("items", [])
-                has_file_urls = any((item.get("url") or "").startswith("file:///") for item in items)
-                has_space_urls = any(" " in (item.get("url") or "") for item in items)
-                if not has_file_urls and not has_space_urls and items:
-                    return data
-        except Exception:
-            pass
-
     if not job.edit_plan:
-        raise HTTPException(status_code=400, detail="Job has no edit plan and no rendered output yet")
+        raise HTTPException(status_code=400, detail="Job has no edit plan")
 
     plan_dict = job.edit_plan
-    total_dur = plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0
+    total_dur = float(
+        plan_dict.get("target_duration")
+        or plan_dict.get("total_duration")
+        or 30.0
+    )
+
+    source_duration = total_dur
+    try:
+        if job.source_file and Path(job.source_file).exists():
+            probe = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    "ffprobe", "-v", "quiet", "-print_format", "json",
+                    "-show_format", "-show_streams", str(job.source_file)
+                ],
+                capture_output=True,
+                text=True,
+            )
+            pdata = json.loads(probe.stdout or "{}")
+            source_duration = float(
+                pdata.get("format", {}).get("duration")
+                or source_duration
+            )
+    except Exception:
+        pass
 
     plan_obj = EditPlan(
-        plan_id=f"plan_{job.job_id}",
-        title=f"Draft: {Path(job.source_filename).stem}",
-        target_duration=float(total_dur),
-        source_media={"path": job.source_file, "duration": float(total_dur), "title": job.source_filename},
-        clip_interval={"in_point": 0.0, "out_point": float(total_dur)},
+        plan_id=plan_dict.get("plan_id", f"plan_{job.job_id}"),
+        title=plan_dict.get("title", f"AI Edit: {Path(job.source_filename).stem}"),
+        target_duration=total_dur,
+        source_media={
+            "path": job.source_file,
+            "duration": source_duration,
+            "title": job.source_filename,
+            "width": plan_dict.get("source_media", {}).get("width", 1920),
+            "height": plan_dict.get("source_media", {}).get("height", 1080),
+            "fps": plan_dict.get("source_media", {}).get("fps", 30),
+        },
+        clip_interval=plan_dict.get(
+            "clip_interval",
+            {"in_point": 0.0, "out_point": total_dur},
+        ),
         niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
         style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
         shots=plan_dict.get("shots", []),
@@ -882,14 +597,34 @@ async def get_job_openreel_project(job_id: str):
         audio_cues=plan_dict.get("audio_cues", {}),
     )
 
+    oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
     oreel_dir.mkdir(parents=True, exist_ok=True)
-    openreel_adapter.export_project_files(
+
+    base_asset_url = (
+        f"http://127.0.0.1:8000/api/jobs/"
+        f"{urllib.parse.quote(job.job_id, safe='~()*!._-')}/assets"
+    )
+
+    project = openreel_adapter.create_openreel_project(
         edit_plan=plan_obj,
-        output_dir=oreel_dir,
-        project_filename=f"{job.job_id}.oreel",
+        project_name=plan_obj.title,
         base_asset_url=base_asset_url,
     )
-    return openreel_adapter.create_openreel_project(plan_obj, base_asset_url=base_asset_url)
+    project["project"]["metadata"] = {
+        "stockpileEditable": True,
+        "sourceOfTruth": "edit_plan",
+        "renderedOutputIsPreviewOnly": True,
+        "revision": int(plan_dict.get("edit_revision", 0)),
+    }
+
+    with open(oreel_dir / f"{job.job_id}.oreel", "w", encoding="utf-8") as f:
+        json.dump(project, f, indent=2)
+    with open(oreel_dir / "project.json", "w", encoding="utf-8") as f:
+        json.dump(project, f, indent=2)
+    with open(oreel_dir / "edit_plan.json", "w", encoding="utf-8") as f:
+        json.dump(plan_obj.to_dict(), f, indent=2)
+
+    return project
 
 
 @app.api_route("/api/jobs/{job_id}/openreel-project", methods=["POST", "PUT"])
