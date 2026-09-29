@@ -19,8 +19,6 @@ class TimelineEngine:
         shots: List[Dict[str, Any]],
         audio_sfx_list: List[Dict[str, Any]] = None,
         ass_subtitles_path: str = None,
-        behind_subject_ass_path: str = None,
-        subject_matte_stream_idx: int = None,
         bgm_stream_idx: int = None,
         bgm_volume: float = 0.15,
         ducking_enabled: bool = True,
@@ -29,158 +27,265 @@ class TimelineEngine:
         watermark_scale: float = 0.28,
         frame_overlay_stream_idx: int = None,
         viewport: Tuple[int, int, int, int] = None,
+        behind_subject_text: Dict[str, Any] = None,
+        subject_matte_stream_idx: int = None,
+        behind_subject_ass_path: str = None,
+        layout_mode: str = "single",
+        cyber_grid_backdrop_idx: int = None,
+        cyber_grid_mask_before_idx: int = None,
+        cyber_grid_mask_after_idx: int = None,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
-        kinetic subtitles, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
+        subject-aware typography and behind-subject captions, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
 
         Returns:
             (filtergraph_string, final_video_layer_name, final_audio_layer_name)
-
-        Behind-subject captions are rendered below a foreground subject matte and
-        above the composed A-roll/B-roll scene. Normal captions remain a top layer.
         """
         filters = []
         audio_sfx_list = audio_sfx_list or []
+        active_broll_intervals = []
 
         # -------------------------------------------------------------
-        # 1. Base Video Normalization (Stream 0:v)
+        # 1. Base Video Normalization & Layout Setup
         # -------------------------------------------------------------
-        if viewport:
-            vp_x, vp_y, vp_w, vp_h = viewport
-            scale_and_pad = (
-                f"scale={vp_w}:{vp_h}:force_original_aspect_ratio=increase,"
-                f"crop={vp_w}:{vp_h},pad={self.width}:{self.height}:{vp_x}:{vp_y}:color=black,setsar=1,fps={self.fps}"
+        if layout_mode == "before_after_cyber_grid" and cyber_grid_backdrop_idx is not None:
+            # Dual-card Cyber Grid Before & After Compositing
+            filters.append("[0:v]split=2[v_raw][v_proc]")
+
+            # Left Card: BEFORE (352x600, raw video, rounded corners)
+            filters.append(
+                f"[v_raw]scale=352:600:force_original_aspect_ratio=increase,crop=352:600,setsar=1,fps={self.fps}[v_b_crop]"
             )
-            filters.append(f"[0:v]{scale_and_pad}[base]")
+            filters.append(f"[{cyber_grid_mask_before_idx}:v]scale=352:600[m_b]")
+            filters.append("[v_b_crop][m_b]alphamerge[v_before]")
+
+            # Right Card: AFTER (600x1060, punch-in zoom 1.40x, color grading, cutaway B-roll overlays, rounded corners)
+            filters.append(
+                f"[v_proc]scale=600*1.40:1060*1.40:force_original_aspect_ratio=increase,"
+                f"crop=600:1060:(in_w-600)/2:min(in_h-1060\\,in_h*0.10),setsar=1,fps={self.fps},"
+                f"eq=contrast=1.20:saturation=1.28:brightness=-0.02,unsharp=5:5:0.8:5:5:0.0[v_a_graded]"
+            )
+
+            # Overlay B-roll shots inside the AFTER card
+            current_after = "v_a_graded"
+            for idx, shot in enumerate(shots, start=1):
+                if not shot.get("asset_path"):
+                    continue
+                start_t = float(shot["start_time"])
+                end_t = float(shot["end_time"])
+                active_broll_intervals.append((start_t, end_t))
+                speed = float(shot.get("speed") or 1.0)
+                broll_stream = f"[{idx}:v]"
+                scaled_broll = f"broll_after_{idx}"
+                next_after = f"after_layer_{idx}"
+                filters.append(
+                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                    f"scale=600:1060:force_original_aspect_ratio=increase,crop=600:1060,setsar=1,fps={self.fps},"
+                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                )
+                filters.append(
+                    f"[{current_after}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_after}]"
+                )
+                current_after = next_after
+
+            # Apply rounded corner alpha mask to the AFTER card
+            filters.append(f"[{cyber_grid_mask_after_idx}:v]scale=600:1060[m_a]")
+            filters.append(f"[{current_after}][m_a]alphamerge[v_after]")
+
+            # Composite both cards onto the 1080x1920 cyber grid backdrop
+            filters.append(
+                f"[{cyber_grid_backdrop_idx}:v]scale={self.width}:{self.height},setsar=1,fps={self.fps}[bg_canvas]"
+            )
+            filters.append("[bg_canvas][v_before]overlay=64:550:eof_action=pass[comp_b]")
+            filters.append("[comp_b][v_after]overlay=440:320:eof_action=pass[cyber_comp]")
+            current_layer = "cyber_comp"
         else:
-            scale_and_pad = (
-                f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-                f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps}"
-            )
-            filters.append(f"[0:v]{scale_and_pad}[base]")
-
-        current_layer = "base"
-
-        # -------------------------------------------------------------
-        # 2. B-Roll Video Overlays with Dynamic Transitions
-        # -------------------------------------------------------------
-        for idx, shot in enumerate(shots, start=1):
-            if not shot.get("asset_path"):
-                continue
-
-            broll_stream = f"[{idx}:v]"
-            scaled_broll = f"broll_{idx}"
-            next_layer = f"layer_{idx}"
-
-            start_t = float(shot["start_time"])
-            end_t = float(shot["end_time"])
-            duration = max(0.2, end_t - start_t)
-
-            trans = shot.get("transition", {})
-            type_in = trans.get("type_in", "dissolve")
-            from ai_broll_autopilot.config import Config
-            is_streamer_or_meme = (
-                shot.get("style") == "meme" or
-                any(k in str(shot.get("meme_template", "")).lower() for k in ("speed", "caseoh", "jynx", "homeless", "pornstar", "shave", "doctor", "chad", "harold")) or
-                any(k in str(shot.get("search_prompt", "")).lower() for k in ("speed", "caseoh", "jynx", "streamer"))
-            )
-            speed = float(shot.get("speed") or (Config.STREAMER_SPEED_MULTIPLIER if is_streamer_or_meme else Config.BROLL_SPEED_MULTIPLIER))
-
-            # Snappy fast-paced transitions (0.18s max)
-            dur_in = min(0.20, trans.get("duration_in", 0.18))
-            dur_out = min(0.20, trans.get("duration_out", 0.18))
-
-            # Apply transition effects with high-velocity speed acceleration
-            if type_in == "slide_left":
-                # Whip slide in from right
-                filters.append(
-                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"{scale_and_pad},"
-                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+            if viewport:
+                vp_x, vp_y, vp_w, vp_h = viewport
+                scale_and_pad = (
+                    f"scale={vp_w}:{vp_h}:force_original_aspect_ratio=increase,"
+                    f"crop={vp_w}:{vp_h},pad={self.width}:{self.height}:{vp_x}:{vp_y}:color=black,setsar=1,fps={self.fps}"
                 )
-                slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(1-(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
-                filters.append(
-                    f"[{current_layer}][{scaled_broll}]overlay=x='{slide_expr}':y=0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
-                )
-            elif type_in == "slide_right":
-                # Whip slide in from left
-                filters.append(
-                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"{scale_and_pad},"
-                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
-                )
-                slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(-1+(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
-                filters.append(
-                    f"[{current_layer}][{scaled_broll}]overlay=x='{slide_expr}':y=0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
-                )
-            elif type_in == "cut":
-                # Direct hard cut
-                filters.append(
-                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"{scale_and_pad},"
-                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
-                )
-                filters.append(
-                    f"[{current_layer}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
-                )
+                filters.append(f"[0:v]{scale_and_pad}[base]")
             else:
-                # Default: Smooth crossfade alpha dissolve (in and out) with speedup
-                shot_dur = max(0.4, end_t - start_t)
-                fade_out_st = max(0.0, shot_dur - dur_out)
-                filters.append(
-                    f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
-                    f"{scale_and_pad},"
-                    f"format=yuva420p,"
-                    f"fade=t=in:st=0:d={dur_in:.2f}:alpha=1,"
-                    f"fade=t=out:st={fade_out_st:.2f}:d={dur_out:.2f}:alpha=1,"
-                    f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                scale_and_pad = (
+                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps}"
                 )
-                filters.append(
-                    f"[{current_layer}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
-                )
+                filters.append(f"[0:v]{scale_and_pad}[base]")
 
-            current_layer = next_layer
+            # If subject matte compositing is enabled, split base into background and subject foreground source
+            if subject_matte_stream_idx is not None:
+                filters.append("[base]split=2[base_bg][subject_src]")
+                current_layer = "base_bg"
+            else:
+                current_layer = "base"
 
         # -------------------------------------------------------------
-        # 2b. Subject-aware Caption Layer
+        # 1b. Backward-Compatible Subject-Aware Layered Text Overlay
         # -------------------------------------------------------------
-        if behind_subject_ass_path and subject_matte_stream_idx is not None:
+        if behind_subject_text and behind_subject_text.get("text") and not behind_subject_ass_path:
+            raw_text = behind_subject_text.get("text", "").replace("'", "")
+            t_start = float(behind_subject_text.get("start_time", 0.5))
+            t_dur = float(behind_subject_text.get("duration", 2.5))
+            t_end = t_start + t_dur
+            pos_y = float(behind_subject_text.get("transform", {}).get("position", {}).get("y", 0.28))
+            font_size = int(behind_subject_text.get("style", {}).get("fontSize", 68))
+            font_color = behind_subject_text.get("style", {}).get("color", "yellow")
+            if font_color.startswith("#"):
+                font_color = "0x" + font_color[1:]
+
+            drawtext_flt = (
+                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}:"
+                f"bordercolor=black:borderw=5:x=(w-text_w)/2:y={int(self.height * pos_y)}:"
+                f"enable='between(t,{t_start:.2f},{t_end:.2f})'"
+            )
+
+            if subject_matte_stream_idx is not None:
+                filters.append(f"[{current_layer}]{drawtext_flt}[bg_with_text]")
+                filters.append(
+                    f"[{subject_matte_stream_idx}:v]scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},format=gray[subject_mask]"
+                )
+                filters.append(f"[subject_src][subject_mask]alphamerge[subject_fg]")
+                filters.append(
+                    f"[bg_with_text][subject_fg]overlay=0:0:enable='between(t,{t_start:.2f},{t_end:.2f})':eof_action=pass[layer_subj_comp]"
+                )
+                current_layer = "layer_subj_comp"
+            else:
+                filters.append(f"[{current_layer}]{drawtext_flt}[layer_subj_txt]")
+                current_layer = "layer_subj_txt"
+
+        # -------------------------------------------------------------
+        # 2. B-Roll Video Overlays with Dynamic Transitions (Single Layout)
+        # -------------------------------------------------------------
+        if layout_mode != "before_after_cyber_grid":
+            for idx, shot in enumerate(shots, start=1):
+                if not shot.get("asset_path"):
+                    continue
+
+                broll_stream = f"[{idx}:v]"
+                scaled_broll = f"broll_{idx}"
+                next_layer = f"layer_{idx}"
+
+                start_t = float(shot["start_time"])
+                end_t = float(shot["end_time"])
+                active_broll_intervals.append((start_t, end_t))
+                duration = max(0.2, end_t - start_t)
+
+                trans = shot.get("transition", {})
+                type_in = trans.get("type_in", "dissolve")
+                from ai_broll_autopilot.config import Config
+                is_streamer_or_meme = (
+                    shot.get("style") == "meme" or
+                    any(k in str(shot.get("meme_template", "")).lower() for k in ("speed", "caseoh", "jynx", "homeless", "pornstar", "shave", "doctor", "chad", "harold")) or
+                    any(k in str(shot.get("search_prompt", "")).lower() for k in ("speed", "caseoh", "jynx", "streamer"))
+                )
+                speed = float(shot.get("speed") or (Config.STREAMER_SPEED_MULTIPLIER if is_streamer_or_meme else Config.BROLL_SPEED_MULTIPLIER))
+
+                # Snappy fast-paced transitions (0.18s max)
+                dur_in = min(0.20, trans.get("duration_in", 0.18))
+                dur_out = min(0.20, trans.get("duration_out", 0.18))
+
+                # Apply transition effects with high-velocity speed acceleration
+                if type_in == "slide_left":
+                    # Whip slide in from right
+                    filters.append(
+                        f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                        f"{scale_and_pad},"
+                        f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    )
+                    slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(1-(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
+                    filters.append(
+                        f"[{current_layer}][{scaled_broll}]overlay=x='{slide_expr}':y=0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
+                    )
+                elif type_in == "slide_right":
+                    # Whip slide in from left
+                    filters.append(
+                        f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                        f"{scale_and_pad},"
+                        f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    )
+                    slide_expr = f"if(lt(t,{start_t:.2f}+{dur_in:.2f}),(-1+(t-{start_t:.2f})/{dur_in:.2f})*W,0)"
+                    filters.append(
+                        f"[{current_layer}][{scaled_broll}]overlay=x='{slide_expr}':y=0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
+                    )
+                elif type_in == "cut":
+                    # Direct hard cut
+                    filters.append(
+                        f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                        f"{scale_and_pad},"
+                        f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    )
+                    filters.append(
+                        f"[{current_layer}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
+                    )
+                else:
+                    # Default: Smooth crossfade alpha dissolve (in and out) with speedup
+                    shot_dur = max(0.4, end_t - start_t)
+                    fade_out_st = max(0.0, shot_dur - dur_out)
+                    filters.append(
+                        f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                        f"{scale_and_pad},"
+                        f"format=yuva420p,"
+                        f"fade=t=in:st=0:d={dur_in:.2f}:alpha=1,"
+                        f"fade=t=out:st={fade_out_st:.2f}:d={dur_out:.2f}:alpha=1,"
+                        f"setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    )
+                    filters.append(
+                        f"[{current_layer}][{scaled_broll}]overlay=0:0:enable='between(t,{start_t:.2f},{end_t:.2f})':eof_action=pass[{next_layer}]"
+                    )
+
+                current_layer = next_layer
+
+        # -------------------------------------------------------------
+        # 2c. Subject-Aware Layered Caption Compositing (Captions Behind Subject)
+        # -------------------------------------------------------------
+        if behind_subject_ass_path:
             import os
             from pathlib import Path
-
             if os.path.exists(behind_subject_ass_path):
-                clean_ass = str(Path(behind_subject_ass_path).resolve()).replace('\\', '/').replace(':', '\\:')
-                filters.append(f"[{current_layer}]subtitles='{clean_ass}'[caption_under_subject]")
+                clean_behind_ass = str(Path(behind_subject_ass_path).resolve()).replace('\\', '/').replace(':', '\\:')
+                # Burn behind-subject captions onto the composed background
+                filters.append(f"[{current_layer}]subtitles='{clean_behind_ass}'[caption_under_subject]")
 
-                hidden_terms = []
-                for shot in shots:
-                    if not shot.get("asset_path"):
-                        continue
-                    start_t = float(shot.get("start_time", 0.0))
-                    end_t = float(shot.get("end_time", start_t))
-                    if end_t > start_t:
-                        hidden_terms.append(f"between(t,{start_t:.3f},{end_t:.3f})")
-                subject_enable = "1" if not hidden_terms else f"lt({'+'.join(hidden_terms)},0.5)"
+                if subject_matte_stream_idx is not None:
+                    # Prepare subject mask from matte stream
+                    filters.append(
+                        f"[{subject_matte_stream_idx}:v]scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                        f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},format=gray[subject_mask]"
+                    )
+                    # Merge A-roll RGB with alpha mask to get isolated foreground subject
+                    filters.append(f"[subject_src][subject_mask]alphamerge[subject_fg]")
 
-                filters.append(
-                    f"[0:v]{scale_and_pad},format=rgb24[subject_src]"
-                )
-                filters.append(
-                    f"[{subject_matte_stream_idx}:v]setpts=PTS-STARTPTS,"
-                    f"scale={self.width}:{self.height},fps={self.fps},format=gray," 
-                    f"tpad=stop_mode=clone:stop_duration=3600[subject_mask]"
-                )
-                filters.append(
-                    "[subject_src][subject_mask]alphamerge[subject_fg]"
-                )
-                filters.append(
-                    f"[caption_under_subject][subject_fg]"
-                    f"overlay=0:0:enable='{subject_enable}':eof_action=pass:format=auto[subject_caption_layer]"
-                )
-                current_layer = "subject_caption_layer"
+                    # B-Roll occlusion protection: ensure A-roll subject does NOT appear over active B-roll
+                    if active_broll_intervals:
+                        broll_cond = "+".join(f"between(t,{st:.2f},{et:.2f})" for st, et in active_broll_intervals)
+                        enable_expr = f":enable='not({broll_cond})'"
+                    else:
+                        enable_expr = ""
+
+                    filters.append(
+                        f"[caption_under_subject][subject_fg]overlay=0:0{enable_expr}:eof_action=pass[subject_caption_layer]"
+                    )
+                    current_layer = "subject_caption_layer"
+                else:
+                    # Graceful fallback: keep captions visible without subject occlusion
+                    current_layer = "caption_under_subject"
 
         # -------------------------------------------------------------
-        # 2c. Campaign Frame Overlay (Torn Paper Mask & Header/Watermark)
+        # 3. Normal Kinetic Subtitle Burn-In (Overlayed on top of subject layer)
+        # -------------------------------------------------------------
+        if ass_subtitles_path:
+            import os
+            from pathlib import Path
+            if os.path.exists(ass_subtitles_path):
+                clean_ass = str(Path(ass_subtitles_path).resolve()).replace('\\', '/').replace(':', '\\:')
+                filters.append(f"[{current_layer}]subtitles='{clean_ass}'[subbed_v]")
+                current_layer = "subbed_v"
+
+        # -------------------------------------------------------------
+        # 4. Campaign Frame Overlay (Torn Paper Mask & Header/Watermark)
         # -------------------------------------------------------------
         if frame_overlay_stream_idx is not None:
             framed_layer = "framed_layer"
@@ -190,7 +295,7 @@ class TimelineEngine:
             current_layer = framed_layer
 
         # -------------------------------------------------------------
-        # 3. Campaign Watermark Overlay
+        # 5. Campaign Watermark Overlay
         # -------------------------------------------------------------
         if watermark_stream_idx is not None:
             wm_in = f"[{watermark_stream_idx}:v]"
@@ -217,17 +322,6 @@ class TimelineEngine:
             current_layer = "wm_layer"
 
         # -------------------------------------------------------------
-        # 4. Kinetic Subtitle Burn-In (Overlayed on top of all video)
-        # -------------------------------------------------------------
-        if ass_subtitles_path:
-            import os
-            from pathlib import Path
-            if os.path.exists(ass_subtitles_path):
-                clean_ass = str(Path(ass_subtitles_path).resolve()).replace('\\', '/').replace(':', '\\:')
-                filters.append(f"[{current_layer}]subtitles='{clean_ass}'[subbed_v]")
-                current_layer = "subbed_v"
-
-        # -------------------------------------------------------------
         # 4. Multi-Track Audio Mixing (Dialogue + SFX + BGM Ducking)
         # -------------------------------------------------------------
         final_audio_layer = "final_a"
@@ -236,11 +330,20 @@ class TimelineEngine:
 
         # 4a. Transition stingers & Foley SFX
         if audio_sfx_list:
+            used_video_indices = [
+                i for i in [
+                    frame_overlay_stream_idx,
+                    watermark_stream_idx,
+                    subject_matte_stream_idx,
+                    cyber_grid_backdrop_idx,
+                    cyber_grid_mask_before_idx,
+                    cyber_grid_mask_after_idx,
+                ] if i is not None
+            ]
             audio_inputs_start = (
-                1 + len(shots)
-                + (1 if frame_overlay_stream_idx is not None else 0)
-                + (1 if watermark_stream_idx is not None else 0)
-                + (1 if subject_matte_stream_idx is not None else 0)
+                max([0, len(shots)] + used_video_indices) + 1
+                if used_video_indices
+                else 1 + len(shots)
             )
             for a_idx, sfx_item in enumerate(audio_sfx_list):
                 stream_in = f"[{audio_inputs_start + a_idx}:a]"

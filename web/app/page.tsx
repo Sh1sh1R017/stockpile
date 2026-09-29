@@ -84,6 +84,10 @@ const EmbeddedOpenReelModal = dynamic(
   () => import("../components/OpenReelModals").then((m) => m.EmbeddedOpenReelModal),
   { ssr: false }
 );
+const DiffusionStudioModal = dynamic(
+  () => import("../components/DiffusionStudioModal").then((m) => m.DiffusionStudioModal),
+  { ssr: false }
+);
 
 export default function StudioDashboard() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -174,10 +178,12 @@ export default function StudioDashboard() {
   const [hdrAvailable, setHdrAvailable] = useState<boolean>(false);
   const [hdrMeta, setHdrMeta] = useState<any>(null);
 
-  // OpenReel Integration State
+  // OpenReel & Diffusion Studio Integration State
   const [isOpenReelExporting, setIsOpenReelExporting] = useState<boolean>(false);
   const [openReelModalData, setOpenReelModalData] = useState<any>(null);
   const [embeddedOpenReelJob, setEmbeddedOpenReelJob] = useState<string | null>(null);
+  const [embeddedOpenReelEngine, setEmbeddedOpenReelEngine] = useState<string | undefined>(undefined);
+  const [embeddedDiffusionJob, setEmbeddedDiffusionJob] = useState<string | null>(null);
 
   // Campaigns & Curated Moments State
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
@@ -594,6 +600,8 @@ export default function StudioDashboard() {
     subtitles_enabled?: boolean;
     subtitle_style?: string;
     subtitle_position?: string;
+    subtitles_behind_subject?: boolean;
+    caption_motion?: string;
     bgm_track_id?: string | null;
     bgm_volume?: number;
     bgm_ducking?: boolean;
@@ -1714,6 +1722,16 @@ export default function StudioDashboard() {
                   <Film className="w-3.5 h-3.5 text-indigo-200" />
                   <span>🎬 Open Timeline Editor</span>
                 </button>
+
+                {/* Open in Diffusion Studio Button */}
+                <button
+                  onClick={() => selectedJob && setEmbeddedDiffusionJob(selectedJob.job_id)}
+                  className="bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02]"
+                  title="Launch Diffusion Studio WebCodecs composition player & inspector"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-200" />
+                  <span>✨ Diffusion Studio</span>
+                </button>
               </div>
             </div>
 
@@ -2199,8 +2217,24 @@ export default function StudioDashboard() {
 
       <EmbeddedOpenReelModal
         embeddedOpenReelJob={embeddedOpenReelJob}
-        onClose={() => setEmbeddedOpenReelJob(null)}
+        engine={embeddedOpenReelEngine}
+        onClose={() => {
+          setEmbeddedOpenReelJob(null);
+          setEmbeddedOpenReelEngine(undefined);
+        }}
       />
+
+      {embeddedDiffusionJob && (
+        <DiffusionStudioModal
+          jobId={embeddedDiffusionJob}
+          onClose={() => setEmbeddedDiffusionJob(null)}
+          onHandoffToOpenReel={(id, engine) => {
+            setEmbeddedDiffusionJob(null);
+            setEmbeddedOpenReelEngine(engine || "diffusion");
+            setEmbeddedOpenReelJob(id);
+          }}
+        />
+      )}
     </div>
   );
 }

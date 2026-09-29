@@ -29,8 +29,6 @@ class Renderer:
         edit_plan: Dict[str, Any],
         output_path: str,
         ass_subtitles_path: str = None,
-        behind_subject_ass_path: str = None,
-        subject_matte_path: str = None,
         bgm_path: str = None,
         bgm_volume: float = 0.15,
         ducking_enabled: bool = True,
@@ -43,6 +41,9 @@ class Renderer:
         preserve_dialogue_only: bool = False,
         frame_overlay_path: str = None,
         viewport: tuple = None,
+        behind_subject_ass_path: str = None,
+        subject_matte_path: str = None,
+        layout_mode: str = None,
     ) -> str:
         """Render the composite video with B-roll cutaway overlays, dynamic transitions,
         kinetic subtitles, frame overlay mask, watermark branding, and mixed audio SFX with ducked background music.
@@ -99,10 +100,64 @@ class Renderer:
                     "type": "graphic_impact"
                 })
 
+        # Check for text overlays with behind_subject flag
+        behind_subject_overlay = None
+        for ov in edit_plan.get("text_overlays", []):
+            if ov.get("behind_subject") or ov.get("behindSubject"):
+                behind_subject_overlay = ov
+                break
+
+        # Check if behind-subject subtitles are active
+        has_behind_subtitles = bool(behind_subject_ass_path and os.path.exists(behind_subject_ass_path))
+        if not has_behind_subtitles and edit_plan.get("subtitles"):
+            for sub in edit_plan.get("subtitles", []):
+                if sub.get("behind_subject") or sub.get("behindSubject"):
+                    has_behind_subtitles = True
+                    break
+
+        if not subject_matte_path or not os.path.exists(subject_matte_path):
+            subject_matte_path = None
+            if has_behind_subtitles:
+                matte_file = out_p.parent / "subject_matte.mp4"
+                try:
+                    from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+                    m_path = subject_isolation_service.create_subject_matte_clip(
+                        video_path=str(base_p),
+                        output_matte_path=str(matte_file),
+                        start_time=0.0,
+                        duration=None,
+                        target_width=Config.TARGET_WIDTH,
+                        target_height=Config.TARGET_HEIGHT,
+                    )
+                    if m_path and os.path.exists(m_path):
+                        subject_matte_path = m_path
+                except Exception as e:
+                    logger.warning(f"Subject isolation matte for subtitles skipped: {e}. Falling back to standard compositing.")
+            elif behind_subject_overlay:
+                matte_file = out_p.parent / f"matte_{behind_subject_overlay.get('id', 'hook')}.mp4"
+                try:
+                    from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+                    st = float(behind_subject_overlay.get("start_time", 0.0))
+                    dur = float(behind_subject_overlay.get("duration", 2.5))
+                    m_path = subject_isolation_service.create_subject_matte_clip(
+                        video_path=str(base_p),
+                        output_matte_path=str(matte_file),
+                        start_time=st,
+                        duration=dur,
+                        target_width=Config.TARGET_WIDTH,
+                        target_height=Config.TARGET_HEIGHT,
+                    )
+                    if m_path and os.path.exists(m_path):
+                        subject_matte_path = m_path
+                except Exception as e:
+                    logger.warning(f"Subject isolation matte skipped: {e}. Falling back to normal text overlay.")
+
         logger.info(
             f"Rendering timeline: base={base_p.name} with {len(shots)} B-roll cutaway overlays, "
             f"{len(audio_sfx_list)} audio SFX tracks, subtitles={bool(ass_subtitles_path)}, "
-            f"BGM={bool(bgm_path)}, frame_overlay={bool(frame_overlay_path)}, watermark={bool(watermark_path)}"
+            f"behind_subtitles={bool(behind_subject_ass_path)}, "
+            f"BGM={bool(bgm_path)}, frame_overlay={bool(frame_overlay_path)}, watermark={bool(watermark_path)}, "
+            f"behind_subject_matte={bool(subject_matte_path)}"
         )
 
         # Build FFmpeg command inputs
@@ -113,38 +168,59 @@ class Renderer:
         for shot in shots:
             cmd.extend(["-stream_loop", "-1", "-i", str(shot["asset_path"])])
 
+        # Layout mode resolution
+        layout_mode = (
+            layout_mode
+            or edit_plan.get("layout_mode")
+            or edit_plan.get("render_settings", {}).get("layout_mode")
+            or "single"
+        )
+
+        current_input_idx = 1 + len(shots)
+
         # Optional Frame Overlay stream (torn paper mask & branding)
         frame_overlay_stream_idx = None
         if frame_overlay_path and os.path.exists(frame_overlay_path):
-            frame_overlay_stream_idx = 1 + len(shots)
+            frame_overlay_stream_idx = current_input_idx
             cmd.extend(["-loop", "1", "-i", str(frame_overlay_path)])
+            current_input_idx += 1
 
         # Optional Watermark input stream
         watermark_stream_idx = None
         if watermark_path and os.path.exists(watermark_path):
-            watermark_stream_idx = 1 + len(shots) + (1 if frame_overlay_stream_idx is not None else 0)
+            watermark_stream_idx = current_input_idx
             cmd.extend(["-loop", "1", "-i", str(watermark_path)])
+            current_input_idx += 1
 
-        # Optional subject matte stream. This is a grayscale mask used only when
-        # behind-subject captions are requested.
+        # Optional Subject Matte input stream for layered typography
         subject_matte_stream_idx = None
-        if behind_subject_ass_path and subject_matte_path and os.path.exists(subject_matte_path):
-            subject_matte_stream_idx = (
-                1 + len(shots)
-                + (1 if frame_overlay_stream_idx is not None else 0)
-                + (1 if watermark_stream_idx is not None else 0)
-            )
-            cmd.extend(["-i", str(subject_matte_path)])
-        elif behind_subject_ass_path:
-            logger.warning("Behind-subject captions requested without a usable subject matte; falling back to normal caption burn-in.")
+        if subject_matte_path and os.path.exists(subject_matte_path):
+            subject_matte_stream_idx = current_input_idx
+            cmd.extend(["-stream_loop", "-1", "-i", str(subject_matte_path)])
+            current_input_idx += 1
+
+        # Optional Cyber Grid Before & After streams
+        cyber_grid_backdrop_idx = None
+        cyber_grid_mask_before_idx = None
+        cyber_grid_mask_after_idx = None
+        if layout_mode == "before_after_cyber_grid":
+            from ai_broll_autopilot.services.cyber_grid_engine import cyber_grid_engine
+            bg_p, mb_p, ma_p = cyber_grid_engine.ensure_assets()
+
+            cyber_grid_backdrop_idx = current_input_idx
+            cmd.extend(["-loop", "1", "-i", str(bg_p)])
+            current_input_idx += 1
+
+            cyber_grid_mask_before_idx = current_input_idx
+            cmd.extend(["-loop", "1", "-i", str(mb_p)])
+            current_input_idx += 1
+
+            cyber_grid_mask_after_idx = current_input_idx
+            cmd.extend(["-loop", "1", "-i", str(ma_p)])
+            current_input_idx += 1
 
         # Audio inputs start index
-        audio_inputs_start = (
-            1 + len(shots)
-            + (1 if frame_overlay_stream_idx is not None else 0)
-            + (1 if watermark_stream_idx is not None else 0)
-            + (1 if subject_matte_stream_idx is not None else 0)
-        )
+        audio_inputs_start = current_input_idx
 
         # Inputs audio_inputs_start .. : Audio SFX files
         for sfx in audio_sfx_list:
@@ -161,8 +237,6 @@ class Renderer:
             shots=shots,
             audio_sfx_list=audio_sfx_list,
             ass_subtitles_path=ass_subtitles_path,
-            behind_subject_ass_path=behind_subject_ass_path if subject_matte_stream_idx is not None else None,
-            subject_matte_stream_idx=subject_matte_stream_idx,
             bgm_stream_idx=bgm_stream_idx,
             bgm_volume=bgm_volume,
             ducking_enabled=ducking_enabled,
@@ -171,6 +245,13 @@ class Renderer:
             watermark_scale=watermark_scale,
             frame_overlay_stream_idx=frame_overlay_stream_idx,
             viewport=viewport,
+            behind_subject_text=behind_subject_overlay,
+            subject_matte_stream_idx=subject_matte_stream_idx,
+            behind_subject_ass_path=behind_subject_ass_path,
+            layout_mode=layout_mode,
+            cyber_grid_backdrop_idx=cyber_grid_backdrop_idx,
+            cyber_grid_mask_before_idx=cyber_grid_mask_before_idx,
+            cyber_grid_mask_after_idx=cyber_grid_mask_after_idx,
         )
 
         # Probe base video duration to ensure output matches base video exactly

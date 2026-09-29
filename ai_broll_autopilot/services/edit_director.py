@@ -36,7 +36,18 @@ def _clean_json_str(text: str) -> str:
 
 @dataclass
 class EditPlan:
-    """Complete declarative edit plan ready for OpenReel project generation."""
+    """Canonical EditPlan Schema v2.1.
+    
+    Represents an intelligent, non-destructive edit structure linking:
+    - Source media metadata
+    - Cuts-First A-roll keep intervals and detected dead-air/filler cuts
+    - Contextual, sentiment-aware B-roll shots with strict veto validation
+    - Word-level kinetic subtitles in safe area
+    - Content-aware motion graphics (numbers, stats, key term badges, lower thirds)
+    - Keyframe punch-in camera zooms
+    - Multi-track sound design (SFX cues + ducked BGM)
+    - Visual QA compliance metrics
+    """
     plan_id: str
     title: str
     target_duration: float
@@ -44,14 +55,31 @@ class EditPlan:
     clip_interval: Dict[str, float]       # {"in_point": float, "out_point": float}
     niche: Dict[str, Any]
     style: Dict[str, Any]
+    version: str = "2.1"
+    cuts: List[Dict[str, Any]] = field(default_factory=list)           # Cuts-First cut candidates
+    keep_intervals: List[Any] = field(default_factory=list)            # Contiguous kept intervals
+    a_roll_ranges: List[Dict[str, Any]] = field(default_factory=list)  # Mapped A-roll chunks
     shots: List[Dict[str, Any]] = field(default_factory=list)          # B-roll cutaways
     text_overlays: List[Dict[str, Any]] = field(default_factory=list)  # Title / graphic callouts
+    graphics: List[Dict[str, Any]] = field(default_factory=list)       # Content-aware kinetic graphics
     subtitles: List[Dict[str, Any]] = field(default_factory=list)      # Word-level timed subtitles
     zooms: List[Dict[str, Any]] = field(default_factory=list)          # Keyframe punch-ins
     audio_cues: Dict[str, Any] = field(default_factory=dict)           # BGM and SFX cues
+    cadence_profile: Dict[str, Any] = field(default_factory=dict)      # Rhythm configuration
+    editorial_spec: Optional[Dict[str, Any]] = None
+    quality_report: Optional[Dict[str, Any]] = None
+    visual_qa: Optional[Dict[str, Any]] = None
+    review_items: List[Dict[str, Any]] = field(default_factory=list)
+    subtitles_behind_subject: bool = False
+    render_settings: Dict[str, Any] = field(default_factory=dict)
+    render_stale: bool = False
+    edit_revision: int = 1
+    openshorts_jobs: List[Dict[str, Any]] = field(default_factory=list)
+    last_render_revision: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
+            "version": self.version,
             "plan_id": self.plan_id,
             "title": self.title,
             "target_duration": round(self.target_duration, 2),
@@ -62,12 +90,64 @@ class EditPlan:
             },
             "niche": self.niche,
             "style": self.style,
+            "cuts": self.cuts,
+            "keep_intervals": self.keep_intervals,
+            "a_roll_ranges": self.a_roll_ranges,
             "shots": self.shots,
             "text_overlays": self.text_overlays,
+            "graphics": self.graphics,
             "subtitles": self.subtitles,
             "zooms": self.zooms,
             "audio_cues": self.audio_cues,
+            "cadence_profile": self.cadence_profile,
+            "review_items": self.review_items,
+            "subtitles_behind_subject": self.subtitles_behind_subject,
+            "render_settings": self.render_settings,
+            "render_stale": self.render_stale,
+            "edit_revision": self.edit_revision,
+            "openshorts_jobs": self.openshorts_jobs,
+            "last_render_revision": self.last_render_revision,
         }
+        if self.editorial_spec:
+            d["editorial_spec"] = self.editorial_spec
+        if self.quality_report:
+            d["quality_report"] = self.quality_report
+        if self.visual_qa:
+            d["visual_qa"] = self.visual_qa
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "EditPlan":
+        return cls(
+            plan_id=d.get("plan_id", f"plan_{uuid.uuid4().hex[:8]}"),
+            title=d.get("title", "Untitled Edit Plan"),
+            target_duration=float(d.get("target_duration", 0.0)),
+            source_media=d.get("source_media", {}),
+            clip_interval=d.get("clip_interval", {"in_point": 0.0, "out_point": float(d.get("target_duration", 0.0))}),
+            niche=d.get("niche", {}),
+            style=d.get("style", {}),
+            version=d.get("version", "2.1"),
+            cuts=d.get("cuts", []),
+            keep_intervals=d.get("keep_intervals", []),
+            a_roll_ranges=d.get("a_roll_ranges", []),
+            shots=d.get("shots", []),
+            text_overlays=d.get("text_overlays", []),
+            graphics=d.get("graphics", []),
+            subtitles=d.get("subtitles", []),
+            zooms=d.get("zooms", []),
+            audio_cues=d.get("audio_cues", {}),
+            cadence_profile=d.get("cadence_profile", {}),
+            editorial_spec=d.get("editorial_spec"),
+            quality_report=d.get("quality_report"),
+            visual_qa=d.get("visual_qa"),
+            review_items=d.get("review_items", []),
+            subtitles_behind_subject=bool(d.get("subtitles_behind_subject", False)),
+            render_settings=d.get("render_settings", {}),
+            render_stale=bool(d.get("render_stale", False)),
+            edit_revision=int(d.get("edit_revision", 1)),
+            openshorts_jobs=d.get("openshorts_jobs", []),
+            last_render_revision=d.get("last_render_revision"),
+        )
 
 
 class EditDirectorService:
@@ -141,46 +221,187 @@ class EditDirectorService:
 
         plan_id = f"plan_{uuid.uuid4().hex[:8]}"
 
-        # 4. Generate Edit Elements (LLM with deterministic algorithmic fallback)
-        plan_data = None
-        if self.client and len(clip_segments) > 0:
-            try:
-                plan_data = await self._plan_with_llm(
-                    clip_segments=clip_segments,
-                    clip_duration=clip_duration,
-                    niche=niche,
-                    style=style,
-                    custom_hook=custom_hook or (clip_candidate.hook_text if clip_candidate else None),
-                )
-            except Exception as e:
-                logger.warning(f"LLM edit planning failed: {e}. Falling back to algorithmic planner.")
+        # -------------------------------------------------------------
+        # 4. Cuts-First Retention Analysis
+        # -------------------------------------------------------------
+        from ai_broll_autopilot.services.retention_engine import retention_engine
+        is_podcast = (niche_id == "clean_podcast" or "podcast" in style_id.lower())
+        detected_cuts = retention_engine.analyze_and_detect_cuts(
+            transcript_segments=clip_segments,
+            video_duration=clip_duration,
+            is_podcast=is_podcast,
+        )
+        keep_intervals = retention_engine.compute_keep_intervals(
+            video_duration=clip_duration,
+            cuts=detected_cuts,
+        )
 
-        if not plan_data:
-            plan_data = self._plan_algorithmic(
-                clip_segments=clip_segments,
-                clip_duration=clip_duration,
-                niche=niche,
-                style=style,
-                custom_hook=custom_hook or (clip_candidate.hook_text if clip_candidate else None),
-            )
+        a_roll_ranges = []
+        for s_keep, e_keep in keep_intervals:
+            a_roll_ranges.append({
+                "start": s_keep,
+                "end": e_keep,
+                "duration": round(e_keep - s_keep, 2),
+                "source_in": round(clip_in + s_keep, 2),
+                "source_out": round(clip_in + e_keep, 2),
+            })
 
-        # 5. Build Subtitles Structure from Segments
+        cuts_data = [c.to_dict() for c in detected_cuts]
+
+        # -------------------------------------------------------------
+        # 5. Execute AI Editorial Intelligence Pipeline
+        # -------------------------------------------------------------
+        from ai_broll_autopilot.services.editorial.pipeline import editorial_pipeline
+        available_assets = []
+        try:
+            from ai_broll_autopilot.core.database import db
+            available_assets = db.list_broll_assets(niche_id=niche_id, limit=60)
+        except Exception:
+            pass
+
+        spec, quality_report = editorial_pipeline.process(
+            source_media=source_media,
+            transcript_segments=transcript_segments,
+            video_duration=clip_duration,
+            available_broll_assets=available_assets,
+            custom_hook=custom_hook or (clip_candidate.hook_text if clip_candidate else None),
+            clip_interval=(clip_in, clip_out),
+            niche_profile=niche,
+            style_profile=style,
+        )
+
+        # 6. Build Subtitles Structure from Segments
         subtitles = self._build_timed_subtitles(clip_segments, style)
 
-        return EditPlan(
-            plan_id=plan_id,
+        shots_data = [
+            {
+                "shot_id": s.shot_id,
+                "start_time": s.start_time,
+                "end_time": s.end_time,
+                "duration": s.duration,
+                "category": s.subject_category,
+                "search_query": s.search_query,
+                "dialogue_trigger": s.reason,
+                "rationale": s.reason,
+                "narrative_role": s.narrative_role.value,
+                "emotional_intent": s.emotional_intent,
+                "confidence": s.scores.confidence,
+                "pacing_category": s.pacing_category.value,
+                "shot_type": s.shot_type.value,
+                "asset_path": s.asset_path,
+            }
+            for s in spec.broll_shots
+        ]
+
+        text_overlays_data = [
+            {
+                "id": c.caption_id,
+                "text": c.text,
+                "start_time": c.start_time,
+                "duration": c.duration,
+                "position": c.position,
+                "behind_subject": c.behind_subject,
+                "emphasis_color": c.highlight_color,
+            }
+            for c in spec.captions
+        ]
+
+        # -------------------------------------------------------------
+        # 7. Content-Aware Motion Graphics Engine
+        # -------------------------------------------------------------
+        from ai_broll_autopilot.services.graphics_engine import graphics_engine
+        detected_graphics = graphics_engine.generate_graphics(
+            transcript_segments=clip_segments,
+            video_duration=clip_duration,
             title=title,
+            highlight_color=style.highlight_color,
+        )
+        graphics_data = [g.to_dict() for g in detected_graphics]
+
+        zooms_data = [
+            {
+                "time": cm.timestamp,
+                "scale": cm.scale,
+                "duration": cm.duration,
+                "reason": cm.reason,
+                "easing": "ease-out",
+            }
+            for cm in spec.camera_moves
+        ]
+
+        audio_cues_data = {
+            "bgm_ducking": True,
+            "bgm_volume": style.bgm_ducking_volume,
+            "sfx": [
+                {
+                    "id": cue.cue_id,
+                    "event_type": cue.event_type.value,
+                    "time": cue.timestamp,
+                    "duration": cue.duration,
+                    "file": cue.sound_file,
+                    "volume": cue.volume,
+                    "reason": cue.reason,
+                    "synced_with": cue.synced_with,
+                }
+                for cue in spec.sfx_cues
+            ],
+        }
+
+        cadence_profile = {
+            "rhythm_pacing": style.broll_cut_pacing,
+            "default_shot_duration": style.default_broll_duration,
+            "max_broll_ratio": niche.editing.max_broll_ratio,
+            "zoom_intensity": style.zoom_intensity,
+            "is_podcast": is_podcast,
+        }
+
+        # -------------------------------------------------------------
+        # 8. Post-Render Visual QA Simulation
+        # -------------------------------------------------------------
+        from ai_broll_autopilot.services.visual_qa import visual_qa
+        qa_result = visual_qa.verify_rendered_video(
+            video_path=source_media.get("path", ""),
+            target_duration=clip_duration,
+        )
+
+        plan = EditPlan(
+            plan_id=plan_id,
+            title=f"AI Edit: {spec.hook.tightened_text[:40]}",
             target_duration=clip_duration,
             source_media=source_media,
             clip_interval={"in_point": clip_in, "out_point": clip_out},
             niche=niche.to_dict(),
             style=style.to_dict(),
-            shots=plan_data.get("shots", []),
-            text_overlays=plan_data.get("text_overlays", []),
+            version="2.1",
+            cuts=cuts_data,
+            keep_intervals=keep_intervals,
+            a_roll_ranges=a_roll_ranges,
+            shots=shots_data,
+            text_overlays=text_overlays_data,
+            graphics=graphics_data,
             subtitles=subtitles,
-            zooms=plan_data.get("zooms", []),
-            audio_cues=plan_data.get("audio_cues", {}),
+            zooms=zooms_data,
+            audio_cues=audio_cues_data,
+            cadence_profile=cadence_profile,
+            editorial_spec=spec.to_dict(),
+            quality_report=quality_report.to_dict(),
+            visual_qa=qa_result.to_dict(),
+            review_items=[
+                {"type": "cut", "count": len(cuts_data)},
+                {"type": "shot", "count": len(shots_data)},
+                {"type": "graphic", "count": len(graphics_data)},
+            ],
         )
+
+        # -------------------------------------------------------------
+        # 9. Iterative Review & Auto-Repair Pass
+        # -------------------------------------------------------------
+        from ai_broll_autopilot.services.iterative_editor import iterative_editor
+        repair_result = iterative_editor.audit_and_repair_plan(plan)
+        if repair_result.repaired_items and plan.quality_report:
+            plan.quality_report["repaired_items"] = repair_result.repaired_items
+
+        return plan
 
     async def _plan_with_llm(
         self,

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from ai_broll_autopilot.services.edit_director import EditPlan
+from ai_broll_autopilot.services.editor_base import EditorAdapter
 from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
 
 logger = logging.getLogger(__name__)
@@ -22,13 +23,38 @@ logger = logging.getLogger(__name__)
 OPENREEL_SCHEMA_VERSION = "1.2.0"
 
 
-class OpenReelAdapter:
+class OpenReelAdapter(EditorAdapter):
     """Transforms Stockpile EditPlan into OpenReel Schema 1.2.0 native project file."""
+
+    @property
+    def engine_name(self) -> str:
+        return "openreel"
+
+    @property
+    def schema_version(self) -> str:
+        return OPENREEL_SCHEMA_VERSION
 
     def __init__(self, default_width: int = 1080, default_height: int = 1920, default_fps: int = 30):
         self.default_width = default_width
         self.default_height = default_height
         self.default_fps = default_fps
+
+    def create_project(
+        self,
+        edit_plan: EditPlan,
+        project_name: Optional[str] = None,
+        resolved_broll_map: Optional[Dict[str, str]] = None,
+        base_asset_url: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Convert EditPlan into OpenReel project JSON dict conforming to EditorAdapter."""
+        return self.create_openreel_project(
+            edit_plan=edit_plan,
+            project_name=project_name,
+            resolved_broll_map=resolved_broll_map,
+            base_asset_url=base_asset_url,
+            **kwargs,
+        )
 
     def create_openreel_project(
         self,
@@ -208,28 +234,62 @@ class OpenReelAdapter:
                 "easing": zoom.get("easing", "snappy"),
             })
 
-        main_clip = {
-            "id": "clip_main_speech",
-            "mediaId": source_media_id,
-            "trackId": "track_video_main",
-            "startTime": 0.0,
-            "duration": duration,
-            "inPoint": in_pt,
-            "outPoint": out_pt,
-            "effects": [],
-            "audioEffects": [],
-            "transform": {
-                "position": {"x": 0.5, "y": 0.5},
-                "scale": {"x": 1.0, "y": 1.0},
-                "rotation": 0,
-                "anchor": {"x": 0.5, "y": 0.5},
-                "opacity": 1.0,
-                "fitMode": "cover",
-            },
-            "volume": 1.0,
-            "keyframes": keyframes,
-        }
-        track_main_video["clips"].append(main_clip)
+        if getattr(edit_plan, "a_roll_ranges", None) and len(edit_plan.a_roll_ranges) > 0:
+            for idx, r in enumerate(edit_plan.a_roll_ranges):
+                r_start = float(r.get("start", 0.0))
+                r_dur = float(r.get("duration", 1.0))
+                r_in = float(r.get("source_in", 0.0))
+                r_out = float(r.get("source_out", r_in + r_dur))
+
+                seg_keyframes = [
+                    kf for kf in keyframes
+                    if r_start <= kf["time"] < (r_start + r_dur)
+                ]
+
+                track_main_video["clips"].append({
+                    "id": f"clip_main_seg_{idx+1}",
+                    "mediaId": source_media_id,
+                    "trackId": "track_video_main",
+                    "startTime": r_start,
+                    "duration": r_dur,
+                    "inPoint": r_in,
+                    "outPoint": r_out,
+                    "effects": [],
+                    "audioEffects": [],
+                    "transform": {
+                        "position": {"x": 0.5, "y": 0.5},
+                        "scale": {"x": 1.0, "y": 1.0},
+                        "rotation": 0,
+                        "anchor": {"x": 0.5, "y": 0.5},
+                        "opacity": 1.0,
+                        "fitMode": "cover",
+                    },
+                    "volume": 1.0,
+                    "keyframes": seg_keyframes,
+                })
+        else:
+            main_clip = {
+                "id": "clip_main_speech",
+                "mediaId": source_media_id,
+                "trackId": "track_video_main",
+                "startTime": 0.0,
+                "duration": duration,
+                "inPoint": in_pt,
+                "outPoint": out_pt,
+                "effects": [],
+                "audioEffects": [],
+                "transform": {
+                    "position": {"x": 0.5, "y": 0.5},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                    "fitMode": "cover",
+                },
+                "volume": 1.0,
+                "keyframes": keyframes,
+            }
+            track_main_video["clips"].append(main_clip)
 
         # 4. B-Roll Overlay Clips & Transitions
         for i, shot in enumerate(edit_plan.shots):
@@ -392,6 +452,55 @@ class OpenReelAdapter:
                 "keyframes": [],
             })
 
+        # Add content-aware kinetic graphics (Number stats, key term badges, lower thirds)
+        for g in getattr(edit_plan, "graphics", []):
+            g_st = float(g.get("start_time", 1.0))
+            g_dur = float(g.get("duration", 2.5))
+            p_text = g.get("primary_text", "")
+            s_text = g.get("secondary_text", "")
+            display_text = f"{p_text}\n{s_text}".strip() if s_text else p_text
+
+            pos_y = (g.get("position", {}).get("y_percent", 25.0)) / 100.0
+            pos_x = (g.get("position", {}).get("x_percent", 50.0)) / 100.0
+
+            text_clips.append({
+                "id": g.get("graphic_id", f"gfx_{len(text_clips)+1}"),
+                "trackId": "track_overlay_text",
+                "startTime": g_st,
+                "duration": g_dur,
+                "text": display_text,
+                "behindSubject": False,
+                "animation": {
+                    "preset": g.get("animation_in", "pop_spring"),
+                    "params": {"popOvershoot": 1.15, "bounceHeight": 20, "slideDistance": 40},
+                    "inDuration": 0.35,
+                    "outDuration": 0.25,
+                },
+                "style": {
+                    "fontFamily": edit_plan.style.get("font_family", "Montserrat"),
+                    "fontSize": 62 if g.get("graphic_type") == "number_stat" else 48,
+                    "fontWeight": "black" if g.get("graphic_type") == "number_stat" else "bold",
+                    "fontStyle": "normal",
+                    "color": g.get("accent_color", "#FFCC00"),
+                    "strokeColor": "#000000",
+                    "strokeWidth": 6,
+                    "shadowColor": "rgba(0, 0, 0, 0.85)",
+                    "shadowBlur": 10,
+                    "textAlign": "center",
+                    "verticalAlign": "middle",
+                    "lineHeight": 1.15,
+                    "letterSpacing": 0.8,
+                },
+                "transform": {
+                    "position": {"x": pos_x, "y": pos_y},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                },
+                "keyframes": [],
+            })
+
         # Assemble full Project model conforming to OpenReel Schema 1.2.0
         tracks_list = [track_main_video, track_broll_video, track_bgm]
         if track_sfx["clips"]:
@@ -479,6 +588,7 @@ class OpenReelAdapter:
         manifest_data = {
             "manifest_version": "1.0.0",
             "openreel_schema_version": OPENREEL_SCHEMA_VERSION,
+            "stockpile_version": getattr(edit_plan, "version", "2.1"),
             "project_id": project_data["project"]["id"],
             "title": edit_plan.title,
             "niche": edit_plan.niche.get("name"),
@@ -488,7 +598,9 @@ class OpenReelAdapter:
             "duration": edit_plan.target_duration,
             "resolution": f"{self.default_width}x{self.default_height} (9:16 vertical)",
             "tracks_count": len(project_data["project"]["timeline"]["tracks"]),
+            "cuts_count": len(getattr(edit_plan, "cuts", [])),
             "broll_cutaways_count": len(edit_plan.shots),
+            "graphics_count": len(getattr(edit_plan, "graphics", [])),
             "subtitles_count": len(edit_plan.subtitles),
             "text_overlays_count": len(edit_plan.text_overlays),
             "behind_subject_overlays_count": sum(1 for t in project_data["project"]["textClips"] if t.get("behindSubject")),

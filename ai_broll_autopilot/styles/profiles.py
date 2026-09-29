@@ -191,4 +191,32 @@ PROFILES = [
         sound_effects_enabled=False,
         bgm_ducking_volume=0.10,
     ),
+
+    # 8. CYBER GRID SHOWCASE (Viral CapCut Before & After, neon cyan/amber accents, cyber canvas)
+    StyleProfile(
+        id="cyber_grid_showcase",
+        name="Cyber Grid Showcase",
+        description="Signature Before & After podcast showcase with neon cyan and amber typography over cyber grid canvas.",
+        font_family="Montserrat",
+        font_size=56,
+        font_weight="900",
+        font_style="normal",
+        primary_color="#FFFFFF",
+        highlight_color="#00FFFF",  # Bright Neon Cyan
+        upcoming_color="rgba(255, 255, 255, 0.75)",
+        background_color="transparent",
+        stroke_color="#000000",
+        stroke_width=5,
+        shadow_color="rgba(0, 0, 0, 0.9)",
+        shadow_blur=8,
+        caption_animation_style="word-pop",
+        caption_position="bottom",
+        broll_cut_pacing="dynamic",
+        default_broll_duration=2.2,
+        zoom_intensity=1.38,
+        transition_type="cut",
+        color_grading_preset="cyber_vibrant",
+        sound_effects_enabled=True,
+        bgm_ducking_volume=0.16,
+    ),
 ]

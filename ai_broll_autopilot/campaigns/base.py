@@ -50,7 +50,8 @@ class CampaignConfig:
     speed_multiplier: float = 1.0
     niche_id: Optional[str] = None
 
-    # Frame Overlay & Framing rules
+    # Framing & Layout rules
+    layout_mode: str = "single"  # "single", "before_after_cyber_grid"
     frame_overlay_required: bool = False
     frame_viewport: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
 
@@ -102,6 +103,7 @@ class CampaignConfig:
             "max_broll_ratio": self.max_broll_ratio,
             "max_cutaway_seconds": self.max_cutaway_seconds,
             "niche_id": self.niche_id,
+            "layout_mode": self.layout_mode,
             "frame_overlay_required": self.frame_overlay_required,
             "frame_viewport": self.frame_viewport,
             "watermark_required": self.watermark_required,

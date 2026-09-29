@@ -37,6 +37,9 @@ from ai_broll_autopilot.services.niche_detector import niche_detector, content_a
 from ai_broll_autopilot.services.clip_detector import clip_detector
 from ai_broll_autopilot.services.edit_director import edit_director, EditPlan
 from ai_broll_autopilot.services.openreel_adapter import openreel_adapter
+from ai_broll_autopilot.services.diffusion_adapter import diffusion_adapter
+from ai_broll_autopilot.services.editor_helper import get_job_edit_plan
+from ai_broll_autopilot.services.editorial.feedback_bridge import editorial_feedback_bridge
 from ai_broll_autopilot.services.broll_library import broll_library, extract_media_metadata
 from ai_broll_autopilot.services.transcriber import Transcriber
 from ai_broll_autopilot.services.qc_service import edit_quality_service
@@ -708,6 +711,223 @@ async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
         "status": "SAVED",
         "job_id": job.job_id,
         "message": "OpenReel project file saved to disk.",
+    }
+
+
+@app.get("/api/jobs/{job_id}/diffusion-project")
+async def get_job_diffusion_project(job_id: str):
+    """Retrieve Diffusion Studio composition specification for the job."""
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id, safe='~()*!._-')}/assets"
+    plan = get_job_edit_plan(job)
+    comp = diffusion_adapter.create_project(
+        edit_plan=plan,
+        project_name=f"Diffusion: {Path(job.source_filename).stem}",
+        base_asset_url=base_asset_url,
+    )
+
+    # Persist composition spec into workspace
+    dif_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "diffusion"
+    dif_dir.mkdir(parents=True, exist_ok=True)
+    with open(dif_dir / "composition.json", "w", encoding="utf-8") as f:
+        json.dump(comp, f, indent=2)
+
+    return comp
+
+
+@app.api_route("/api/jobs/{job_id}/diffusion-project", methods=["POST", "PUT"])
+async def save_job_diffusion_project(job_id: str, payload: Dict[str, Any]):
+    """Persist modified Diffusion Studio composition back into Stockpile workspace."""
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    dif_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "diffusion"
+    dif_dir.mkdir(parents=True, exist_ok=True)
+    with open(dif_dir / "composition.json", "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+    return {"status": "saved", "job_id": job.job_id, "timestamp": int(time.time() * 1000)}
+
+
+@app.get("/api/jobs/{job_id}/diffusion-to-openreel")
+async def handoff_diffusion_to_openreel(job_id: str):
+    """Bidirectional bridge: convert Diffusion Studio composition into OpenReel Schema 1.2.0."""
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    base_asset_url = f"http://127.0.0.1:8000/api/jobs/{urllib.parse.quote(job.job_id, safe='~()*!._-')}/assets"
+    dif_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "diffusion"
+    comp_file = dif_dir / "composition.json"
+
+    comp_data = None
+    if comp_file.exists():
+        try:
+            with open(comp_file, "r", encoding="utf-8") as f:
+                comp_data = json.load(f)
+        except Exception:
+            comp_data = None
+
+    if not comp_data or not isinstance(comp_data, dict):
+        plan = get_job_edit_plan(job)
+        comp_data = diffusion_adapter.create_project(
+            edit_plan=plan,
+            project_name=f"Diffusion: {Path(job.source_filename).stem}",
+            base_asset_url=base_asset_url,
+        )
+
+    return diffusion_adapter.to_openreel_project(
+        comp_data,
+        project_name=f"Diffusion: {Path(job.source_filename).stem}",
+        project_id=f"proj_{job.job_id}",
+    )
+
+
+@app.get("/api/jobs/{job_id}/editorial-spec")
+async def get_job_editorial_spec(job_id: str):
+    """Retrieve full AI Editorial Intelligence specification and quality audit report."""
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    plan = get_job_edit_plan(job)
+    return {
+        "job_id": job.job_id,
+        "title": plan.title,
+        "target_duration": plan.target_duration,
+        "editorial_spec": plan.editorial_spec,
+        "quality_report": plan.quality_report,
+    }
+
+
+@app.post("/api/jobs/{job_id}/editorial-feedback")
+async def record_editorial_feedback(job_id: str, payload: Dict[str, Any]):
+    """Bridge human editor decisions (keep, replace, remove B-roll/SFX/hooks) into learning engine."""
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    action_type = payload.get("type", "broll")
+    if action_type == "broll":
+        editorial_feedback_bridge.record_broll_modification(
+            job_id=job.job_id,
+            shot_id=str(payload.get("shot_id", "")),
+            action=str(payload.get("action", "KEEP")).upper(),
+            prompt=str(payload.get("prompt", "")),
+            asset_title=payload.get("asset_title"),
+            replacement_asset=payload.get("replacement_asset"),
+            feedback_text=payload.get("feedback_text"),
+        )
+    elif action_type == "sfx":
+        editorial_feedback_bridge.record_sfx_modification(
+            job_id=job.job_id,
+            cue_id=str(payload.get("cue_id", "")),
+            action=str(payload.get("action", "KEEP")).upper(),
+            sound_name=str(payload.get("sound_name", "")),
+        )
+    elif action_type == "hook":
+        editorial_feedback_bridge.record_hook_override(
+            job_id=job.job_id,
+            ai_hook=str(payload.get("ai_hook", "")),
+            user_hook=str(payload.get("user_hook", "")),
+        )
+
+    return {"status": "ok", "job_id": job.job_id}
+
+
+@app.get("/api/jobs/{job_id}/editor-project")
+async def get_job_editor_project(job_id: str, engine: Optional[str] = None):
+    """Polymorphic editor project endpoint supporting both OpenReel and Diffusion Studio."""
+    selected_engine = (engine or Config.EDITOR_ENGINE or "openreel").strip().lower()
+    if selected_engine == "diffusion":
+        return await get_job_diffusion_project(job_id)
+    return await get_job_openreel_project(job_id)
+
+
+@app.post("/api/jobs/{job_id}/rebalance")
+async def rebalance_job_timeline(job_id: str):
+    """Audit and rebalance B-roll cutaway distribution across the entire timeline to eliminate gaps."""
+    clean_job_id = job_id
+    while "%" in clean_job_id:
+        unquoted = urllib.parse.unquote(clean_job_id)
+        if unquoted == clean_job_id:
+            break
+        clean_job_id = unquoted
+    job = db.get_job(job_id) or db.get_job(clean_job_id)
+    if not job or not job.edit_plan or not job.transcript_segments:
+        raise HTTPException(status_code=404, detail="Job, edit plan, or transcript segments not found")
+
+    from ai_broll_autopilot.services.director import Director
+    from ai_broll_autopilot.campaigns import campaign_registry
+    from ai_broll_autopilot.services.matcher import Matcher
+
+    campaign = campaign_registry.get_campaign(job.campaign_id)
+    director = Director(api_key=None)
+
+    total_dur = float(job.edit_plan.get("total_duration") or 30.0)
+    current_shots = list(job.edit_plan.get("shots", []))
+
+    rebalanced_shots, cov_pct = director._audit_and_fill_timeline_distribution(
+        clean_shots=current_shots,
+        segments=job.transcript_segments,
+        video_duration=total_dur,
+        campaign=campaign,
+        niche=None,
+    )
+
+    job.edit_plan["shots"] = rebalanced_shots
+    job.edit_plan["broll_shot_count"] = len(rebalanced_shots)
+    job.edit_plan["broll_coverage_seconds"] = round(sum(s["duration"] for s in rebalanced_shots), 2)
+    job.edit_plan["broll_coverage_percentage"] = cov_pct
+
+    # Resolve any newly added shots that lack asset_path
+    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    matcher = Matcher(db)
+    resolved_plan = await matcher.resolve_shots(job.edit_plan, work_dir)
+    job.edit_plan = resolved_plan
+
+    db.save_job(job)
+    return {
+        "status": "success",
+        "message": f"Timeline rebalanced: {len(rebalanced_shots)} cuts distributed across full {total_dur:.1f}s",
+        "shots_count": len(rebalanced_shots),
+        "coverage_percentage": cov_pct,
+        "shots": job.edit_plan["shots"],
     }
 
 

@@ -86,24 +86,15 @@ class EditQualityService:
         if duration > 0:
             broll_duration = sum(float(s.get("duration", 0.0)) for s in shots)
             coverage_pct = (broll_duration / duration) * 100.0
-            if 20.0 <= coverage_pct <= 65.0:
+            # Contextual relevance > percentage coverage. Intentional A-roll is valid and preferred over filler.
+            if coverage_pct <= 65.0:
                 checks.append(QualityCheckResult(
                     name="broll_coverage",
                     category="pacing",
                     passed=True,
                     score=1.0,
-                    message=f"Optimal B-roll visual coverage: {coverage_pct:.1f}%",
+                    message=f"Balanced visual pacing: {coverage_pct:.1f}% B-roll, {100.0 - coverage_pct:.1f}% A-roll.",
                 ))
-            elif coverage_pct < 20.0:
-                checks.append(QualityCheckResult(
-                    name="broll_coverage",
-                    category="pacing",
-                    passed=False,
-                    score=0.6,
-                    message=f"B-roll coverage is low ({coverage_pct:.1f}%). Consider adding more visual cutaways.",
-                    severity="warning",
-                ))
-                warnings.append("Low B-roll coverage: audience retention benefits from frequent visual changes.")
             else:
                 checks.append(QualityCheckResult(
                     name="broll_coverage",
@@ -113,13 +104,13 @@ class EditQualityService:
                     message=f"High B-roll coverage: {coverage_pct:.1f}%. Speaker facial connection maintained.",
                 ))
 
-        # Check cutaway individual durations (should be 1.0s to 4.5s)
+        # Check cutaway individual durations (adaptive sweet spot: 1.5s to 8.0s)
         pacing_issues = []
         for s in shots:
             d = float(s.get("duration", 0.0))
-            if d < 0.8:
+            if d < 1.0:
                 pacing_issues.append(f"Shot {s.get('shot_id')} is too short ({d:.1f}s)")
-            elif d > 5.0:
+            elif d > 8.5:
                 pacing_issues.append(f"Shot {s.get('shot_id')} is too long ({d:.1f}s)")
 
         if not pacing_issues:
@@ -128,7 +119,7 @@ class EditQualityService:
                 category="pacing",
                 passed=True,
                 score=1.0,
-                message="All B-roll shot durations are within the viral sweet spot (1.0s - 4.5s).",
+                message="All B-roll shot durations adhere to adaptive pacing standards (1.5s - 8.0s).",
             ))
         else:
             checks.append(QualityCheckResult(

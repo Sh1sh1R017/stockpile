@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from google import genai
 from google.genai import types
 
@@ -86,7 +86,33 @@ class Director:
 
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        target_shots = max(1, min(6, int(round(target_broll_seconds / 2.2))))
+        # Scaled shot count based on duration and pacing (~2.0s average cutaway)
+        max_possible_shots = max(3, int(video_duration / 2.8))
+        target_shots = max(3, min(max_possible_shots, int(round(target_broll_seconds / 2.0))))
+
+        # Partition video duration into 3 narrative acts for uniform timeline distribution
+        t_act1 = round(video_duration * 0.33, 1)
+        t_act2 = round(video_duration * 0.66, 1)
+        quota_act1 = max(1, target_shots // 3)
+        quota_act2 = max(1, target_shots // 3)
+        quota_act3 = max(1, target_shots - quota_act1 - quota_act2)
+
+        # Segment grouping by act for explicit LLM awareness
+        act1_segs = []
+        act2_segs = []
+        act3_segs = []
+        for s in segments:
+            st = float(s.get("start", 0.0))
+            if st < t_act1:
+                act1_segs.append(s)
+            elif st < t_act2:
+                act2_segs.append(s)
+            else:
+                act3_segs.append(s)
+
+        act1_txt = "\n".join(f"[{s.get('start', 0.0):.2f}s - {s.get('end', 0.0):.2f}s]: {s.get('text', '')}" for s in act1_segs) or "No dialogue in this section."
+        act2_txt = "\n".join(f"[{s.get('start', 0.0):.2f}s - {s.get('end', 0.0):.2f}s]: {s.get('text', '')}" for s in act2_segs) or "No dialogue in this section."
+        act3_txt = "\n".join(f"[{s.get('start', 0.0):.2f}s - {s.get('end', 0.0):.2f}s]: {s.get('text', '')}" for s in act3_segs) or "No dialogue in this section."
         allow_memes = bool(campaign.allow_ai_broll and getattr(niche.editing, "meme_cutaways", False))
 
         # Match curated moment if specified (works for any campaign with curated_moments)
@@ -119,13 +145,24 @@ CONTENT DOMAIN: {niche_desc}
 RELEVANT VISUAL THEMES: {niche_keywords_hint}
 
 MANDATORY DIRECTING OBJECTIVES:
-1. BALANCED PACING & CONTEXTUAL B-ROLL COVERAGE:
+1. FULL-DURATION UNIFORM PACING & TIMELINE SPREAD (CRITICAL):
    - Total Video Duration: {video_duration:.2f} seconds.
    - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
    - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
-   - Generate {target_shots} rapid, snappy cuts (1.5s to 2.4s each).
+   - Generate EXACTLY {target_shots} rapid, snappy cuts (1.5s to 2.4s each).
+   - ABSOLUTE PROHIBITION ON FRONT-LOADING:
+     DO NOT cluster all cuts in the first 10-15 seconds and leave the second half empty!
+     You MUST spread B-roll cutaways across the ENTIRE video from start to finish!
+   - MANDATORY DISTRIBUTION PER ACT:
+     • Act 1 (0.0s to {t_act1:.1f}s): MUST place {quota_act1} cutaway(s)
+     • Act 2 ({t_act1:.1f}s to {t_act2:.1f}s): MUST place {quota_act2} cutaway(s)
+     • Act 3 ({t_act2:.1f}s to {video_duration:.1f}s): MUST place {quota_act3} cutaway(s)
+   - MAXIMUM SPEAKER STAGNATION GAP:
+     Never leave more than 4.0 seconds of continuous speaker alone without a B-roll cutaway or visual event.
+   - SPEAKER BREATHING ROOM:
+     Leave at least 1.0s to 1.8s of speaker on screen between cutaways so the edit breathes naturally.
    - Keep speaker on screen for the first 0.8s to 1.5s opening hook.
-   - NEVER let any cutaway drag out longer than 2.5 seconds! Cut back to the speaker smoothly.
+   - Cutaway duration: 1.5s to 2.4s. NEVER let any cutaway drag out longer than 2.5 seconds. Cut back to speaker smoothly.
 
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
@@ -144,8 +181,15 @@ MANDATORY DIRECTING OBJECTIVES:
    - "search_prompt" MUST be 2 to 4 clean, photogenic keywords optimized for stock video search.
 
 VIDEO DURATION: {video_duration:.2f} seconds
-TIMESTAMPED TRANSCRIPT:
-{formatted_segments}
+TIMESTAMPED TRANSCRIPT (DIVIDED INTO 3 ACTS):
+=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — Place {quota_act1} cut(s) here ===
+{act1_txt}
+
+=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — Place {quota_act2} cut(s) here ===
+{act2_txt}
+
+=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — Place {quota_act3} cut(s) here ===
+{act3_txt}
 
 {learned_rules}
 
@@ -320,79 +364,15 @@ Return ONLY a valid JSON object matching this schema:
                         ms = MemeEngine.generate_unique_contextual_meme(ms, full_transcript, client=self.client)
                         logger.info(f"AI Director autonomous meme cutaway generated on [{ms['shot_id']}] ({ms.get('meme_template')}): {ms.get('meme_captions')}")
 
-            total_broll_time = sum(s["duration"] for s in clean_shots)
-            coverage_pct = round((total_broll_time / video_duration) * 100, 1) if video_duration > 0 else 0
-
-            # Expand coverage only for default viral campaign (~60% target)
-            if campaign.allow_ai_broll and coverage_pct < 58.0 and clean_shots:
-                logger.info(f"B-roll coverage ({coverage_pct}%) below 58%. Expanding shot durations toward ~60%...")
-                for idx, s in enumerate(clean_shots):
-                    next_start = clean_shots[idx + 1]["start_time"] if idx + 1 < len(clean_shots) else (video_duration - 0.5)
-                    avail = next_start - s["start_time"] - 0.4  # preserve 0.4s gap
-                    if avail > s["duration"]:
-                        add = min(avail - s["duration"], max_dur - s["duration"])
-                        if add > 0:
-                            s["duration"] = round(s["duration"] + add, 2)
-                            s["end_time"] = round(s["start_time"] + s["duration"], 2)
-
-                total_broll_time = sum(s["duration"] for s in clean_shots)
-                coverage_pct = round((total_broll_time / video_duration) * 100, 1)
-
-            # Clamp coverage if campaign enforces max_broll_ratio
-            if not campaign.allow_ai_broll and coverage_pct > (campaign.max_broll_ratio * 100):
-                logger.info(f"Clamping B-roll coverage ({coverage_pct}%) to campaign limit {campaign.max_broll_ratio*100}%...")
-                max_total_sec = video_duration * campaign.max_broll_ratio
-                cur_total = 0.0
-                clamped_shots = []
-                for s in clean_shots:
-                    if cur_total + s["duration"] <= max_total_sec:
-                        clamped_shots.append(s)
-                        cur_total += s["duration"]
-                    elif cur_total < max_total_sec:
-                        rem = round(max_total_sec - cur_total, 2)
-                        if rem >= 1.0:
-                            s["duration"] = rem
-                            s["end_time"] = round(s["start_time"] + rem, 2)
-                            clamped_shots.append(s)
-                            cur_total += rem
-                        break
-                clean_shots = clamped_shots
-                total_broll_time = sum(s["duration"] for s in clean_shots)
-                coverage_pct = round((total_broll_time / video_duration) * 100, 1)
-
-            # 2. If still below 55% and there is an uncovered window at the end or in a wide gap, add a contextual shot
-            if campaign.allow_ai_broll and coverage_pct < 56.0 and segments:
-                last_shot_end = clean_shots[-1]["end_time"] if clean_shots else 1.0
-                if (video_duration - last_shot_end) >= 3.0:
-                    start = round(last_shot_end + 0.6, 2)
-                    dur = min(max_dur, round(video_duration - start - 0.5, 2))
-                    if dur >= 2.0:
-                        # Find overlapping segment at the end
-                        end_seg = segments[-1]
-                        seg_text = end_seg.get("text", "").lower()
-                        if any(w in seg_text for w in ["focus", "disciplin", "work", "routine", "go by"]):
-                            prompt = "focused professional determined"
-                        elif any(w in seg_text for w in ["win", "winner", "success", "goal"]):
-                            prompt = "business victory celebration"
-                        else:
-                            prompt = "confident professional modern office"
-
-                        clean_shots.append({
-                            "shot_id": f"broll_{len(clean_shots)+1}",
-                            "start_time": start,
-                            "end_time": round(start + dur, 2),
-                            "duration": dur,
-                            "style": "stockpile",
-                            "dialogue_quote": end_seg.get("text", ""),
-                            "emotional_core": "Closing Determination",
-                            "visceral_human_metaphor": f"Visualizing {prompt}",
-                            "micro_prompts": [prompt, f"{prompt} close up", f"{prompt} hands", f"{prompt} modern"],
-                            "search_prompt": prompt,
-                            "overlay_type": "cutaway",
-                            "narrative_reason": "Closing beat visual reinforcement",
-                        })
-                        total_broll_time = sum(s["duration"] for s in clean_shots)
-                        coverage_pct = round((total_broll_time / video_duration) * 100, 1)
+            # Audit and fill timeline gaps across the ENTIRE video (ensures uniform coverage)
+            clean_shots, coverage_pct = self._audit_and_fill_timeline_distribution(
+                clean_shots=clean_shots,
+                segments=segments,
+                video_duration=video_duration,
+                campaign=campaign,
+                niche=niche,
+            )
+            total_broll_time = round(sum(s["duration"] for s in clean_shots), 2)
 
             # Preserve or detect Level 3 typographic emphasis graphics
             emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
@@ -517,10 +497,15 @@ Return ONLY a valid JSON object matching this schema:
                 shot_data = MemeEngine.generate_unique_contextual_meme(shot_data, full_t, client=self.client)
 
             shots.append(shot_data)
-            last_end = end
-
-        total_broll = sum(s["duration"] for s in shots)
-        coverage_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0
+        # Audit and fill timeline gaps across the ENTIRE video (ensures uniform coverage)
+        shots, coverage_pct = self._audit_and_fill_timeline_distribution(
+            clean_shots=shots,
+            segments=segments,
+            video_duration=video_duration,
+            campaign=campaign,
+            niche=None,
+        )
+        total_broll = round(sum(s["duration"] for s in shots), 2)
 
         emphasis_graphics = []
 
@@ -626,4 +611,179 @@ Return ONLY a valid JSON object matching this schema:
                 })
 
         return emphasis_list
+
+    def _generate_contextual_shot_for_segment(
+        self,
+        seg: Dict[str, Any],
+        shot_idx: int,
+        start_t: float,
+        dur: float,
+        campaign: Any,
+        niche: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Generate a contextually relevant B-roll shot specification for a transcript segment."""
+        text = seg.get("text", "").lower()
+
+        # Contextual domain mappings for rich visual storytelling
+        if any(w in text for w in ["analytic", "data", "metric", "chart", "report", "screen", "kpi"]):
+            prompt = "business analytics dashboard computer monitor"
+            core = "Data Analytics & Metrics"
+        elif any(w in text for w in ["supply chain", "logistic", "ship", "warehouse", "freight", "inventory"]):
+            prompt = "modern logistics warehouse supply chain"
+            core = "Supply Chain & Operations"
+        elif any(w in text for w in ["ad ", "ads", "advertis", "campaign", "marketing"]):
+            prompt = "digital advertising marketing strategy"
+            core = "Advertising & Marketing"
+        elif any(w in text for w in ["innovat", "product", "design", "make", "prototype", "iron", "engineer"]):
+            prompt = "product development innovation workshop"
+            core = "Product Innovation"
+        elif any(w in text for w in ["experience", "learn", "grow", "growth", "advice", "career"]):
+            prompt = "entrepreneur business leadership growth"
+            core = "Executive Growth & Learning"
+        elif any(w in text for w in ["e-commerce", "amazon", "tiktok", "shopify", "sales", "revenue"]):
+            prompt = "ecommerce digital revenue operations"
+            core = "Digital E-Commerce"
+        elif any(w in text for w in ["focus", "disciplin", "work", "routine", "habit"]):
+            prompt = "focused professional working desk"
+            core = "Deep Focus & Execution"
+        elif any(w in text for w in ["win", "winner", "success", "goal", "champion"]):
+            prompt = "business team victory celebration"
+            core = "Achievement & Success"
+        elif any(w in text for w in ["team", "meeting", "collaborat", "office", "brainstorm"]):
+            prompt = "startup team meeting collaboration"
+            core = "Teamwork & Collaboration"
+        else:
+            if niche and getattr(niche, "visual_keywords", None):
+                prompt = f"{niche.visual_keywords[0]} professional"
+                core = f"{niche.name} Focus"
+            else:
+                words = [w for w in re.findall(r"\b[a-z]{4,}\b", text) if w not in ["what", "with", "from", "this", "that", "know", "like", "they", "have", "been"]]
+                prompt = (" ".join(words[:2]) + " modern office") if words else "business modern office workspace"
+                core = "Contextual Narrative"
+
+        return {
+            "shot_id": f"broll_{shot_idx}",
+            "start_time": round(start_t, 2),
+            "end_time": round(start_t + dur, 2),
+            "duration": round(dur, 2),
+            "style": "stockpile",
+            "dialogue_quote": seg.get("text", ""),
+            "emotional_core": core,
+            "visceral_human_metaphor": f"Visualizing {prompt}",
+            "micro_prompts": [prompt, f"{prompt} close up", f"{prompt} hands", f"{prompt} action"],
+            "search_prompt": prompt,
+            "overlay_type": "cutaway",
+            "narrative_reason": f"Contextual reinforcement of: {seg.get('text', '')[:45]}",
+        }
+
+    def _audit_and_fill_timeline_distribution(
+        self,
+        clean_shots: List[Dict[str, Any]],
+        segments: List[Dict[str, Any]],
+        video_duration: float,
+        campaign: Any,
+        niche: Optional[Any] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """Audit timeline for dead zones or front-loading and inject contextual shots across the full duration."""
+        if not clean_shots and not segments:
+            return clean_shots, 0.0
+
+        min_speaker_gap = 1.0  # seconds of speaker face breathing space between cuts
+        max_gap_allowed = 4.0  # seconds: max continuous speaker time before a cutaway is needed
+        max_clip = min(float(getattr(campaign, "max_cutaway_seconds", 2.5)), float(Config.MAX_CLIP_DURATION_SECONDS))
+        min_clip = 1.4
+
+        # 1. Clean and space existing shots
+        sorted_shots = sorted(clean_shots, key=lambda s: float(s.get("start_time", 0.0)))
+        cleaned = []
+        last_end = 0.0
+
+        for s in sorted_shots:
+            st = max(0.8, float(s.get("start_time", 0.0)))
+            if st < last_end + min_speaker_gap:
+                st = last_end + min_speaker_gap
+            dur = min(max_clip, max(min_clip, float(s.get("duration", 2.0))))
+            if st + dur > video_duration - 0.5:
+                dur = max(min_clip, video_duration - 0.5 - st)
+            if dur < 1.0 or st >= video_duration - 1.0:
+                continue
+            et = round(st + dur, 2)
+            s["start_time"] = round(st, 2)
+            s["end_time"] = et
+            s["duration"] = round(et - st, 2)
+            cleaned.append(s)
+            last_end = et
+
+        # 2. Check opening gap: if first shot starts after 4.5s, add early shot (after hook)
+        if segments and (not cleaned or cleaned[0]["start_time"] > 4.5):
+            early_segs = [s for s in segments if s.get("start", 0.0) >= 0.8 and s.get("end", 0.0) <= 4.2]
+            if early_segs:
+                seg = early_segs[0]
+                ins_st = 1.2
+                ins_dur = min(max_clip, max(min_clip, 2.0))
+                new_s = self._generate_contextual_shot_for_segment(seg, 1, ins_st, ins_dur, campaign, niche)
+                cleaned.insert(0, new_s)
+                if len(cleaned) > 1 and cleaned[1]["start_time"] < new_s["end_time"] + min_speaker_gap:
+                    cleaned[1]["start_time"] = round(new_s["end_time"] + min_speaker_gap, 2)
+                    cleaned[1]["end_time"] = round(cleaned[1]["start_time"] + cleaned[1]["duration"], 2)
+
+        # 3. Check internal gaps between consecutive shots
+        i = 0
+        while i < len(cleaned) - 1:
+            gap_start = cleaned[i]["end_time"]
+            gap_end = cleaned[i + 1]["start_time"]
+            gap = gap_end - gap_start
+            if gap > max_gap_allowed and segments:
+                matching = [s for s in segments if s.get("end", 0.0) > gap_start and s.get("start", 0.0) < gap_end]
+                if matching:
+                    seg = matching[0]
+                    ins_st = round(gap_start + min_speaker_gap, 2)
+                    ins_dur = min(max_clip, max(min_clip, round(gap - (2 * min_speaker_gap), 2)))
+                    if ins_dur >= min_clip and ins_st + ins_dur <= gap_end - 0.5:
+                        new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, ins_st, ins_dur, campaign, niche)
+                        cleaned.insert(i + 1, new_s)
+                        i += 1
+            i += 1
+
+        # 4. Check TAIL GAP (from last shot to video_duration) - GUARANTEES SECOND HALF IS COVERED
+        last_end = cleaned[-1]["end_time"] if cleaned else 1.0
+        tail_gap = video_duration - last_end
+        if tail_gap >= 3.8 and segments:
+            tail_segs = [s for s in segments if s.get("end", 0.0) > last_end + 0.2]
+            if tail_segs:
+                num_tail_shots = max(1, int(round((tail_gap - 0.8) / 3.4)))
+                step = max(1, len(tail_segs) // num_tail_shots)
+                cur_t = round(last_end + min_speaker_gap, 2)
+                for k in range(num_tail_shots):
+                    seg_idx = min(len(tail_segs) - 1, k * step)
+                    seg = tail_segs[seg_idx]
+                    rem_time = video_duration - 0.8 - cur_t
+                    if rem_time < min_clip:
+                        break
+                    shot_dur = min(max_clip, max(min_clip, round(min(2.0, rem_time), 2)))
+                    new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, cur_t, shot_dur, campaign, niche)
+                    cleaned.append(new_s)
+                    cur_t = round(new_s["end_time"] + min_speaker_gap, 2)
+
+        # 5. Re-sort & Re-index shots sequentially
+        cleaned = sorted(cleaned, key=lambda s: float(s.get("start_time", 0.0)))
+        for idx, s in enumerate(cleaned):
+            s["shot_id"] = f"broll_{idx+1}"
+
+        # 6. Smooth Coverage Balancing (scale durations proportionally rather than deleting shots)
+        target_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        target_broll_sec = video_duration * target_ratio
+        total_broll = sum(s["duration"] for s in cleaned)
+
+        if total_broll > target_broll_sec and cleaned:
+            scale = target_broll_sec / total_broll
+            for s in cleaned:
+                scaled_dur = round(max(1.3, s["duration"] * scale), 2)
+                s["duration"] = scaled_dur
+                s["end_time"] = round(s["start_time"] + scaled_dur, 2)
+            total_broll = sum(s["duration"] for s in cleaned)
+
+        cov_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0.0
+        logger.info(f"Timeline audit completed: {len(cleaned)} shots spanning 0s to {cleaned[-1]['end_time'] if cleaned else 0}s (coverage: {cov_pct}%)")
+        return cleaned, cov_pct
 

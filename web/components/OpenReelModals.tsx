@@ -85,13 +85,18 @@ export const OpenReelExportModal: React.FC<OpenReelExportModalProps> = ({
 interface EmbeddedOpenReelModalProps {
   embeddedOpenReelJob: string | null;
   onClose: () => void;
+  engine?: string;
 }
 
 export const EmbeddedOpenReelModal: React.FC<EmbeddedOpenReelModalProps> = ({
   embeddedOpenReelJob,
   onClose,
+  engine,
 }) => {
   if (!embeddedOpenReelJob) return null;
+
+  const engineParam = engine ? `&engine=${encodeURIComponent(engine)}` : "";
+  const openReelUrl = `http://localhost:5173/#/editor?loadJob=${encodeURIComponent(embeddedOpenReelJob)}${engineParam}`;
 
   return (
     <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col p-2 sm:p-4">
@@ -99,14 +104,14 @@ export const EmbeddedOpenReelModal: React.FC<EmbeddedOpenReelModalProps> = ({
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950">
           <div className="flex items-center gap-2">
             <Film className="w-5 h-5 text-emerald-400" />
-            <span className="font-bold text-sm text-white">Timeline Editor</span>
+            <span className="font-bold text-sm text-white">OpenReel Video Editor</span>
             <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
               Schema 1.2.0 • Non-Destructive Multi-Track
             </span>
           </div>
           <div className="flex items-center gap-2">
             <a
-              href={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(embeddedOpenReelJob)}`}
+              href={openReelUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
@@ -126,10 +131,10 @@ export const EmbeddedOpenReelModal: React.FC<EmbeddedOpenReelModalProps> = ({
         </div>
         <div className="flex-1 w-full bg-zinc-950 relative">
           <iframe
-            src={`http://localhost:5173/#/editor?loadJob=${encodeURIComponent(embeddedOpenReelJob)}`}
+            src={openReelUrl}
             className="w-full h-full border-0"
             allow="camera; microphone; display-capture; clipboard-read; clipboard-write; web-share"
-            title="Timeline Editor"
+            title="OpenReel Editor"
           />
         </div>
       </div>

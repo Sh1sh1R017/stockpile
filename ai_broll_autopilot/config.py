@@ -57,6 +57,9 @@ class Config:
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
 
+    # Editor Engine Selection ("openreel" or "diffusion")
+    EDITOR_ENGINE: str = os.getenv("EDITOR_ENGINE", "openreel")
+
     # SDR2HDR & Upscaling Engine
     HDR_ENABLED: bool = False
     HDR_DEFAULT_SCALE: float = 1.0  # 1.0 (Native HDR10), 1.5 (2K QHD), 2.0 (4K UHD)
