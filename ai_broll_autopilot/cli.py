@@ -1,4 +1,4 @@
-"""Command line interface for Stockpile AI Video Intelligence & OpenReel Integration."""
+"""Command line interface for Stockpile AI Video Intelligence."""
 
 import argparse
 import asyncio
@@ -82,7 +82,7 @@ def cmd_niches(args):
 def cmd_styles(args):
     """List all registered visual styles."""
     styles = style_registry.list_styles()
-    table = Table(title="Registered Visual Styles (OpenReel Compatible)")
+    table = Table(title="Registered Visual Styles")
     table.add_column("Style ID", style="cyan", no_wrap=True)
     table.add_column("Name", style="bold white")
     table.add_column("Font", style="yellow")
@@ -246,7 +246,7 @@ async def cmd_generate_edit(args):
 
 
 async def cmd_export_openreel(args):
-    """Export native OpenReel Schema 1.2.0 project (.oreel / project.json) ready for editing."""
+    """Export a non-destructive editable project (.oreel / project.json)."""
     target_path = Path(args.target).resolve()
     if not target_path.exists():
         console.print(f"[red]Error: Target file not found: {target_path}[/red]")
@@ -296,15 +296,15 @@ async def cmd_export_openreel(args):
     files = openreel_adapter.export_project_files(plan, out_dir)
 
     console.print(Panel(
-        f"[bold green]OpenReel Project Exported Successfully![/bold green]\n\n"
-        f"[bold cyan]OpenReel Project File (.oreel):[/bold cyan] {files['oreel']}\n"
-        f"[bold cyan]OpenReel JSON (project.json):[/bold cyan] {files['project_json']}\n"
+        f"[bold green]Editable Project Exported Successfully![/bold green]\n\n"
+        f"[bold cyan]Editable Project File (.oreel):[/bold cyan] {files['oreel']}\n"
+        f"[bold cyan]Project JSON (project.json):[/bold cyan] {files['project_json']}\n"
         f"[bold cyan]Project Manifest:[/bold cyan] {files['manifest']}\n"
         f"[bold cyan]Edit Plan:[/bold cyan] {files['plan']}\n\n"
-        f"[yellow]To edit this project in OpenReel:[/yellow]\n"
-        f"1. Start OpenReel web editor (`pnpm --filter @openreel/web dev`)\n"
-        f"2. Open {files['oreel']} via File -> Open Project, or pass manifest to OpenReel host.",
-        title="OpenReel Integration",
+        f"[yellow]To edit this project in the Timeline Editor:[/yellow]\n"
+        f"1. Start the Timeline Editor used by your Stockpile setup.\n"
+        f"2. Open {files['oreel']} via File -> Open Project, or pass the manifest to the timeline host.",
+        title="Editable Timeline",
     ))
 
 
@@ -495,7 +495,7 @@ def cmd_inspect(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stockpile AI Video Brain & OpenReel Integration CLI")
+    parser = argparse.ArgumentParser(description="Stockpile AI Video Editing CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # niches command
@@ -526,9 +526,9 @@ def main():
     p_ge.add_argument("--output-dir", type=str, default=None, help="Output folder for edit_plan.json")
 
     # export-openreel / export-project command
-    p_eo = subparsers.add_parser("export-openreel", aliases=["export-project"], help="Export native OpenReel Schema 1.2.0 project (.oreel)")
+    p_eo = subparsers.add_parser("export-openreel", aliases=["export-project"], help="Export an editable project (.oreel)")
     p_eo.add_argument("target", help="Path to video file OR edit_plan.json")
-    p_eo.add_argument("--output-dir", type=str, default=None, help="Output directory for OpenReel files")
+    p_eo.add_argument("--output-dir", type=str, default=None, help="Output directory for editable project files")
 
     # qc command
     p_qc = subparsers.add_parser("qc", help="Audit video edit plan for safe zones, readability, and pacing")
