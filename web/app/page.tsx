@@ -53,7 +53,7 @@ import {
 } from "../lib/types";
 import { MasterVideoPlayer } from "../components/MasterVideoPlayer";
 import { ShotCard } from "../components/ShotCard";
-import { OpenShortsPanel } from "../components/OpenShortsPanel";
+import { CreatorWorkflowPanel } from "../components/CreatorWorkflowPanel";
 
 // Code-split heavy modals to minimize initial bundle size and hydration cost
 const MemeStudioModal = dynamic(
@@ -1997,7 +1997,11 @@ export default function StudioDashboard() {
               onLaunchOpenReel={(id) => setEmbeddedOpenReelJob(id)}
               videoRef={masterVideoRef}
             />
-            <OpenShortsPanel jobId={selectedJob.job_id} />
+            <CreatorWorkflowPanel
+              jobId={selectedJob.job_id}
+              totalDuration={totalDuration}
+              onOpenOpenReel={(id) => setEmbeddedOpenReelJob(id)}
+            />
           </div>
 
           {/* RIGHT COLUMN: B-Roll Cutaway Cards, Isolated Players, AI Review & Feedback (7 cols) */}
