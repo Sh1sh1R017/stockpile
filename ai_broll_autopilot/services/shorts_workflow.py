@@ -119,6 +119,8 @@ def workflow_record(
     caption_style: Optional[str] = None,
     caption_motion: Optional[str] = None,
     subtitles_behind_subject: Optional[bool] = None,
+    niche_id: Optional[str] = None,
+    style_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return additive workflow metadata kept inside the canonical EditPlan."""
     return {
@@ -135,6 +137,8 @@ def workflow_record(
         "caption_style": caption_style,
         "caption_motion": caption_motion,
         "subtitles_behind_subject": subtitles_behind_subject,
+        "niche_id": niche_id,
+        "style_id": style_id,
         "status": "queued",
     }
 
