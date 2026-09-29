@@ -11,3 +11,4 @@ rich
 fastapi
 uvicorn
 python-multipart
+httpx

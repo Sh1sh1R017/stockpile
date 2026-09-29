@@ -1,96 +1,72 @@
-# 🎞️ stockpile
+# Stockpile
 
-Drop a clip, get b-roll automatically. AI finds and scores relevant footage from YouTube. Made this for my brother who mainly creates tiktoks but might be useful for other content creators.
+AI-powered video editing and short-form production.
 
-## Example (with Google Drive)
+Stockpile turns long-form footage into editable short-form projects with AI-assisted clip discovery, contextual B-roll, animated captions, subject-aware typography, audio layers, and a non-destructive timeline.
 
-**1. Drop video in input folder:**
+## Features
 
-<img src="media/input.gif" width="700" alt="Input Process">
+- AI Clip Generator for long-form video
+- Smart B-Roll with contextual matching
+- Smart Captions with word-level timing
+- Caption Motion presets
+- Subject-Aware Typography
+- Editable multitrack Timeline Editor
+- Music and Sound Effects
+- Deterministic rendering
+- Google Drive workflows
 
-**2. Get notification when processing completes:**
+## Caption Motion
 
-<img src="media/notif.gif" width="700" alt="Notification">
+Word Pop, Bounce, Typewriter, True Focus, Text Scramble, Slide Up, Karaoke, Reveal, Impact, and Subtle Fade.
 
-**3. Access organized b-roll folders:**
+## Non-destructive editing
 
-<img src="media/output.gif" width="700" alt="Output Result">
+The EditPlan is the canonical source of truth. The raw source remains editable and B-Roll stays on independent timeline tracks. The final rendered MP4 is a delivery artifact, never the editable source.
 
-## ⚡ Quick Start (Local)
+Deleting a B-Roll clip changes the EditPlan. Rendering consumes the current EditPlan and does not regenerate deleted editorial decisions.
 
-**Requirements:** Python, [FFmpeg](https://ffmpeg.org/download.html), [Gemini API key](https://aistudio.google.com/apikey)
-
-```bash
-# clone and install
-git clone https://github.com/sasoder/stockpile.git
-cd stockpile
-# set up virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# install dependencies
-pip install -r requirements.txt
-
-# configure
-cp .env.example .env
-# add your GEMINI_API_KEY to .env
-
-# run locally
-python stockpile.py
-```
-
-Drop videos in `input/`, get organized b-roll in `output/`.
-
-## ☁️ Google Drive Integration (recommended)
-
-For cloud workflow with automated Drive uploads:
-
-**1. Create OAuth Client:**
-
-- Create a Google Cloud project
-- Enable Google Drive API and Gmail API
-- Go to [Google Cloud Console OAuth Clients](https://console.cloud.google.com/auth/clients) to create a new client.
-- Save the client ID and secret to your `.env` file.
-- When you start the script for the first time, it will prompt you to authorize your client.
-
-**2. Configure Drive folders:**
-
-```bash
-# Add to .env
-GOOGLE_DRIVE_INPUT_FOLDER_ID=your_input_folder_id
-GOOGLE_DRIVE_OUTPUT_FOLDER_ID=your_output_folder_id
-GOOGLE_CLIENT_ID=your_oauth_client_id
-GOOGLE_CLIENT_SECRET=your_oauth_client_secret
-NOTIFICATION_EMAIL=your@email.com
-```
-
-Now drop videos in your Google Drive input folder, get organized b-roll uploaded to your output folder with email notification when it's complete.
-
-## How it works
-
-1. Drop your video in input folder (local or Google Drive)
-2. AI transcribes and extracts key topics/visuals from your clip
-3. YouTube search finds high-quality b-roll for each topic
-4. AI evaluates each video for b-roll quality and visual relevance
-5. Get a drive link to organized folders with scored videos ready to edit
+## Architecture
 
 ```
-📁 output/
-  └── your_project_20250718/
-      ├── 🏭 industrial_revolution_factory/
-      │   ├── score08_vintage_factory_footage.mp4
-      │   └── score09_steam_engine_documentary.mp4
-      ├── ⚙️ steel_production_process/
-      │   └── score07_molten_steel_pouring.mp4
-      └── 👷 workers_assembly_line/
-          └── score08_ford_assembly_line_1920s.mp4
+LONG VIDEO
+  ↓
+INGEST
+  ↓
+TRANSCRIPT + MEDIA INTELLIGENCE
+  ↓
+AI CLIP GENERATOR
+  ↓
+AI EDIT DIRECTOR
+  ↓
+CANONICAL EDITPLAN
+  ↓
+TIMELINE EDITOR
+  ↓
+USER EDITS
+  ↓
+UPDATED EDITPLAN
+  ↓
+RENDER
+  ↓
+FINAL VIDEO
 ```
 
-## ⚙️ Configuration
+## Documentation
 
-- `GEMINI_API_KEY` - get from Google AI Studio (required)
-- `MAX_VIDEOS_PER_PHRASE=3` - videos downloaded per topic
-- `MAX_VIDEO_DURATION_SECONDS=900` - skip videos longer than 15min
-- **Local:** uses `LOCAL_INPUT_FOLDER` and `LOCAL_OUTPUT_FOLDER` folders
-- **Google Drive:** set `GOOGLE_DRIVE_INPUT_FOLDER_ID` and `GOOGLE_DRIVE_OUTPUT_FOLDER_ID`
-- **Notifications:** add `NOTIFICATION_EMAIL` for completion alerts
+- [Architecture](docs/ARCHITECTURE.md)
+- [Product Branding](docs/PRODUCT_BRANDING.md)
+- [Third-Party Software & Credits](docs/THIRD_PARTY.md)
+
+## Open-source credits
+
+Stockpile uses and integrates with selected open-source projects. Relevant repositories, attribution, and licensing references are documented in [Third-Party Software & Credits](docs/THIRD_PARTY.md).
+
+## Development principles
+
+- EditPlan is canonical.
+- User edits are non-destructive.
+- Deleted clips are never silently recreated.
+- Provider-specific implementations stay behind adapters.
+- Customer-facing UI uses Stockpile terminology.
+- Third-party software is credited accurately.

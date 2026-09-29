@@ -77,6 +77,15 @@ class Config:
     # Pexels Video API (Royalty-free & Watermark-free)
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
 
+    # Optional OpenShorts long-form clipping service
+    OPENSHORTS_API_URL: str = os.getenv("OPENSHORTS_API_URL", "")
+    OPENSHORTS_API_KEY: str = os.getenv("OPENSHORTS_API_KEY", "")
+
+    # Optional motion-anything recipe checkout used as a motion reference library
+    MOTION_ANYTHING_DIR: Path = Path(
+        os.getenv("MOTION_ANYTHING_DIR", str(PROJECT_ROOT / "motion-anything"))
+    )
+
     @classmethod
     def ensure_directories(cls):
         cls.INPUT_DIR.mkdir(parents=True, exist_ok=True)

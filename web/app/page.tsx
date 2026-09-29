@@ -53,6 +53,7 @@ import {
 } from "../lib/types";
 import { MasterVideoPlayer } from "../components/MasterVideoPlayer";
 import { ShotCard } from "../components/ShotCard";
+import { OpenShortsPanel } from "../components/OpenShortsPanel";
 
 // Code-split heavy modals to minimize initial bundle size and hydration cost
 const MemeStudioModal = dynamic(
@@ -130,6 +131,7 @@ export default function StudioDashboard() {
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
   const [subtitleStyle, setSubtitleStyle] = useState<string>("hormozi");
   const [subtitlePosition, setSubtitlePosition] = useState<string>("bottom");
+  const [subtitleMotion, setSubtitleMotion] = useState<string>("word-pop");
   const [selectedBgmId, setSelectedBgmId] = useState<string>("chill_lofi");
   const [bgmVolume, setBgmVolume] = useState<number>(0.16);
   const [bgmDucking, setBgmDucking] = useState<boolean>(true);
@@ -557,11 +559,11 @@ export default function StudioDashboard() {
 
   const handleExportToOpenReel = async () => {
     if (!selectedJob || !selectedJob.edit_plan) {
-      alert("No active edit plan to export to OpenReel.");
+      alert("No active edit plan to export to the Timeline Editor.");
       return;
     }
     setIsOpenReelExporting(true);
-    showToast("Exporting non-destructive OpenReel project (.oreel)...");
+    showToast("Exporting non-destructive editable project...");
     try {
       const res = await fetch("/api/export-openreel", {
         method: "POST",
@@ -574,13 +576,13 @@ export default function StudioDashboard() {
       if (res.ok) {
         const data = await res.json();
         setOpenReelModalData(data);
-        showToast("🎬 Project exported to OpenReel Schema 1.2.0!");
+        showToast("🎬 Editable project exported successfully!");
       } else {
         const err = await res.json().catch(() => ({}));
         alert(`Export failed: ${err.detail || "Server error"}`);
       }
     } catch (e) {
-      alert("Error exporting to OpenReel: " + e);
+      alert("Error exporting editable project: " + e);
     } finally {
       setIsOpenReelExporting(false);
     }
@@ -667,6 +669,7 @@ export default function StudioDashboard() {
           }
           return updated;
         });
+        await handleRerenderMaster();
       } else {
         const err = await res.json().catch(() => ({}));
         showToast(`Trim failed: ${err.detail || "Invalid timestamp"}`);
@@ -689,7 +692,7 @@ export default function StudioDashboard() {
         { method: "DELETE" }
       );
       if (res.ok) {
-        showToast(`Removed Cutaway ${shotId}`);
+        showToast(`Removed Cutaway ${shotId} — re-rendering exact EditPlan...`);
         setSelectedJob((prev) => {
           if (!prev || !prev.edit_plan) return prev;
           const updated = {
@@ -977,6 +980,7 @@ export default function StudioDashboard() {
             if (rs.subtitles_enabled !== undefined) setSubtitlesEnabled(rs.subtitles_enabled);
             if (rs.subtitle_style) setSubtitleStyle(rs.subtitle_style);
             if (rs.subtitle_position) setSubtitlePosition(rs.subtitle_position);
+            if (rs.caption_motion) setSubtitleMotion(rs.caption_motion);
             if (rs.bgm_track_id !== undefined) setSelectedBgmId(rs.bgm_track_id || "none");
             if (rs.bgm_volume !== undefined) setBgmVolume(rs.bgm_volume);
             if (rs.bgm_ducking !== undefined) setBgmDucking(rs.bgm_ducking);
@@ -1698,14 +1702,14 @@ export default function StudioDashboard() {
                   <span>{isRerenderingMaster ? "Burning Subtitles & BGM..." : "⚡ Re-render Master Edit"}</span>
                 </button>
 
-                {/* Open in OpenReel Button */}
+                {/* Open in Timeline Editor */}
                 <button
                   onClick={() => selectedJob && setEmbeddedOpenReelJob(selectedJob.job_id)}
                   className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02]"
-                  title="Launch live multi-track OpenReel video editor inside this dashboard"
+                  title="Launch the editable timeline inside this dashboard"
                 >
                   <Film className="w-3.5 h-3.5 text-indigo-200" />
-                  <span>🎬 Open in OpenReel</span>
+                  <span>🎬 Open Timeline Editor</span>
                 </button>
               </div>
             </div>
@@ -1763,6 +1767,42 @@ export default function StudioDashboard() {
                           </button>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Caption Motion */}
+                    <div className="space-y-1 pt-1">
+                      <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                        Caption Motion
+                      </label>
+                      <select
+                        value={subtitleMotion}
+                        onChange={async (e) => {
+                          const profile = e.target.value;
+                          setSubtitleMotion(profile);
+                          try {
+                            const res = await fetch(
+                              `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/caption-motion`,
+                              {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ profile }),
+                              }
+                            );
+                            if (!res.ok) throw new Error("Motion update failed");
+                            showToast(`Caption motion: ${profile}`);
+                          } catch (err) {
+                            console.error("Failed to update caption motion:", err);
+                          }
+                        }}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-200 px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="word-pop">Word Pop</option>
+                        <option value="bounce">Bounce</option>
+                        <option value="typewriter">Typewriter</option>
+                        <option value="focus">True Focus</option>
+                        <option value="scramble">Text Scramble</option>
+                        <option value="slide-up">Slide Up</option>
+                      </select>
                     </div>
 
                     {/* Position Picker */}
@@ -1917,6 +1957,7 @@ export default function StudioDashboard() {
               onLaunchOpenReel={(id) => setEmbeddedOpenReelJob(id)}
               videoRef={masterVideoRef}
             />
+            <OpenShortsPanel jobId={selectedJob.job_id} />
           </div>
 
           {/* RIGHT COLUMN: B-Roll Cutaway Cards, Isolated Players, AI Review & Feedback (7 cols) */}

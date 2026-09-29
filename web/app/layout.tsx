@@ -4,8 +4,8 @@ import "./globals.css";
 import { Sparkles, Video, Cloud, Settings, Film, BrainCircuit } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "AI B-Roll Autopilot Studio",
-  description: "Autonomous Emotional B-Roll Editing & Continuous Learning Engine",
+  title: "Stockpile — AI Video Editing Studio",
+  description: "AI-powered video editing, smart B-roll, short-form clipping, animated captions, and editable timelines.",
 };
 
 export default function RootLayout({
@@ -29,10 +29,10 @@ export default function RootLayout({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold tracking-tight text-base text-zinc-100">AI B-ROLL AUTOPILOT</span>
-                  <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">Studio MVP</span>
+                  <span className="font-bold tracking-tight text-base text-zinc-100">STOCKPILE</span>
+                  <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">AI VIDEO STUDIO</span>
                 </div>
-                <p className="text-xs text-zinc-400">Emotional Resonance & Cloud Watcher</p>
+                <p className="text-xs text-zinc-400">AI Editing & Media Intelligence</p>
               </div>
             </Link>
 
@@ -78,7 +78,7 @@ export default function RootLayout({
 
         {/* Footer */}
         <footer className="border-t border-zinc-800/60 py-6 text-center text-xs text-zinc-500">
-          AI B-Roll Autopilot Studio • Powered by Whisper, Gemini AI Director & Azure Container Apps
+          Stockpile • AI-assisted video editing and short-form production
         </footer>
       </body>
     </html>
