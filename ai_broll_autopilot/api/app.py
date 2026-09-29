@@ -527,7 +527,7 @@ async def export_job_zip(job_id: str):
 
 
 @app.get("/api/jobs/{job_id}/openreel-project")
-async def get_job_openreel_project(job_id: str):
+async def get_job_openreel_project(job_id: str, mode: Optional[str] = "editable"):
     """Return a non-destructive OpenReel project built from the raw source + EditPlan.
 
     The rendered MP4 is never used as the primary timeline media. B-roll, captions,
@@ -619,6 +619,12 @@ async def get_job_openreel_project(job_id: str):
         "renderedOutputIsPreviewOnly": True,
         "revision": int(plan_dict.get("edit_revision", 0)),
     }
+
+    if mode == "rendered":
+        tracks = project["project"]["timeline"]["tracks"]
+        video_tracks = [t for t in tracks if t.get("type") == "video"]
+        if len(video_tracks) > 1:
+            video_tracks[1]["hidden"] = True
 
     with open(oreel_dir / f"{job.job_id}.oreel", "w", encoding="utf-8") as f:
         json.dump(project, f, indent=2)

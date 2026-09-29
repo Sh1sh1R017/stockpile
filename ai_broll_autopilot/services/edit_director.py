@@ -49,6 +49,7 @@ class EditPlan:
     subtitles: List[Dict[str, Any]] = field(default_factory=list)      # Word-level timed subtitles
     zooms: List[Dict[str, Any]] = field(default_factory=list)          # Keyframe punch-ins
     audio_cues: Dict[str, Any] = field(default_factory=dict)           # BGM and SFX cues
+    razor_captions: List[Dict[str, Any]] = field(default_factory=list) # Rapid Razor Caption events
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -67,6 +68,7 @@ class EditPlan:
             "subtitles": self.subtitles,
             "zooms": self.zooms,
             "audio_cues": self.audio_cues,
+            "razor_captions": self.razor_captions,
         }
 
 

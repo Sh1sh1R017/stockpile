@@ -33,7 +33,7 @@ export const OpenShortsPanel: React.FC<OpenShortsPanelProps> = ({ jobId }) => {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(\`/api/jobs/\${encodeURIComponent(jobId)}/openshorts\`, {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/openshorts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -64,7 +64,7 @@ export const OpenShortsPanel: React.FC<OpenShortsPanelProps> = ({ jobId }) => {
     const poll = async () => {
       try {
         const response = await fetch(
-          \`/api/jobs/\${encodeURIComponent(jobId)}/openshorts/\${encodeURIComponent(externalJobId)}\`
+          `/api/jobs/${encodeURIComponent(jobId)}/openshorts/${encodeURIComponent(externalJobId)}`
         );
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Status request failed");
