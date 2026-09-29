@@ -167,7 +167,8 @@ class TimelineEngine:
                 )
                 filters.append(
                     f"[{subject_matte_stream_idx}:v]setpts=PTS-STARTPTS,"
-                    f"scale={self.width}:{self.height},fps={self.fps},format=gray[subject_mask]"
+                    f"scale={self.width}:{self.height},fps={self.fps},format=gray," 
+                    f"tpad=stop_mode=clone:stop_duration=3600[subject_mask]"
                 )
                 filters.append(
                     "[subject_src][subject_mask]alphamerge[subject_fg]"
