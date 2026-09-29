@@ -78,18 +78,6 @@ def annotate_segments_for_subject_captions(
         item["behind_subject"] = force_behind_subject or _is_behind_subject(subtitle)
         prepared.append(item)
 
-    if not transcript_segments and subtitles:
-        return [
-            {
-                "start": _time_range(sub)[0],
-                "end": _time_range(sub)[1],
-                "text": sub.get("text", ""),
-                "words": sub.get("words", []),
-                "behind_subject": force_behind_subject or _is_behind_subject(sub),
-            }
-            for sub in subtitles
-        ]
-
     return prepared
 
 
