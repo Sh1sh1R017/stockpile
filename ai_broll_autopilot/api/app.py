@@ -679,6 +679,8 @@ async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
         # Mark with OpenReel edit tag
         updated_dict["openreel_custom_edited"] = True
         updated_dict["last_openreel_sync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        updated_dict["render_stale"] = True
+        updated_dict["edit_revision"] = int(updated_dict.get("edit_revision", 0)) + 1
 
         job.edit_plan = updated_dict
         job.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -1764,8 +1766,16 @@ async def delete_cutaway_shot(job_id: str, shot_id: str):
     if len(job.edit_plan["shots"]) == initial_len:
         raise HTTPException(status_code=404, detail=f"Shot '{shot_id}' not found")
 
+    job.edit_plan["render_stale"] = True
+    job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
     db.save_job(job)
-    return {"status": "deleted", "shot_id": shot_id, "remaining_count": len(job.edit_plan["shots"])}
+    return {
+        "status": "deleted",
+        "shot_id": shot_id,
+        "remaining_count": len(job.edit_plan["shots"]),
+        "render_stale": True,
+        "edit_revision": job.edit_plan["edit_revision"],
+    }
 
 
 @app.get("/api/bgm/tracks")
