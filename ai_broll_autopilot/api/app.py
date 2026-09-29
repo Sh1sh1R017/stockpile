@@ -138,6 +138,7 @@ class JobSettingsRequest(BaseModel):
     subtitles_enabled: Optional[bool] = Field(None, description="Toggle kinetic subtitles on/off")
     subtitle_style: Optional[str] = Field(None, description="Subtitle style: hormozi, beast, clean")
     subtitle_position: Optional[str] = Field(None, description="Subtitle position: bottom, center, top")
+    subtitles_behind_subject: Optional[bool] = Field(None, description="Place kinetic captions behind the detected foreground subject")
     bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
     bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
     bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
@@ -1817,6 +1818,12 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
         settings["subtitle_style"] = req.subtitle_style
     if req.subtitle_position is not None:
         settings["subtitle_position"] = req.subtitle_position
+    if req.subtitles_behind_subject is not None:
+        settings["subtitles_behind_subject"] = req.subtitles_behind_subject
+        for subtitle in job.edit_plan.get("subtitles", []):
+            subtitle["behind_subject"] = req.subtitles_behind_subject
+        job.edit_plan["render_stale"] = True
+        job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
     if req.bgm_track_id is not None:
         settings["bgm_track_id"] = req.bgm_track_id if req.bgm_track_id != "none" else None
     if req.bgm_volume is not None:
@@ -1848,12 +1855,10 @@ async def rerender_job_video(job_id: str):
 
     from ai_broll_autopilot.services.renderer import Renderer
     from ai_broll_autopilot.services.transition_engine import TransitionEngine
-    from ai_broll_autopilot.services.subtitle_engine import SubtitleEngine
     from ai_broll_autopilot.services.bgm_engine import BGMEngine
 
     renderer = Renderer()
     trans_engine = TransitionEngine()
-    sub_engine = SubtitleEngine()
     bgm_engine = BGMEngine()
 
     work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
@@ -1888,20 +1893,23 @@ async def rerender_job_video(job_id: str):
     caption_motion = normalize_motion_profile(settings.get("caption_motion", "word-pop"))
 
     ass_path = None
+    behind_subject_ass_path = None
+    subject_matte_path = None
     if sub_enabled and job.transcript_segments:
-        try:
-            ass_dest = work_dir / "subtitles_kinetic.ass"
-            sub_engine.generate_ass_file(
-                segments=job.transcript_segments,
-                output_path=ass_dest,
-                style_preset=sub_style,
-                position=sub_pos,
-                motion_profile=caption_motion,
-            )
-            if ass_dest.exists():
-                ass_path = str(ass_dest.resolve())
-        except Exception as se:
-            logger.warning(f"Could not generate kinetic subtitles: {se}")
+        ass_path, behind_subject_ass_path, subject_matte_path = await orchestrator._prepare_caption_render_assets(
+            source_video=job.source_file,
+            edit_plan=job.edit_plan,
+            transcript_segments=job.transcript_segments,
+            work_dir=work_dir,
+            style_preset=sub_style,
+            position=sub_pos,
+            custom_margin_v=getattr(campaign, "subtitle_margin_v", 280),
+            hook_text=None,
+            hook_duration=None,
+            suppress_hook=True,
+            text_emphasis_events=None,
+        )
+        caption_motion = job.edit_plan.get("render_settings", {}).get("caption_motion", caption_motion)
 
     # Resolve BGM track
     bgm_track_id = settings.get("bgm_track_id")
@@ -1922,6 +1930,8 @@ async def rerender_job_video(job_id: str):
         edit_plan=job.edit_plan,
         output_path=str(rendered_video),
         ass_subtitles_path=ass_path,
+        behind_subject_ass_path=behind_subject_ass_path,
+        subject_matte_path=subject_matte_path,
         bgm_path=bgm_path,
         bgm_volume=bgm_vol,
         ducking_enabled=ducking,
@@ -1960,7 +1970,8 @@ async def rerender_job_video(job_id: str):
         "job_id": job_id,
         "video_url": f"/api/jobs/{job_id}/video",
         "file_size": Path(out_path).stat().st_size,
-        "subtitles_burned": bool(ass_path),
+        "subtitles_burned": bool(ass_path or behind_subject_ass_path),
+        "subtitles_behind_subject": bool(behind_subject_ass_path and subject_matte_path),
         "bgm_applied": bool(bgm_path),
         "hdr_enabled": hdr_enabled
     }
