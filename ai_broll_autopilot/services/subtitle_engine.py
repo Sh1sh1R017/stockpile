@@ -106,8 +106,14 @@ class SubtitleEngine:
         suppress_hook: bool = False,
         text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
         motion_profile: str = "word-pop",
+        only_behind_subject: Optional[bool] = None,
     ) -> Path:
-        """Generate an .ass file with kinetic active-word highlighting and optional Level 3 emphasis graphics."""
+        """Generate an .ass file with kinetic highlighting.
+
+        When only_behind_subject is set, segments are filtered by their
+        behind_subject / behindSubject flag so the renderer can build separate
+        caption layers.
+        """
         cfg = self.PRESETS.get(style_preset.lower(), self.PRESETS["hormozi"])
         motion = (motion_profile or "word-pop").lower()
         if motion not in {"word-pop", "bounce", "typewriter", "focus", "scramble", "slide-up"}:
@@ -143,6 +149,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
         events = []
+        if only_behind_subject is True:
+            suppress_hook = True
+
         if not suppress_hook and hook_text and hook_text.strip():
             h_dur = hook_duration if hook_duration else 45.0
             h_start = "0:00:00.00"
@@ -150,7 +159,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             clean_hook = hook_text.strip().upper()
             events.append(f"Dialogue: 1,{h_start},{h_end},Hook,,0,0,0,,{clean_hook}")
 
-        if text_emphasis_events:
+        if text_emphasis_events and only_behind_subject is not True:
             for ev in text_emphasis_events:
                 st = format_ass_timestamp(float(ev["start_time"]))
                 et = format_ass_timestamp(float(ev["start_time"]) + float(ev.get("duration", 1.2)))
@@ -165,6 +174,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Flatten word stream
         all_words: List[Dict[str, Any]] = []
         for seg in segments:
+            if only_behind_subject is not None:
+                segment_behind_subject = bool(seg.get("behind_subject", seg.get("behindSubject", False)))
+                if segment_behind_subject != only_behind_subject:
+                    continue
+
             seg_words = seg.get("words", [])
             if seg_words:
                 all_words.extend(seg_words)
