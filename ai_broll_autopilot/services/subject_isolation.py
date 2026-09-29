@@ -258,6 +258,8 @@ class SubjectIsolationService:
         sample_fps: float = 8.0,
         processing_width: int = 540,
         processing_height: int = 960,
+        start_time: float = 0.0,
+        duration: Optional[float] = None,
     ) -> Path:
         """Generate a low-rate portrait-space subject matte video for caption compositing.
 
@@ -273,6 +275,10 @@ class SubjectIsolationService:
         cap = cv2.VideoCapture(str(source))
         if not cap.isOpened():
             raise RuntimeError(f"Could not open source video: {source}")
+
+        start_time = max(0.0, float(start_time))
+        if start_time > 0.0:
+            cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000.0)
 
         source_fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
         if source_fps <= 0:
@@ -292,11 +298,16 @@ class SubjectIsolationService:
 
         frame_index = 0
         processed = 0
+        max_frames = None
+        if duration is not None:
+            max_frames = max(1, int(round(float(duration) * source_fps)))
         last_mask = np.zeros((height, width), dtype=np.uint8)
         try:
             while True:
                 ret, frame = cap.read()
                 if not ret:
+                    break
+                if max_frames is not None and frame_index >= max_frames:
                     break
 
                 if frame_index % stride != 0:
