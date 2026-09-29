@@ -732,6 +732,8 @@ class Orchestrator:
                 watermark_scale=getattr(campaign, "watermark_scale", 0.28),
                 preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
                 viewport=getattr(campaign, "frame_viewport", None),
+                source_start_time=source_start,
+                render_duration=short_duration,
             )
 
             self._update_state(job, JobState.REVIEWING, progress=0.90, msg="Checking generated short")
