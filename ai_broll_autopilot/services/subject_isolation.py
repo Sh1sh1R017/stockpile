@@ -9,7 +9,7 @@ while providing server-side layout detection and offline alpha matte rendering.
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -250,6 +250,111 @@ class SubjectIsolationService:
         except Exception as e:
             logger.warning(f"GrabCut matte failed: {e}. Returning threshold fallback.")
             return np.full((h, w), 255, dtype=np.uint8)
+
+    def generate_person_matte_video(
+        self,
+        video_path: str,
+        output_path: str,
+        sample_fps: float = 8.0,
+        processing_width: int = 540,
+        processing_height: int = 960,
+    ) -> Path:
+        """Generate a low-rate portrait-space subject matte video for caption compositing.
+
+        The matte is evaluated on sampled frames and held between samples. Processing is
+        intentionally reduced to a small portrait canvas so the feature stays practical
+        for server-side rendering. The returned MP4 contains a grayscale alpha mask.
+        """
+        source = Path(video_path)
+        dest = Path(output_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source video not found: {source}")
+
+        cap = cv2.VideoCapture(str(source))
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open source video: {source}")
+
+        source_fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        if source_fps <= 0:
+            source_fps = 30.0
+        sample_fps = max(1.0, min(sample_fps, source_fps))
+        stride = max(1, int(round(source_fps / sample_fps)))
+
+        fps = source_fps
+        width = max(2, int(processing_width))
+        height = max(2, int(processing_height))
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        writer = cv2.VideoWriter(str(dest), fourcc, fps / stride, (width, height), isColor=False)
+        if not writer.isOpened():
+            cap.release()
+            raise RuntimeError(f"Could not create subject matte video: {dest}")
+
+        frame_index = 0
+        processed = 0
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if frame_index % stride != 0:
+                    frame_index += 1
+                    continue
+
+                fitted = self._fit_frame_to_canvas(frame, width, height)
+                gray = cv2.cvtColor(fitted, cv2.COLOR_BGR2GRAY)
+                faces = []
+                if self.face_cascade:
+                    faces = self.face_cascade.detectMultiScale(
+                        gray,
+                        scaleFactor=1.1,
+                        minNeighbors=4,
+                        minSize=(max(24, int(width * 0.08)), max(24, int(height * 0.05))),
+                    )
+
+                face_rect = None
+                if len(faces):
+                    face_rect = tuple(max(faces, key=lambda f: f[2] * f[3]).tolist())
+
+                if face_rect:
+                    mask = self.generate_person_matte(fitted, face_rect)
+                else:
+                    # Conservative fallback: black means "no foreground". This preserves
+                    # caption readability instead of hiding the entire caption layer.
+                    mask = np.zeros((height, width), dtype=np.uint8)
+
+                writer.write(mask)
+                processed += 1
+                frame_index += 1
+        finally:
+            cap.release()
+            writer.release()
+
+        if processed == 0 or not dest.exists() or dest.stat().st_size == 0:
+            raise RuntimeError(f"Subject matte generation produced no frames: {dest}")
+
+        logger.info(
+            "Generated subject matte video: %s (%d sampled frames @ %.2f fps)",
+            dest,
+            processed,
+            fps / stride,
+        )
+        return dest
+
+    @staticmethod
+    def _fit_frame_to_canvas(frame: np.ndarray, width: int, height: int) -> np.ndarray:
+        """Match the renderer's scale-down-and-pad behavior in portrait space."""
+        src_h, src_w = frame.shape[:2]
+        scale = min(width / max(1, src_w), height / max(1, src_h))
+        new_w = max(1, int(round(src_w * scale)))
+        new_h = max(1, int(round(src_h * scale)))
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+        x = (width - new_w) // 2
+        y = (height - new_h) // 2
+        canvas[y:y + new_h, x:x + new_w] = resized
+        return canvas
 
 
 # Global singleton instance
