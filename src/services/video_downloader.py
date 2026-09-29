@@ -252,8 +252,15 @@ class VideoDownloader:
             new_files = files_after - files_before
 
             score_prefix = f"score{video.score:02d}_"
+            valid_exts = {".mp4", ".mov", ".mkv", ".webm"}
             for file_path in new_files:
-                if file_path.is_file() and file_path.name.startswith(score_prefix):
+                if (
+                    file_path.is_file()
+                    and file_path.name.startswith(score_prefix)
+                    and file_path.suffix.lower() in valid_exts
+                    and not file_path.name.endswith(".part")
+                    and not file_path.name.endswith(".ytdl")
+                ):
                     return self._trim_to_max_duration(str(file_path), max_clip_duration)
 
             # Fallback if range download failed to find cut
@@ -267,7 +274,13 @@ class VideoDownloader:
                 files_after = set(output_dir.glob("*"))
                 new_files = files_after - files_before
                 for file_path in new_files:
-                    if file_path.is_file() and file_path.name.startswith(score_prefix):
+                    if (
+                        file_path.is_file()
+                        and file_path.name.startswith(score_prefix)
+                        and file_path.suffix.lower() in valid_exts
+                        and not file_path.name.endswith(".part")
+                        and not file_path.name.endswith(".ytdl")
+                    ):
                         return self._trim_to_max_duration(str(file_path), max_clip_duration)
 
             logger.warning(

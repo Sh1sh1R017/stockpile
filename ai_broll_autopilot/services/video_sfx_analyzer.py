@@ -150,7 +150,7 @@ Or if no sound effect fits:
                     temperature=0.2,
                     http_options=types.HttpOptions(
                         retry_options=types.HttpRetryOptions(attempts=1),
-                        timeout=5000
+                        timeout=15000
                     )
                 )
             )

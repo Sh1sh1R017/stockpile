@@ -69,6 +69,7 @@ export interface JobSummary {
   updated_at: string;
   error_message?: string;
   has_video: boolean;
+  output_video_path?: string;
   emotional_summary?: string;
   drive_file_url?: string;
   campaign_id?: string;
@@ -129,6 +130,10 @@ export interface JobDetail extends JobSummary {
     broll_shot_count?: number;
     openreel_custom_edited?: boolean;
     last_openreel_sync?: string;
+    last_render_revision?: number;
+    edit_revision?: number;
+    render_stale?: boolean;
+    subtitles_behind_subject?: boolean;
     render_settings?: {
       subtitles_enabled?: boolean;
       subtitle_style?: string;

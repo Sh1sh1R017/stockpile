@@ -98,7 +98,7 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
                         response_mime_type="application/json",
                         http_options=types.HttpOptions(
                             retry_options=types.HttpRetryOptions(attempts=1),
-                            timeout=8000
+                            timeout=15000
                         ),
                     ),
                 )
@@ -180,8 +180,7 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
 
         for shot in shots:
             if is_watermark_issue:
-                # Force clean procedural paper-collage
-                shot["style"] = "collage"
+                # Remove dirty watermarked asset so clean stock footage or A-roll is preserved
                 shot.pop("asset_path", None)
                 shot["status"] = "pending"
             elif shot.get("duration", 0) > 3.0 and shot.get("style") == "stockpile":

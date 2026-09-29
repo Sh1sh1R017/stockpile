@@ -70,6 +70,7 @@ class EditPlan:
     quality_report: Optional[Dict[str, Any]] = None
     visual_qa: Optional[Dict[str, Any]] = None
     review_items: List[Dict[str, Any]] = field(default_factory=list)
+    razor_captions: List[Dict[str, Any]] = field(default_factory=list) # Rapid Razor Caption events
     subtitles_behind_subject: bool = False
     render_settings: Dict[str, Any] = field(default_factory=dict)
     render_stale: bool = False
@@ -101,6 +102,7 @@ class EditPlan:
             "audio_cues": self.audio_cues,
             "cadence_profile": self.cadence_profile,
             "review_items": self.review_items,
+            "razor_captions": self.razor_captions,
             "subtitles_behind_subject": self.subtitles_behind_subject,
             "render_settings": self.render_settings,
             "render_stale": self.render_stale,
@@ -141,6 +143,7 @@ class EditPlan:
             quality_report=d.get("quality_report"),
             visual_qa=d.get("visual_qa"),
             review_items=d.get("review_items", []),
+            razor_captions=d.get("razor_captions", []),
             subtitles_behind_subject=bool(d.get("subtitles_behind_subject", False)),
             render_settings=d.get("render_settings", {}),
             render_stale=bool(d.get("render_stale", False)),

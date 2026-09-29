@@ -541,18 +541,16 @@ export default function StudioDashboard() {
         }),
       });
 
-      // 2. Trigger re-render
-      const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/rerender`, {
+      // 2. Trigger background re-render to prevent Next.js dev server proxy timeout
+      const res = await fetch(`/api/jobs/${encodeURIComponent(selectedJobId)}/rerender?background=true`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
 
       if (res.ok) {
-        showToast("Master video re-rendered with viral subtitles & BGM ducking!");
-        if (masterVideoRef.current) {
-          masterVideoRef.current.load();
-        }
+        setSelectedJob((prev) => prev ? { ...prev, status: "RENDERING", progress: 0.75 } : prev);
+        showToast("Re-rendering master video with updated subtitles & BGM (FFmpeg)...");
         fetchData();
       } else {
         const err = await res.json().catch(() => ({}));
