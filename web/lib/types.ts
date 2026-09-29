@@ -134,6 +134,30 @@ export interface JobDetail extends JobSummary {
     edit_revision?: number;
     render_stale?: boolean;
     subtitles_behind_subject?: boolean;
+    short_edits?: Array<{
+      job_id: string;
+      title: string;
+      source: string;
+      start: number;
+      end: number;
+      batch_id?: string | null;
+      candidate_id?: string | null;
+      status?: string;
+    }>;
+    workflow?: {
+      type?: string;
+      source?: string;
+      parent_job_id?: string;
+      batch_id?: string | null;
+      candidate_id?: string | null;
+      status?: string;
+      title?: string;
+      source_interval?: { start: number; end: number };
+      caption_style?: string | null;
+      caption_motion?: string | null;
+      subtitles_behind_subject?: boolean | null;
+      error?: string;
+    };
     render_settings?: {
       subtitles_enabled?: boolean;
       subtitle_style?: string;
