@@ -19,6 +19,8 @@ class TimelineEngine:
         shots: List[Dict[str, Any]],
         audio_sfx_list: List[Dict[str, Any]] = None,
         ass_subtitles_path: str = None,
+        behind_subject_ass_path: str = None,
+        subject_matte_stream_idx: int = None,
         bgm_stream_idx: int = None,
         bgm_volume: float = 0.15,
         ducking_enabled: bool = True,
@@ -33,6 +35,9 @@ class TimelineEngine:
 
         Returns:
             (filtergraph_string, final_video_layer_name, final_audio_layer_name)
+
+        Behind-subject captions are rendered below a foreground subject matte and
+        above the composed A-roll/B-roll scene. Normal captions remain a top layer.
         """
         filters = []
         audio_sfx_list = audio_sfx_list or []
@@ -137,7 +142,44 @@ class TimelineEngine:
             current_layer = next_layer
 
         # -------------------------------------------------------------
-        # 2b. Campaign Frame Overlay (Torn Paper Mask & Header/Watermark)
+        # 2b. Subject-aware Caption Layer
+        # -------------------------------------------------------------
+        if behind_subject_ass_path and subject_matte_stream_idx is not None:
+            import os
+            from pathlib import Path
+
+            if os.path.exists(behind_subject_ass_path):
+                clean_ass = str(Path(behind_subject_ass_path).resolve()).replace('\\', '/').replace(':', '\\:')
+                filters.append(f"[{current_layer}]subtitles='{clean_ass}'[caption_under_subject]")
+
+                hidden_terms = []
+                for shot in shots:
+                    if not shot.get("asset_path"):
+                        continue
+                    start_t = float(shot.get("start_time", 0.0))
+                    end_t = float(shot.get("end_time", start_t))
+                    if end_t > start_t:
+                        hidden_terms.append(f"between(t,{start_t:.3f},{end_t:.3f})")
+                subject_enable = "1" if not hidden_terms else f"lt({'+'.join(hidden_terms)},0.5)"
+
+                filters.append(
+                    f"[0:v]{scale_and_pad},format=rgb24[subject_src]"
+                )
+                filters.append(
+                    f"[{subject_matte_stream_idx}:v]setpts=PTS-STARTPTS,"
+                    f"scale={self.width}:{self.height},fps={self.fps},format=gray[subject_mask]"
+                )
+                filters.append(
+                    "[subject_src][subject_mask]alphamerge[subject_fg]"
+                )
+                filters.append(
+                    f"[caption_under_subject][subject_fg]"
+                    f"overlay=0:0:enable='{subject_enable}':eof_action=pass:format=auto[subject_caption_layer]"
+                )
+                current_layer = "subject_caption_layer"
+
+        # -------------------------------------------------------------
+        # 2c. Campaign Frame Overlay (Torn Paper Mask & Header/Watermark)
         # -------------------------------------------------------------
         if frame_overlay_stream_idx is not None:
             framed_layer = "framed_layer"
@@ -197,6 +239,7 @@ class TimelineEngine:
                 1 + len(shots)
                 + (1 if frame_overlay_stream_idx is not None else 0)
                 + (1 if watermark_stream_idx is not None else 0)
+                + (1 if subject_matte_stream_idx is not None else 0)
             )
             for a_idx, sfx_item in enumerate(audio_sfx_list):
                 stream_in = f"[{audio_inputs_start + a_idx}:a]"
