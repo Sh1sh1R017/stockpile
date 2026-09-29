@@ -2457,6 +2457,7 @@ async def create_single_stockpile_short(job_id: str, req: ShortEditRequest):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    batch_id = f"single_{job_id}_{int(req.start * 1000)}_{int(req.end * 1000)}"
     try:
         duration = get_video_duration(job.source_file)
         start = float(req.start)
@@ -2469,20 +2470,13 @@ async def create_single_stockpile_short(job_id: str, req: ShortEditRequest):
             end=end,
             title=req.title,
             source="manual",
+            batch_id=batch_id,
             caption_style=req.caption_style,
             caption_motion=req.caption_motion,
             subtitles_behind_subject=req.subtitles_behind_subject,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-    batch_id = f"single_{child_id}"
-    child = db.get_job(child_id)
-    if child and child.edit_plan:
-        wf = child.edit_plan.get("workflow", {})
-        wf["batch_id"] = batch_id
-        child.edit_plan["workflow"] = wf
-        db.save_job(child)
 
     return {
         "status": "queued",
