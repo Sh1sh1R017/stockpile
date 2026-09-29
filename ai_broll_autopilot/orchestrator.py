@@ -24,6 +24,8 @@ from ai_broll_autopilot.services.subtitle_engine import SubtitleEngine
 from ai_broll_autopilot.services.bgm_engine import BGMEngine
 from ai_broll_autopilot.services.openreel_adapter import openreel_adapter
 from ai_broll_autopilot.services.edit_director import EditPlan
+from ai_broll_autopilot.services.subject_caption import annotate_segments_for_subject_captions, has_behind_subject_segments
+from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
 from ai_broll_autopilot.services.qc_service import edit_quality_service
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,108 @@ class Orchestrator:
         """Gracefully shut down autopilot."""
         self.watcher.stop()
         await self.queue.stop()
+
+    async def _prepare_caption_render_assets(
+        self,
+        source_video: str,
+        edit_plan: Dict[str, Any],
+        transcript_segments: list[Dict[str, Any]],
+        work_dir: Path,
+        style_preset: str,
+        position: str,
+        custom_margin_v: Optional[int] = None,
+        hook_text: Optional[str] = None,
+        hook_duration: Optional[float] = None,
+        suppress_hook: bool = False,
+        text_emphasis_events: Optional[list[Dict[str, Any]]] = None,
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Prepare normal/behind-subject caption layers and a reusable subject matte."""
+        subtitles = edit_plan.get("subtitles", []) if edit_plan else []
+        render_settings = edit_plan.get("render_settings", {}) if edit_plan else {}
+        force_behind = bool(render_settings.get("subtitles_behind_subject", False))
+        segments = annotate_segments_for_subject_captions(
+            transcript_segments,
+            subtitles,
+            force_behind_subject=force_behind,
+        )
+        behind_enabled = has_behind_subject_segments(segments)
+
+        all_ass_dest = work_dir / "subtitles_kinetic.ass"
+        try:
+            self.sub_engine.generate_ass_file(
+                segments=segments or transcript_segments,
+                output_path=all_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=hook_text,
+                hook_duration=hook_duration,
+                suppress_hook=suppress_hook,
+                text_emphasis_events=text_emphasis_events,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+            )
+        except Exception as se:
+            logger.warning(f"Could not generate kinetic subtitles: {se}")
+            return None, None, None
+
+        if not behind_enabled:
+            return (
+                str(all_ass_dest.resolve()) if all_ass_dest.exists() else None,
+                None,
+                None,
+            )
+
+        normal_ass_dest = work_dir / "subtitles_normal.ass"
+        behind_ass_dest = work_dir / "subtitles_behind_subject.ass"
+        try:
+            self.sub_engine.generate_ass_file(
+                segments=segments,
+                output_path=normal_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=hook_text,
+                hook_duration=hook_duration,
+                suppress_hook=suppress_hook,
+                text_emphasis_events=text_emphasis_events,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+                only_behind_subject=False,
+            )
+            self.sub_engine.generate_ass_file(
+                segments=segments,
+                output_path=behind_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=None,
+                hook_duration=None,
+                suppress_hook=True,
+                text_emphasis_events=None,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+                only_behind_subject=True,
+            )
+
+            matte_dest = work_dir / "subject_matte.mp4"
+            await asyncio.to_thread(
+                subject_isolation_service.generate_person_matte_video,
+                source_video,
+                str(matte_dest),
+            )
+            if not matte_dest.exists():
+                raise RuntimeError("Subject matte file was not created")
+
+            return (
+                str(normal_ass_dest.resolve()) if normal_ass_dest.exists() else None,
+                str(behind_ass_dest.resolve()) if behind_ass_dest.exists() else None,
+                str(matte_dest.resolve()),
+            )
+        except Exception as me:
+            logger.warning(f"Could not prepare behind-subject captions: {me}. Falling back to normal subtitles.")
+            return (
+                str(all_ass_dest.resolve()) if all_ass_dest.exists() else None,
+                None,
+                None,
+            )
 
     async def process_job(self, job: Job):
         """Process a single job end-to-end through the state machine."""
@@ -187,27 +291,28 @@ class Orchestrator:
                 except Exception as fe:
                     logger.warning(f"Could not generate podcast frame overlay: {fe}")
 
-            # 6b. Generate kinetic subtitles with campaign styling and safe vertical positioning
+            # 6b. Prepare kinetic subtitles and optional behind-subject caption layers
             ass_path = None
+            behind_subject_ass_path = None
+            subject_matte_path = None
             if job.transcript_segments and campaign.subtitles_required:
-                try:
-                    ass_dest = work_dir / "subtitles_kinetic.ass"
-                    self.sub_engine.generate_ass_file(
-                        segments=job.transcript_segments,
-                        output_path=ass_dest,
-                        style_preset=campaign.subtitle_style,
-                        position=campaign.subtitle_position,
-                        custom_margin_v=campaign.subtitle_margin_v,
-                        hook_text=hook_txt,
-                        hook_duration=duration if campaign.id == "curious_mike" else 4.0,
-                        suppress_hook=bool(frame_overlay_path),
-                        text_emphasis_events=edit_plan.get("text_emphasis_graphics"),
-                    )
-                    if ass_dest.exists():
-                        ass_path = str(ass_dest.resolve())
-                        logger.info(f"Kinetic subtitles generated at: {ass_path}")
-                except Exception as se:
-                    logger.warning(f"Could not generate kinetic subtitles: {se}")
+                ass_path, behind_subject_ass_path, subject_matte_path = await self._prepare_caption_render_assets(
+                    source_video=job.source_file,
+                    edit_plan=edit_plan,
+                    transcript_segments=job.transcript_segments,
+                    work_dir=work_dir,
+                    style_preset=campaign.subtitle_style,
+                    position=campaign.subtitle_position,
+                    custom_margin_v=campaign.subtitle_margin_v,
+                    hook_text=hook_txt,
+                    hook_duration=duration if campaign.id == "curious_mike" else 4.0,
+                    suppress_hook=bool(frame_overlay_path),
+                    text_emphasis_events=edit_plan.get("text_emphasis_graphics"),
+                )
+                if behind_subject_ass_path and subject_matte_path:
+                    logger.info(f"Behind-subject captions enabled: {behind_subject_ass_path}")
+                elif ass_path:
+                    logger.info(f"Kinetic subtitles generated at: {ass_path}")
 
             # 6c. Background Music: only if campaign allows it
             bgm_path = None
@@ -231,6 +336,8 @@ class Orchestrator:
                 job.edit_plan,
                 str(rendered_video),
                 ass_subtitles_path=ass_path,
+                behind_subject_ass_path=behind_subject_ass_path,
+                subject_matte_path=subject_matte_path,
                 bgm_path=bgm_path,
                 bgm_volume=0.14,
                 upscale_hdr=getattr(job, "upscale_hdr", False),
@@ -274,6 +381,8 @@ class Orchestrator:
                     job.edit_plan,
                     str(rendered_video),
                     ass_subtitles_path=ass_path,
+                    behind_subject_ass_path=behind_subject_ass_path,
+                    subject_matte_path=subject_matte_path,
                     bgm_path=bgm_path,
                     bgm_volume=0.14,
                     ducking_enabled=True,
