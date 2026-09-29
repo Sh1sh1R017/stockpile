@@ -41,6 +41,7 @@ from ai_broll_autopilot.services.broll_library import broll_library, extract_med
 from ai_broll_autopilot.services.transcriber import Transcriber
 from ai_broll_autopilot.services.qc_service import edit_quality_service
 from ai_broll_autopilot.services.openshorts_client import OpenShortsClient, OpenShortsError
+from ai_broll_autopilot.services.caption_motion import CAPTION_MOTION_PROFILES, normalize_motion_profile, apply_caption_motion
 
 logger = logging.getLogger(__name__)
 
@@ -1884,6 +1885,7 @@ async def rerender_job_video(job_id: str):
     sub_enabled = settings.get("subtitles_enabled", True)
     sub_style = settings.get("subtitle_style", "hormozi")
     sub_pos = settings.get("subtitle_position", "bottom")
+    caption_motion = normalize_motion_profile(settings.get("caption_motion", "word-pop"))
 
     ass_path = None
     if sub_enabled and job.transcript_segments:
@@ -1893,7 +1895,8 @@ async def rerender_job_video(job_id: str):
                 segments=job.transcript_segments,
                 output_path=ass_dest,
                 style_preset=sub_style,
-                position=sub_pos
+                position=sub_pos,
+                motion_profile=caption_motion,
             )
             if ass_dest.exists():
                 ass_path = str(ass_dest.resolve())
@@ -2154,6 +2157,11 @@ class OpenShortsRequest(BaseModel):
     auto_hook: bool = True
     confirm_rights: bool = False
 
+class CaptionMotionRequest(BaseModel):
+    profile: str = "word-pop"
+
+
+
 
 
 
@@ -2261,6 +2269,41 @@ async def get_openshorts_job_status(job_id: str, openshorts_job_id: str):
         "status": status.get("status"),
         "logs": (status.get("logs") or [])[-10:],
         "clips": normalized,
+    }
+
+
+@app.get("/api/caption-motions")
+async def get_caption_motions():
+    """List motion-anything-inspired caption profiles supported by Stockpile."""
+    return [
+        {"id": key, **value}
+        for key, value in CAPTION_MOTION_PROFILES.items()
+    ]
+
+
+@app.post("/api/jobs/{job_id}/caption-motion")
+async def set_job_caption_motion(job_id: str, req: CaptionMotionRequest):
+    """Apply a caption motion profile to the canonical EditPlan."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    profile = normalize_motion_profile(req.profile)
+    if not job.edit_plan:
+        job.edit_plan = {}
+    job.edit_plan["render_settings"] = job.edit_plan.get("render_settings", {})
+    job.edit_plan["render_settings"]["caption_motion"] = profile
+    job.edit_plan["subtitles"] = apply_caption_motion(
+        job.edit_plan.get("subtitles", []),
+        profile,
+    )
+    job.edit_plan["render_stale"] = True
+    job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
+    db.save_job(job)
+    return {
+        "status": "success",
+        "profile": profile,
+        "render_stale": True,
+        "edit_revision": job.edit_plan["edit_revision"],
     }
 
 
