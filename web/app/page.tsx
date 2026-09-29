@@ -559,11 +559,11 @@ export default function StudioDashboard() {
 
   const handleExportToOpenReel = async () => {
     if (!selectedJob || !selectedJob.edit_plan) {
-      alert("No active edit plan to export to OpenReel.");
+      alert("No active edit plan to export to the Timeline Editor.");
       return;
     }
     setIsOpenReelExporting(true);
-    showToast("Exporting non-destructive OpenReel project (.oreel)...");
+    showToast("Exporting non-destructive editable project...");
     try {
       const res = await fetch("/api/export-openreel", {
         method: "POST",
@@ -576,13 +576,13 @@ export default function StudioDashboard() {
       if (res.ok) {
         const data = await res.json();
         setOpenReelModalData(data);
-        showToast("🎬 Project exported to OpenReel Schema 1.2.0!");
+        showToast("🎬 Editable project exported successfully!");
       } else {
         const err = await res.json().catch(() => ({}));
         alert(`Export failed: ${err.detail || "Server error"}`);
       }
     } catch (e) {
-      alert("Error exporting to OpenReel: " + e);
+      alert("Error exporting editable project: " + e);
     } finally {
       setIsOpenReelExporting(false);
     }
@@ -1702,14 +1702,14 @@ export default function StudioDashboard() {
                   <span>{isRerenderingMaster ? "Burning Subtitles & BGM..." : "⚡ Re-render Master Edit"}</span>
                 </button>
 
-                {/* Open in OpenReel Button */}
+                {/* Open in Timeline Editor */}
                 <button
                   onClick={() => selectedJob && setEmbeddedOpenReelJob(selectedJob.job_id)}
                   className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02]"
-                  title="Launch live multi-track OpenReel video editor inside this dashboard"
+                  title="Launch the editable timeline inside this dashboard"
                 >
                   <Film className="w-3.5 h-3.5 text-indigo-200" />
-                  <span>🎬 Open in OpenReel</span>
+                  <span>🎬 Open Timeline Editor</span>
                 </button>
               </div>
             </div>
