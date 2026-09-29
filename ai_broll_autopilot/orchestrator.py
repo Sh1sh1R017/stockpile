@@ -763,6 +763,7 @@ class Orchestrator:
             plan["render_stale"] = False
             plan["last_render_revision"] = int(plan.get("edit_revision", 1))
             job.edit_plan = plan
+            self._update_parent_short_status(job, "COMPLETED")
             self._update_state(job, JobState.COMPLETED, progress=1.0, msg="Edited short completed")
         except Exception as e:
             workflow = (job.edit_plan or {}).setdefault("workflow", {})
@@ -770,7 +771,29 @@ class Orchestrator:
             workflow["error"] = str(e)
             job.edit_plan = job.edit_plan or {}
             job.edit_plan["workflow"] = workflow
+            self._update_parent_short_status(job, "FAILED")
             self._update_state(job, JobState.FAILED, progress=job.progress, error=str(e), msg=f"Short edit failed: {e}")
+
+    def _update_parent_short_status(self, job: Job, status: str):
+        """Mirror child short status into its parent EditPlan when the parent still exists."""
+        workflow = (job.edit_plan or {}).get("workflow", {}) if job.edit_plan else {}
+        parent_id = workflow.get("parent_job_id")
+        if not parent_id:
+            return
+
+        parent = self.db.get_job(parent_id)
+        if not parent or not parent.edit_plan:
+            return
+
+        changed = False
+        for item in parent.edit_plan.get("short_edits", []):
+            if item.get("job_id") == job.job_id:
+                item["status"] = status
+                changed = True
+                break
+
+        if changed:
+            self.db.save_job(parent)
 
     def _update_state(
         self,
