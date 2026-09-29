@@ -455,6 +455,9 @@ Respond ONLY with valid JSON matching:
                 "startTime": st,
                 "endTime": et,
                 "animationStyle": style.caption_animation_style,
+                "motionProfile": "word-pop",
+                "motionRecipe": "motion-anything:word-pop",
+                "behind_subject": False,
                 "style": style.to_openreel_subtitle_style(),
                 "words": timed_words,
             })
