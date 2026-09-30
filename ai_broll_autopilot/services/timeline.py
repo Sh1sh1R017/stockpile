@@ -47,6 +47,15 @@ class TimelineEngine:
         audio_sfx_list = audio_sfx_list or []
         active_broll_intervals = []
 
+        reference_mask_labels = []
+        if reference_style and reference_card_mask_idx is not None:
+            reference_mask_labels = [f"ref_mask_{i}" for i in range(len(shots) + 1)]
+            filters.append(
+                f"[{reference_card_mask_idx}:v]format=gray,"
+                f"split={len(reference_mask_labels)}"
+                + "".join(f"[{label}]" for label in reference_mask_labels)
+            )
+
         # -------------------------------------------------------------
         # 1. Base Video Normalization & Layout Setup
         # -------------------------------------------------------------
@@ -119,11 +128,7 @@ class TimelineEngine:
                     f"eq=contrast=1.05:saturation=1.03:brightness=-0.01"
                 )
                 filters.append(f"[0:v]{reference_scale}[base_card]")
-                filters.append(
-                    f"[{reference_card_mask_idx}:v]scale={card_w}:{card_h},"
-                    f"format=gray[reference_mask]"
-                )
-                filters.append("[base_card][reference_mask]alphamerge[base_card_rounded]")
+                filters.append("[base_card][ref_mask_0]alphamerge[base_card_rounded]")
                 filters.append(
                     f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d=300[reference_canvas]"
                 )
@@ -196,15 +201,6 @@ class TimelineEngine:
         # -------------------------------------------------------------
         # 2. B-Roll Video Overlays with Dynamic Transitions (Single Layout)
         # -------------------------------------------------------------
-        reference_mask_labels = []
-        if reference_style and reference_card_mask_idx is not None and shots:
-            reference_mask_labels = [f"ref_mask_{i}" for i in range(len(shots) + 1)]
-            filters.append(
-                f"[{reference_card_mask_idx}:v]scale={self.width}:{self.height},format=gray,"
-                f"split={len(reference_mask_labels)}"
-                + "".join(f"[{label}]" for label in reference_mask_labels)
-            )
-
         if layout_mode != "before_after_cyber_grid":
             for idx, shot in enumerate(shots, start=1):
                 if not shot.get("asset_path"):
