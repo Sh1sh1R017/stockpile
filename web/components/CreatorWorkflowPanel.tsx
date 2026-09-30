@@ -48,6 +48,7 @@ interface CreatorWorkflowPanelProps {
 }
 
 const CAPTION_PRESETS = [
+  { id: "cinematic_social", label: "Cinematic Social", sample: "closer you are" },
   { id: "razor_pop", label: "Razor Pop", sample: "MOST PEOPLE" },
   { id: "razor_neon", label: "Razor Neon", sample: "THE BIG IDEA" },
   { id: "razor_badge", label: "Razor Badge", sample: "$10 MILLION" },
@@ -85,7 +86,7 @@ export const CreatorWorkflowPanel: React.FC<CreatorWorkflowPanelProps> = ({
   const [childEdits, setChildEdits] = useState<ChildEdit[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [captionPreset, setCaptionPreset] = useState("razor_pop");
+  const [captionPreset, setCaptionPreset] = useState("cinematic_social");
   const [captionMotion, setCaptionMotion] = useState("word-pop");
   const [behindSubject, setBehindSubject] = useState(true);
   const [captionDraftSaved, setCaptionDraftSaved] = useState(false);
@@ -305,7 +306,7 @@ export const CreatorWorkflowPanel: React.FC<CreatorWorkflowPanelProps> = ({
         body: JSON.stringify({
           subtitles_enabled: true,
           subtitle_style: captionPreset,
-          subtitle_position: "bottom",
+          subtitle_position: captionPreset === "cinematic_social" ? "center" : "bottom",
           subtitles_behind_subject: behindSubject,
           caption_motion: captionMotion,
         }),
