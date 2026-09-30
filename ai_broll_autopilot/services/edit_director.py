@@ -587,7 +587,11 @@ Respond ONLY with valid JSON matching:
         """Deterministic rule-based edit director respecting niche and style parameters."""
         max_broll_seconds = clip_duration * niche.editing.max_broll_ratio
         shot_duration = style.default_broll_duration
-        target_shots = max(1, min(5, int(max_broll_seconds / max(1.0, shot_duration))))
+        reference_style = style.id == "cinematic_social_editorial"
+        min_broll = getattr(style, "broll_min_duration", 1.2)
+        max_broll = getattr(style, "broll_max_duration", 2.4)
+        shot_duration = getattr(style, "default_broll_duration", shot_duration)
+        target_shots = max(1, min(10, int(round(max_broll_seconds / max(0.5, shot_duration)))))
 
         # 1. Identify visual keywords spoken in segments
         niche_kws = {kw.lower(): kw for kw in niche.visual_keywords}
@@ -610,13 +614,18 @@ Respond ONLY with valid JSON matching:
         # 2. Schedule B-Roll shots spaced across the timeline
         shots = []
         allocated_time = 1.5  # Start after initial face hook
-        step = max(3.0, (clip_duration - 2.0) / (target_shots + 1))
+        step = (
+            max(2.0, (clip_duration - 2.0) / (target_shots + 1))
+            if reference_style
+            else max(3.0, (clip_duration - 2.0) / (target_shots + 1))
+        )
 
         for i in range(target_shots):
             shot_start = round(allocated_time, 2)
-            shot_end = round(min(clip_duration - 0.5, shot_start + shot_duration), 2)
+            target_dur = min(max_broll, max(min_broll, shot_duration))
+            shot_end = round(min(clip_duration - 0.5, shot_start + target_dur), 2)
             actual_dur = round(shot_end - shot_start, 2)
-            if actual_dur < 1.0:
+            if actual_dur < max(0.5, min_broll * 0.75):
                 break
 
             # Find matching keyword near this timestamp if possible
@@ -634,9 +643,17 @@ Respond ONLY with valid JSON matching:
                 "end_time": shot_end,
                 "duration": actual_dur,
                 "category": cat,
-                "search_query": f"{niche.name} {matched_kw}",
+                "search_query": (
+                    f"{matched_kw} real world documentary footage"
+                    if reference_style
+                    else f"{niche.name} {matched_kw}"
+                ),
                 "dialogue_trigger": f"Illustrates {matched_kw}",
-                "rationale": f"Contextual cutaway matching topic '{matched_kw}' in {niche.name}.",
+                "rationale": (
+                    f"Reference-style literal visual punctuation for '{matched_kw}' in {niche.name}."
+                    if reference_style
+                    else f"Contextual cutaway matching topic '{matched_kw}' in {niche.name}."
+                ),
             })
 
             allocated_time += actual_dur + step
@@ -673,10 +690,12 @@ Respond ONLY with valid JSON matching:
         # 5. Audio Cues
         sfx_triggers = []
         for shot in shots:
+            if reference_style and len(sfx_triggers) % 3 != 0:
+                continue
             sfx_triggers.append({
                 "time": shot["start_time"],
                 "sound": "whoosh",
-                "volume": 0.35,
+                "volume": 0.20 if reference_style else 0.35,
             })
 
         audio_cues = {
