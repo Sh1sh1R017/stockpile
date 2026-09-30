@@ -121,6 +121,16 @@ export interface ShotDetail {
     reason?: string;
     audio_url?: string;
   };
+  emotion?: string;
+  sentiment?: string;
+  tone_of_voice?: string;
+  tone_intensity?: number;
+  impact_score?: number;
+  visualizability?: number;
+  broll_priority?: number;
+  visual_strategy?: string;
+  broll_search_queries?: string[];
+  avoid_visuals?: string[];
 }
 
 export interface JobDetail extends JobSummary {
@@ -174,6 +184,31 @@ export interface JobDetail extends JobSummary {
       style?: any;
     }>;
     razor_captions?: any[];
+    broll_selection_model?: string;
+    broll_selection_policy?: string;
+    broll_super_analysis?: {
+      global_tone?: string;
+      emotional_arc?: string[];
+      selection_policy?: string;
+      moments?: Array<{
+        start: number;
+        end: number;
+        anchor_quote?: string;
+        emotion?: string;
+        sentiment?: string;
+        tone_of_voice?: string;
+        tone_intensity?: number;
+        impact_score?: number;
+        visualizability?: number;
+        broll_priority?: number;
+        best_for_broll?: boolean;
+        visual_strategy?: string;
+        search_queries?: string[];
+        avoid_visuals?: string[];
+        recommended_duration?: number;
+        why_broll?: string;
+      }>;
+    };
     shots: ShotDetail[];
   };
 }
