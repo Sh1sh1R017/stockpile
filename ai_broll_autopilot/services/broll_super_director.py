@@ -162,7 +162,7 @@ class BrollSuperDirector:
         selected: List[Dict[str, Any]] = []
         for moment in moments:
             start = float(moment["start"])
-            if start < 0.8 and video_duration > 3:
+            if not reference_style and start < 0.8 and video_duration > 3:
                 start = 0.8
             if any(abs(start - x["start"]) < 1.0 for x in selected):
                 continue
@@ -241,6 +241,50 @@ class BrollSuperDirector:
             shot["duration"] = round(end - start, 2)
             cleaned.append(shot)
             last_end = end
+
+        # Preserve the reference's high visual coverage after emotional
+        # retiming. Extend strong shots into available gaps rather than inventing
+        # extra unrelated shots.
+        if reference_style and cleaned:
+            target_seconds = video_duration * float(
+                style_data.get("broll_target_ratio", 0.90) or 0.90
+            )
+            total_seconds = sum(float(s.get("duration", 0.0)) for s in cleaned)
+            standard_cap = float(
+                style_data.get("broll_max_duration", 2.2) or 2.2
+            )
+            for _ in range(4):
+                if total_seconds >= target_seconds:
+                    break
+                changed = False
+                for idx, shot in enumerate(cleaned):
+                    start_time = float(shot.get("start_time", 0.0))
+                    current = float(shot.get("duration", 0.0))
+                    impact = float(shot.get("impact_score", 0.0) or 0.0)
+                    visual = float(shot.get("visualizability", 0.0) or 0.0)
+                    cap = hero_max_duration if impact >= 85 and visual >= 85 else standard_cap
+                    next_start = (
+                        float(cleaned[idx + 1].get("start_time", video_duration))
+                        if idx + 1 < len(cleaned)
+                        else video_duration
+                    )
+                    room = max(0.0, next_start - start_time - 0.08)
+                    desired = min(
+                        cap,
+                        room,
+                        current + max(0.0, target_seconds - total_seconds),
+                    )
+                    if desired > current + 0.05:
+                        shot["duration"] = round(desired, 2)
+                        shot["end_time"] = round(start_time + desired, 2)
+                        total_seconds = sum(
+                            float(s.get("duration", 0.0)) for s in cleaned
+                        )
+                        changed = True
+                        if total_seconds >= target_seconds:
+                            break
+                if not changed:
+                    break
 
         total = round(sum(float(s.get("duration", 0)) for s in cleaned), 2)
         plan["shots"] = cleaned

@@ -82,11 +82,18 @@ class Director:
                 niche = niche_registry.get_profile("generic")
 
         # Resolve the visual treatment independently from the subtitle preset.
+        # An explicit campaign editing_style is an editorial contract and must
+        # override the niche's default style.
         from ai_broll_autopilot.services.niche_detector import NICHE_TO_STYLE_MAP
         from ai_broll_autopilot.styles import style_registry
-        style_id = NICHE_TO_STYLE_MAP.get(
-            niche.id if niche else "generic",
-            "cinematic_social_editorial",
+        campaign_style_id = str(getattr(campaign, "editing_style", "") or "").strip()
+        style_id = (
+            campaign_style_id
+            or NICHE_TO_STYLE_MAP.get(
+                niche.id if niche else "generic",
+                "cinematic_social_editorial",
+            )
+            or "cinematic_social_editorial"
         )
         style_profile = style_registry.get_style(style_id)
 
@@ -302,11 +309,11 @@ Return ONLY a valid JSON object matching this schema:
                     continue
 
                 start = max(0.0, float(shot.get("start_time", 0.0)))
-                # Prevent overlap with previous shot (keep minimum 0.4s speaker gap)
-                if start < last_end + 0.4:
-                    start = last_end + 0.4
+                reference_gap = 0.15 if reference_editing else 0.4
+                if start < last_end + reference_gap:
+                    start = last_end + reference_gap
 
-                if start >= video_duration - 0.8:
+                if start >= video_duration - (0.2 if reference_editing else 0.8):
                     break
 
                 style = shot.get("style", "stockpile").lower()
@@ -751,10 +758,35 @@ Return ONLY a valid JSON object matching this schema:
         if not clean_shots and not segments:
             return clean_shots, 0.0
 
-        min_speaker_gap = 1.0  # seconds of speaker face breathing space between cuts
-        max_gap_allowed = 4.0  # seconds: max continuous speaker time before a cutaway is needed
-        max_clip = min(float(getattr(campaign, "max_cutaway_seconds", 2.5)), float(Config.MAX_CLIP_DURATION_SECONDS))
-        min_clip = 1.4
+        from ai_broll_autopilot.styles import style_registry
+        style_id = str(getattr(campaign, "editing_style", "") or "").strip()
+        style_profile = style_registry.get_style(style_id) if style_id else None
+        reference_style = bool(
+            getattr(style_profile, "reference_style", False)
+            or style_id in {"cinematic_social_editorial", "cinematic_editorial"}
+        )
+
+        min_speaker_gap = 0.15 if reference_style else 1.0
+        max_gap_allowed = (
+            float(getattr(style_profile, "max_continuous_aroll_seconds", 3.5))
+            if reference_style and style_profile
+            else 4.0
+        )
+        configured_max_clip = float(getattr(campaign, "max_cutaway_seconds", 2.5))
+        style_max_clip = (
+            float(getattr(style_profile, "hero_broll_max_duration", configured_max_clip))
+            if reference_style and style_profile
+            else configured_max_clip
+        )
+        max_clip = min(
+            8.0 if reference_style else float(Config.MAX_CLIP_DURATION_SECONDS),
+            style_max_clip,
+        )
+        min_clip = (
+            float(getattr(style_profile, "broll_min_duration", 0.8))
+            if reference_style and style_profile
+            else 1.4
+        )
 
         # 1. Clean and space existing shots
         sorted_shots = sorted(clean_shots, key=lambda s: float(s.get("start_time", 0.0)))
@@ -762,7 +794,7 @@ Return ONLY a valid JSON object matching this schema:
         last_end = 0.0
 
         for s in sorted_shots:
-            st = max(0.8, float(s.get("start_time", 0.0)))
+            st = max(0.0 if reference_style else 0.8, float(s.get("start_time", 0.0)))
             if st < last_end + min_speaker_gap:
                 st = last_end + min_speaker_gap
             dur = min(max_clip, max(min_clip, float(s.get("duration", 2.0))))
@@ -777,12 +809,18 @@ Return ONLY a valid JSON object matching this schema:
             cleaned.append(s)
             last_end = et
 
-        # 2. Check opening gap: if first shot starts after 4.5s, add early shot (after hook)
-        if segments and (not cleaned or cleaned[0]["start_time"] > 4.5):
-            early_segs = [s for s in segments if s.get("start", 0.0) >= 0.8 and s.get("end", 0.0) <= 4.2]
+        # 2. Open on a meaningful visual in reference mode instead of forcing
+        # a talking-head intro.
+        opening_threshold = 1.0 if reference_style else 4.5
+        if segments and (not cleaned or cleaned[0]["start_time"] > opening_threshold):
+            early_segs = (
+                [s for s in segments if s.get("start", 0.0) >= 0.0 and s.get("end", 0.0) <= 4.2]
+                if reference_style
+                else [s for s in segments if s.get("start", 0.0) >= 0.8 and s.get("end", 0.0) <= 4.2]
+            )
             if early_segs:
                 seg = early_segs[0]
-                ins_st = 1.2
+                ins_st = 0.0 if reference_style else 1.2
                 ins_dur = min(max_clip, max(min_clip, 2.0))
                 new_s = self._generate_contextual_shot_for_segment(seg, 1, ins_st, ins_dur, campaign, niche)
                 cleaned.insert(0, new_s)
@@ -833,15 +871,55 @@ Return ONLY a valid JSON object matching this schema:
         for idx, s in enumerate(cleaned):
             s["shot_id"] = f"broll_{idx+1}"
 
-        # 6. Smooth Coverage Balancing (scale durations proportionally rather than deleting shots)
-        target_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        # 6. Reference coverage balancing: expand useful visuals before trimming.
+        style_ratio = getattr(style_profile, "broll_target_ratio", None)
+        target_ratio = (
+            float(style_ratio)
+            if reference_style and style_ratio is not None
+            else (niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio)
+        )
         target_broll_sec = video_duration * target_ratio
-        total_broll = sum(s["duration"] for s in cleaned)
+        total_broll = sum(float(s["duration"]) for s in cleaned)
+
+        if reference_style and cleaned and total_broll < target_broll_sec:
+            hero_cap = float(getattr(style_profile, "hero_broll_max_duration", 7.5))
+            standard_cap = float(getattr(style_profile, "broll_max_duration", 2.2))
+            for _ in range(4):
+                if total_broll >= target_broll_sec:
+                    break
+                changed = False
+                for idx, shot in enumerate(cleaned):
+                    start_time = float(shot["start_time"])
+                    current = float(shot["duration"])
+                    impact = float(shot.get("impact_score", 0.0) or 0.0)
+                    visual = float(shot.get("visualizability", 0.0) or 0.0)
+                    cap = hero_cap if impact >= 85 and visual >= 85 else standard_cap
+                    next_start = (
+                        float(cleaned[idx + 1]["start_time"])
+                        if idx + 1 < len(cleaned)
+                        else video_duration
+                    )
+                    room = max(0.0, next_start - start_time - 0.08)
+                    desired = min(
+                        cap,
+                        room,
+                        current + max(0.0, target_broll_sec - total_broll),
+                    )
+                    if desired > current + 0.05:
+                        shot["duration"] = round(desired, 2)
+                        shot["end_time"] = round(start_time + desired, 2)
+                        total_broll = sum(float(s["duration"]) for s in cleaned)
+                        changed = True
+                        if total_broll >= target_broll_sec:
+                            break
+                if not changed:
+                    break
 
         if total_broll > target_broll_sec and cleaned:
             scale = target_broll_sec / total_broll
+            floor = float(getattr(style_profile, "broll_min_duration", 0.8)) if reference_style else 1.3
             for s in cleaned:
-                scaled_dur = round(max(1.3, s["duration"] * scale), 2)
+                scaled_dur = round(max(floor, s["duration"] * scale), 2)
                 s["duration"] = scaled_dur
                 s["end_time"] = round(s["start_time"] + scaled_dur, 2)
             total_broll = sum(s["duration"] for s in cleaned)

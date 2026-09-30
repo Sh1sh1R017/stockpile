@@ -2429,7 +2429,7 @@ class ShortEditRequest(BaseModel):
     start: float = Field(..., ge=0.0)
     end: float = Field(..., gt=0.0)
     title: str = Field("Edited Short", max_length=160)
-    caption_style: str = Field("razor_pop")
+    caption_style: str = Field("cinematic_social")
     caption_motion: str = Field("word-pop")
     subtitles_behind_subject: bool = True
 
@@ -2437,7 +2437,7 @@ class ShortEditRequest(BaseModel):
 class OpenShortsBatchEditRequest(BaseModel):
     candidates: List[Dict[str, Any]]
     batch_id: Optional[str] = None
-    caption_style: str = Field("razor_pop")
+    caption_style: str = Field("cinematic_social")
     caption_motion: str = Field("word-pop")
     subtitles_behind_subject: bool = True
 

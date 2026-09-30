@@ -353,3 +353,62 @@ def test_reference_editing_guideline_profile():
     assert style.caption_words_per_group == 3
     assert any("85-95%" in guideline for guideline in style.editorial_guidelines)
 
+
+
+def test_reference_edit_campaign_override_and_timeline_coverage():
+    from ai_broll_autopilot.campaigns import campaign_registry
+    from ai_broll_autopilot.services.director import Director
+
+    campaign = campaign_registry.get_campaign("default")
+    director = Director(api_key=None)
+    segments = [
+        {"start": 0.0, "end": 2.0, "text": "The secret is location."},
+        {"start": 2.0, "end": 4.5, "text": "The closer you are to the source, the higher the value."},
+        {"start": 4.5, "end": 7.0, "text": "That is what people will remember."},
+    ]
+    shots = [
+        {"shot_id": "broll_1", "start_time": 0.0, "end_time": 1.2, "duration": 1.2, "impact_score": 92, "visualizability": 94},
+        {"shot_id": "broll_2", "start_time": 2.0, "end_time": 3.2, "duration": 1.2, "impact_score": 88, "visualizability": 90},
+        {"shot_id": "broll_3", "start_time": 4.0, "end_time": 5.2, "duration": 1.2, "impact_score": 80, "visualizability": 86},
+    ]
+
+    cleaned, coverage = director._audit_and_fill_timeline_distribution(
+        clean_shots=shots,
+        segments=segments,
+        video_duration=7.0,
+        campaign=campaign,
+        niche=None,
+    )
+
+    assert campaign.editing_style == "cinematic_social_editorial"
+    assert len(cleaned) >= 3
+    assert coverage >= 85.0
+    assert max(float(s["duration"]) for s in cleaned) >= 3.0
+
+
+def test_reference_edit_builds_2_to_4_word_caption_beats():
+    from ai_broll_autopilot.services.edit_director import EditDirectorService
+
+    service = EditDirectorService(api_key=None)
+    style = style_registry.get_style("cinematic_social_editorial")
+    subtitles = service._build_timed_subtitles(
+        [{
+            "start": 0.0,
+            "end": 3.0,
+            "text": "The closer you are to the source",
+            "words": [
+                {"word": "The", "start": 0.0, "end": 0.35},
+                {"word": "closer", "start": 0.35, "end": 0.75},
+                {"word": "you", "start": 0.75, "end": 1.0},
+                {"word": "are", "start": 1.0, "end": 1.25},
+                {"word": "to", "start": 1.25, "end": 1.45},
+                {"word": "the", "start": 1.45, "end": 1.65},
+                {"word": "source", "start": 1.65, "end": 2.1},
+            ],
+        }],
+        style,
+    )
+
+    assert len(subtitles) == 3
+    assert all(2 <= len(sub["words"]) <= 4 for sub in subtitles)
+    assert [sub["text"] for sub in subtitles] == ["The closer you", "are to the", "source"]
