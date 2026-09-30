@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, List
 
+from PIL import Image, ImageDraw
+
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.services.timeline import TimelineEngine
 
@@ -22,6 +24,35 @@ class Renderer:
             target_height=Config.TARGET_HEIGHT,
             target_fps=Config.TARGET_FPS
         )
+
+    @staticmethod
+    def _ensure_reference_card_mask(
+        output_path: Path,
+        width: int,
+        height: int,
+        width_ratio: float = 0.944,
+        height_ratio: float = 0.574,
+        radius: int = 52,
+    ) -> Path:
+        """Create the rounded alpha mask used by the reference-card renderer."""
+        card_w = int(round(width * max(0.5, min(width_ratio, 1.0)))) & ~1
+        card_h = int(round(height * max(0.35, min(height_ratio, 0.95)))) & ~1
+        scaled_radius = int(round(radius * (width / 1080.0)))
+        scaled_radius = max(8, min(scaled_radius, min(card_w, card_h) // 2))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if output_path.exists():
+            return output_path
+
+        image = Image.new("L", (card_w, card_h), 0)
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle(
+            (0, 0, card_w - 1, card_h - 1),
+            radius=scaled_radius,
+            fill=255,
+        )
+        image.save(output_path, format="PNG")
+        return output_path
 
     async def render(
         self,
@@ -52,7 +83,21 @@ class Renderer:
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
-        shots: List[Dict[str, Any]] = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
+        style_data = edit_plan.get("style") if isinstance(edit_plan.get("style"), dict) else {}
+        editing_style = str(
+            edit_plan.get("editing_style")
+            or style_data.get("id")
+            or ""
+        )
+        reference_style = bool(
+            edit_plan.get("reference_editing")
+            or style_data.get("reference_style")
+            or editing_style in {"cinematic_social_editorial", "cinematic_editorial"}
+        )
+
+        shots: List[Dict[str, Any]] = [
+            s for s in edit_plan.get("shots", []) if s.get("asset_path")
+        ]
 
         # Gather all sound effects (transition stingers/whooshes + contextual Foley + Level 3 Graphic impacts)
         audio_sfx_list: List[Dict[str, Any]] = []
@@ -69,7 +114,7 @@ class Renderer:
                     "volume": stinger.get("volume", 0.25),
                     "type": "transition_stinger"
                 })
-            elif os.path.exists("assets/sfx/whoosh.mp3"):
+            elif not reference_style and os.path.exists("assets/sfx/whoosh.mp3"):
                 audio_sfx_list.append({
                     "path": "assets/sfx/whoosh.mp3",
                     "start_time": max(0.0, start_t - 0.05),
@@ -176,6 +221,17 @@ class Renderer:
             or "single"
         )
 
+        reference_card_mask_idx = None
+        reference_card_width_ratio = float(
+            style_data.get("visual_container_width_ratio", 0.944)
+        )
+        reference_card_height_ratio = float(
+            style_data.get("visual_container_height_ratio", 0.574)
+        )
+        reference_card_radius = int(
+            style_data.get("visual_container_radius", 52)
+        )
+
         current_input_idx = 1 + len(shots)
 
         # Optional Frame Overlay stream (torn paper mask & branding)
@@ -190,6 +246,21 @@ class Renderer:
         if watermark_path and os.path.exists(watermark_path):
             watermark_stream_idx = current_input_idx
             cmd.extend(["-loop", "1", "-i", str(watermark_path)])
+            current_input_idx += 1
+
+        # Reference style uses one reusable rounded card mask for the A-roll
+        # and every B-roll replacement.
+        if reference_style:
+            mask_path = self._ensure_reference_card_mask(
+                out_p.parent / "reference_card_mask.png",
+                self.timeline.width,
+                self.timeline.height,
+                width_ratio=reference_card_width_ratio,
+                height_ratio=reference_card_height_ratio,
+                radius=reference_card_radius,
+            )
+            reference_card_mask_idx = current_input_idx
+            cmd.extend(["-loop", "1", "-i", str(mask_path)])
             current_input_idx += 1
 
         # Optional Subject Matte input stream for layered typography
@@ -252,6 +323,11 @@ class Renderer:
             cyber_grid_backdrop_idx=cyber_grid_backdrop_idx,
             cyber_grid_mask_before_idx=cyber_grid_mask_before_idx,
             cyber_grid_mask_after_idx=cyber_grid_mask_after_idx,
+            reference_style=reference_style,
+            reference_card_mask_idx=reference_card_mask_idx,
+            reference_card_width_ratio=reference_card_width_ratio,
+            reference_card_height_ratio=reference_card_height_ratio,
+            reference_card_radius=reference_card_radius,
         )
 
         # Probe base video duration to ensure output matches base video exactly
