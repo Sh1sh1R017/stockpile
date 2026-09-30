@@ -246,6 +246,43 @@ async def list_jobs(limit: int = 50):
     return res
 
 
+def ensure_job_subtitles(job: Job) -> List[Dict[str, Any]]:
+    """Ensure job has rhythmic word-level subtitles from transcript or ASS file."""
+    if not job.edit_plan or not isinstance(job.edit_plan, dict):
+        return []
+    existing = job.edit_plan.get("subtitles")
+    if existing and len(existing) > 0:
+        return existing
+
+    subs = []
+    if getattr(job, "transcript_segments", None) and len(job.transcript_segments) > 0:
+        try:
+            from ai_broll_autopilot.services.razor_caption.engine import RazorCaptionEngine
+            engine = RazorCaptionEngine()
+            events = engine.process(job.transcript_segments)
+            subs = engine.to_subtitles(events, "hormozi")
+        except Exception as e:
+            logger.warning(f"Failed to generate razor subtitles from transcript: {e}")
+
+    if not subs:
+        wk_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
+        for ass_name in ("subtitles_kinetic.ass", "subtitles_normal.ass", "subtitles.ass"):
+            ass_p = wk_dir / ass_name
+            if ass_p.exists():
+                from ai_broll_autopilot.services.openreel_adapter import extract_subtitles_from_ass
+                subs = extract_subtitles_from_ass(ass_p)
+                if subs:
+                    break
+
+    if subs:
+        job.edit_plan["subtitles"] = subs
+        try:
+            db.update_job(job)
+        except Exception:
+            pass
+    return subs
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job_detail(job_id: str):
     """Retrieve full details, transcript, and edit plan for a specific job."""
@@ -264,6 +301,9 @@ async def get_job_detail(job_id: str):
                 survey_data = json.loads(survey_path.read_text(encoding="utf-8"))
             except Exception:
                 pass
+
+    # Ensure subtitles are hydrated
+    ensure_job_subtitles(job)
 
     # Enhance edit_plan shots with direct B-roll video preview URLs
     enhanced_edit_plan = None
@@ -584,6 +624,9 @@ async def get_job_openreel_project(job_id: str, mode: Optional[str] = None):
             )
     except Exception:
         pass
+
+    # Ensure subtitles are hydrated from transcript or ASS file
+    ensure_job_subtitles(job)
 
     # Use the canonical EditPlan reconstruction so OpenReel receives the
     # complete v2.1 structure (A-roll ranges, graphics, captions, SFX, etc.).

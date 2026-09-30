@@ -72,6 +72,7 @@ class EditPlan:
     review_items: List[Dict[str, Any]] = field(default_factory=list)
     razor_captions: List[Dict[str, Any]] = field(default_factory=list) # Rapid Razor Caption events
     subtitles_behind_subject: bool = False
+    hook_text: Optional[str] = None
     render_settings: Dict[str, Any] = field(default_factory=dict)
     render_stale: bool = False
     edit_revision: int = 1
@@ -104,6 +105,7 @@ class EditPlan:
             "review_items": self.review_items,
             "razor_captions": self.razor_captions,
             "subtitles_behind_subject": self.subtitles_behind_subject,
+            "hook_text": self.hook_text,
             "render_settings": self.render_settings,
             "render_stale": self.render_stale,
             "edit_revision": self.edit_revision,
@@ -145,6 +147,7 @@ class EditPlan:
             review_items=d.get("review_items", []),
             razor_captions=d.get("razor_captions", []),
             subtitles_behind_subject=bool(d.get("subtitles_behind_subject", False)),
+            hook_text=d.get("hook_text"),
             render_settings=d.get("render_settings", {}),
             render_stale=bool(d.get("render_stale", False)),
             edit_revision=int(d.get("edit_revision", 1)),

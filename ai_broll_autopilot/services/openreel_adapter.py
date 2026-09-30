@@ -23,6 +23,72 @@ logger = logging.getLogger(__name__)
 OPENREEL_SCHEMA_VERSION = "1.2.0"
 
 
+def extract_subtitles_from_ass(ass_path: Path) -> List[Dict[str, Any]]:
+    """Extract clean rhythmic subtitle beats from an ASS file for OpenReel and dashboard."""
+    if not ass_path.exists():
+        return []
+    import re
+
+    def ass_time_to_seconds(t_str: str) -> float:
+        parts = t_str.strip().split(":")
+        h = int(parts[0])
+        m = int(parts[1])
+        s_parts = parts[2].split(".")
+        s = int(s_parts[0])
+        c = int(s_parts[1]) if len(s_parts) > 1 else 0
+        return h * 3600 + m * 60 + s + c / 100.0
+
+    try:
+        lines = ass_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return []
+
+    raw_subs = []
+    for line in lines:
+        if line.startswith("Dialogue:"):
+            parts = line.strip().split(",", 9)
+            if len(parts) >= 10:
+                layer, start, end, style, name, ml, mr, mv, eff, text = parts
+                if style.lower() == "hook":
+                    continue
+                clean_text = re.sub(r"\{[^}]*\}", "", text).strip()
+                if not clean_text:
+                    continue
+                st = ass_time_to_seconds(start)
+                et = ass_time_to_seconds(end)
+                raw_subs.append({
+                    "text": clean_text,
+                    "startTime": st,
+                    "endTime": et,
+                })
+
+    merged = []
+    for s in raw_subs:
+        if merged and merged[-1]["text"] == s["text"]:
+            merged[-1]["endTime"] = max(merged[-1]["endTime"], s["endTime"])
+        else:
+            merged.append(s)
+
+    result = []
+    for idx, s in enumerate(merged):
+        words = [{"word": w, "start": s["startTime"], "end": s["endTime"]} for w in s["text"].split()]
+        result.append({
+            "id": f"sub_{idx+1}",
+            "text": s["text"],
+            "startTime": s["startTime"],
+            "endTime": s["endTime"],
+            "words": words,
+            "style": {
+                "fontFamily": "Impact",
+                "fontSize": 56,
+                "color": "#FFFFFF",
+                "highlightColor": "#FFDD00",
+                "position": "bottom",
+            },
+        })
+    return result
+
+
 class OpenReelAdapter(EditorAdapter):
     """Transforms Stockpile EditPlan into OpenReel Schema 1.2.0 native project file."""
 
@@ -123,16 +189,18 @@ class OpenReelAdapter(EditorAdapter):
 
         # Add B-roll media items
         broll_map = resolved_broll_map or {}
-        for shot in edit_plan.shots:
-            shot_id = shot.get("shot_id", "broll")
+        for i, shot in enumerate(edit_plan.shots):
+            shot_id = shot.get("shot_id", f"broll_{i+1}")
             asset_path = shot.get("asset_path") or broll_map.get(shot_id)
+            query = shot.get("search_query") or shot.get("category") or f"Cut {i+1}"
+            clean_display_name = f"B-Roll {i+1}: {query.title()}"
             if asset_path:
                 broll_name = Path(asset_path).name
                 broll_http_url = f"{base_asset_url}/{urllib.parse.quote(broll_name)}" if base_asset_url else f"file:///{Path(asset_path).as_posix()}"
-                broll_thumb_url = f"{base_asset_url}/{urllib.parse.quote(broll_name)}/thumb" if base_asset_url else None
+                broll_thumb_url = f"{base_asset_url}/sfx_frame_shot_{i+1}.jpg" if base_asset_url else f"{base_asset_url}/{urllib.parse.quote(broll_name)}/thumb"
                 media_items.append({
                     "id": f"media_{shot_id}",
-                    "name": broll_name,
+                    "name": clean_display_name,
                     "type": "video",
                     "metadata": {
                         "duration": float(shot.get("duration", 3.0)),
@@ -160,7 +228,35 @@ class OpenReelAdapter(EditorAdapter):
                     "url": broll_http_url if (base_asset_url and broll_http_url) else f"file:///{Path(asset_path).as_posix()}",
                 })
 
-        # 2. Timeline Tracks
+        # 2. Timeline Tracks (Clean Multitrack NLE Hierarchy)
+        track_overlay_text = {
+            "id": "track_overlay_text",
+            "name": "Hook & Text Overlays",
+            "type": "video",
+            "role": "general",
+            "mode": "standard",
+            "clips": [],
+            "transitions": [],
+            "hidden": False,
+            "muted": False,
+            "locked": False,
+            "solo": False,
+        }
+
+        track_captions = {
+            "id": "track_captions",
+            "name": "Captions",
+            "type": "video",
+            "role": "captions",
+            "mode": "standard",
+            "clips": [],
+            "transitions": [],
+            "hidden": False,
+            "muted": False,
+            "locked": False,
+            "solo": False,
+        }
+
         track_main_video = {
             "id": "track_video_main",
             "name": "Speaker / A-Roll",
@@ -326,7 +422,10 @@ class OpenReelAdapter(EditorAdapter):
             shot_id = shot.get("shot_id", f"broll_{i+1}")
             st = float(shot.get("start_time", 0.0))
             dur = float(shot.get("duration", 2.0))
+            query = shot.get("search_query") or shot.get("category") or f"Cut {i+1}"
+            clean_display_name = f"B-Roll {i+1}: {query.title()}"
             broll_media_id = f"media_{shot_id}" if (shot.get("asset_path") or broll_map.get(shot_id)) else source_media_id
+            broll_thumb_url = f"{base_asset_url}/sfx_frame_shot_{i+1}.jpg" if base_asset_url else None
 
             broll_clip = {
                 "id": f"clip_{shot_id}",
@@ -349,6 +448,9 @@ class OpenReelAdapter(EditorAdapter):
                 "volume": 0.0,
                 "keyframes": [],
                 "metadata": {
+                    "name": clean_display_name,
+                    "title": clean_display_name,
+                    "thumbnailUrl": broll_thumb_url,
                     "searchQuery": shot.get("search_query", ""),
                     "category": shot.get("category", ""),
                     "rationale": shot.get("rationale", ""),
@@ -512,8 +614,96 @@ class OpenReelAdapter(EditorAdapter):
                 "words": s.get("words", []),
             })
 
-        # 6. Text Clips (Graphic Callouts & Hook Title with behindSubject)
+        # 6. Text Clips (Graphic Callouts, Hook Title, and Consolidated Captions)
         text_clips = []
+
+        # 6a. Hook Text Clip (Top layer, Upper-Third, Behind Subject)
+        hook_text = getattr(edit_plan, "hook_text", None)
+        if hook_text and isinstance(hook_text, str) and hook_text.strip():
+            text_clips.append({
+                "id": "clip_hook_title",
+                "trackId": "track_overlay_text",
+                "startTime": 0.0,
+                "duration": min(4.0, duration),
+                "text": hook_text.strip().upper(),
+                "behindSubject": True,
+                "animation": {
+                    "preset": "pop",
+                    "params": {"popOvershoot": 1.18, "bounceHeight": 20, "slideDistance": 30},
+                    "inDuration": 0.35,
+                    "outDuration": 0.25,
+                },
+                "style": {
+                    "fontFamily": edit_plan.style.get("font_family", "Impact"),
+                    "fontSize": 72,
+                    "fontWeight": "bold",
+                    "fontStyle": "normal",
+                    "color": edit_plan.style.get("highlight_color", "#FFDD00"),
+                    "strokeColor": "#000000",
+                    "strokeWidth": 6,
+                    "shadowColor": "rgba(0, 0, 0, 0.9)",
+                    "shadowBlur": 12,
+                    "textAlign": "center",
+                    "verticalAlign": "middle",
+                    "lineHeight": 1.1,
+                    "letterSpacing": 1.0,
+                },
+                "transform": {
+                    "position": {"x": 0.5, "y": 0.28},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                },
+                "keyframes": [],
+            })
+
+        # 6b. Consolidated Subtitle / Kinetic Caption Clips onto Captions Track
+        for idx, sub in enumerate(openreel_subtitles):
+            sub_st = float(sub.get("startTime", 0.0))
+            sub_et = float(sub.get("endTime", sub_st + 1.5))
+            sub_dur = max(0.1, sub_et - sub_st)
+            sub_text = sub.get("text", "")
+            sub_style = sub.get("style", {})
+
+            text_clips.append({
+                "id": sub.get("id", f"clip_cap_{idx+1}"),
+                "trackId": "track_captions",
+                "startTime": sub_st,
+                "duration": sub_dur,
+                "text": sub_text,
+                "behindSubject": bool(sub.get("behindSubject", False)),
+                "animation": {
+                    "preset": sub.get("motionProfile", "word-pop"),
+                    "params": {"popOvershoot": 1.12, "bounceHeight": 10, "slideDistance": 15},
+                    "inDuration": 0.15,
+                    "outDuration": 0.15,
+                },
+                "style": {
+                    "fontFamily": sub_style.get("fontFamily") or edit_plan.style.get("font_family", "Impact"),
+                    "fontSize": sub_style.get("fontSize", 58),
+                    "fontWeight": "bold",
+                    "fontStyle": "normal",
+                    "color": sub_style.get("color", "#FFFFFF"),
+                    "strokeColor": "#000000",
+                    "strokeWidth": 5,
+                    "shadowColor": "rgba(0, 0, 0, 0.85)",
+                    "shadowBlur": 10,
+                    "textAlign": "center",
+                    "verticalAlign": "bottom",
+                    "lineHeight": 1.15,
+                    "letterSpacing": 0.8,
+                },
+                "transform": {
+                    "position": {"x": 0.5, "y": 0.82},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                },
+                "keyframes": [],
+            })
+
         for i, ov in enumerate(edit_plan.text_overlays):
             ov_pos = ov.get("position", "center")
             # Upper third (behind head/neck) vs center vs lower third
@@ -695,6 +885,24 @@ class OpenReelAdapter(EditorAdapter):
         if track_sfx["clips"]:
             tracks_list.append(track_sfx)
 
+        # Build timeline markers for Hook, B-roll cuts, and graphics
+        timeline_markers = []
+        if hook_text and isinstance(hook_text, str) and hook_text.strip():
+            timeline_markers.append({
+                "id": "marker_hook",
+                "time": 0.0,
+                "label": f"Hook: {hook_text.strip()[:24]}",
+                "color": "#F59E0B",
+            })
+        for i, s in enumerate(edit_plan.shots):
+            query = s.get("search_query") or s.get("category") or f"Cut {i+1}"
+            timeline_markers.append({
+                "id": f"marker_{s.get('shot_id', i+1)}",
+                "time": float(s.get("start_time", 0.0)),
+                "label": f"Cut {i+1}: {query[:20]}",
+                "color": "#6366F1",
+            })
+
         project = {
             "id": proj_id,
             "name": name,
@@ -715,15 +923,7 @@ class OpenReelAdapter(EditorAdapter):
                 # would make OpenReel render them twice.
                 "subtitles": [],
                 "duration": duration,
-                "markers": [
-                    {
-                        "id": f"marker_{s.get('shot_id', i)}",
-                        "time": float(s.get("start_time", 0.0)),
-                        "label": f"B-Roll: {s.get('category', 'cutaway')}",
-                        "color": "#F59E0B",
-                    }
-                    for i, s in enumerate(edit_plan.shots)
-                ],
+                "markers": timeline_markers,
             },
             "mediaLibrary": {
                 "items": media_items,

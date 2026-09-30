@@ -88,6 +88,9 @@ export interface ShotDetail {
   speed?: number;
   dialogue_quote?: string;
   search_prompt?: string;
+  search_query?: string;
+  category?: string;
+  rationale?: string;
   emotional_core?: string;
   visceral_human_metaphor?: string;
   asset_title?: string;
@@ -139,6 +142,8 @@ export interface JobDetail extends JobSummary {
     summary: string;
     total_duration?: number;
     broll_shot_count?: number;
+    hook_text?: string;
+    zooms?: Array<{ time: number; scale: number; easing?: string }>;
     openreel_custom_edited?: boolean;
     last_openreel_sync?: string;
     last_render_revision?: number;
