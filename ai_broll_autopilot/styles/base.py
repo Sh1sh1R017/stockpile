@@ -37,14 +37,18 @@ class StyleProfile:
     zoom_intensity: float = 1.06         # Subtle punch-in scale factor for emphatic speech
     transition_type: str = "cut"         # "cut", "crossfade", "slide", "zoom", "glitch", "whip"
     color_grading_preset: Optional[str] = None # e.g. "punchy_contrast", "cinematic_warm", "cool_tech"
+    editorial_guidelines: List[str] = field(default_factory=list)
 
     # Reference-style editorial controls
+    reference_style: bool = False
+    broll_target_ratio: Optional[float] = None
     caption_words_per_group: int = 3
     caption_y_percent: float = 58.0
     broll_min_duration: float = 0.8
     broll_max_duration: float = 2.2
     max_continuous_aroll_seconds: float = 3.5
     max_zoom_scale: float = 1.05
+    hero_broll_max_duration: float = 2.6
     visual_container_scale: float = 0.944
     visual_container_width_ratio: float = 0.944
     visual_container_height_ratio: float = 0.574
@@ -81,12 +85,16 @@ class StyleProfile:
             "zoom_intensity": self.zoom_intensity,
             "transition_type": self.transition_type,
             "color_grading_preset": self.color_grading_preset,
+            "editorial_guidelines": list(self.editorial_guidelines),
+            "reference_style": self.reference_style,
+            "broll_target_ratio": self.broll_target_ratio,
             "caption_words_per_group": self.caption_words_per_group,
             "caption_y_percent": self.caption_y_percent,
             "broll_min_duration": self.broll_min_duration,
             "broll_max_duration": self.broll_max_duration,
             "max_continuous_aroll_seconds": self.max_continuous_aroll_seconds,
             "max_zoom_scale": self.max_zoom_scale,
+            "hero_broll_max_duration": self.hero_broll_max_duration,
             "visual_container_scale": self.visual_container_scale,
             "visual_container_width_ratio": self.visual_container_width_ratio,
             "visual_container_height_ratio": self.visual_container_height_ratio,
