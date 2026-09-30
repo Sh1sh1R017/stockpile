@@ -361,8 +361,7 @@ class Matcher:
                 scored = await loop.run_in_executor(
                     None,
                     self.ai_service.evaluate_videos,
-                    f"{prompt}
-{evaluation_context}".strip(),
+                    f"{prompt}\\n{evaluation_context}".strip(),
                     results
                 )
             except Exception as eval_err:
