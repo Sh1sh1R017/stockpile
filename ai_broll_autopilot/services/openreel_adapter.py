@@ -217,6 +217,36 @@ class OpenReelAdapter(EditorAdapter):
             "solo": False,
         }
 
+        # OpenReel renders TextClips through their trackId, so the containing
+        # timeline tracks must exist for captions/hooks to appear as editable lanes.
+        track_captions = {
+            "id": "track_captions",
+            "name": "Captions",
+            "type": "video",
+            "role": "captions",
+            "mode": "standard",
+            "clips": [],
+            "transitions": [],
+            "hidden": False,
+            "muted": True,
+            "locked": False,
+            "solo": False,
+        }
+
+        track_overlay_text = {
+            "id": "track_overlay_text",
+            "name": "Hooks & Text",
+            "type": "text",
+            "role": "general",
+            "mode": "standard",
+            "clips": [],
+            "transitions": [],
+            "hidden": False,
+            "muted": True,
+            "locked": False,
+            "solo": False,
+        }
+
         # 3. Main Speaker Clip (Trimmed to In/Out points with 9:16 vertical cover fit)
         in_pt = float(edit_plan.clip_interval.get("in_point", 0.0))
         out_pt = float(edit_plan.clip_interval.get("out_point", in_pt + duration))
@@ -369,6 +399,96 @@ class OpenReelAdapter(EditorAdapter):
                     "keyframes": [],
                 })
 
+        # Canonical SFX cues live in EditPlan.audio_cues["sfx"]. Prefer that
+        # structure for the editable timeline, with the old shot-level fields as
+        # a backwards-compatible fallback when no curated cues exist.
+        audio_cues = edit_plan.audio_cues if isinstance(edit_plan.audio_cues, dict) else {}
+        curated_sfx = audio_cues.get("sfx") or []
+        if curated_sfx:
+            track_sfx["clips"] = []
+            legacy_sfx_media_ids = {
+                item["id"] for item in media_items if item["id"].startswith("media_sfx_")
+            }
+            if legacy_sfx_media_ids:
+                media_items = [
+                    item for item in media_items if item["id"] not in legacy_sfx_media_ids
+                ]
+
+            sfx_media_cache: Dict[str, str] = {}
+            for idx, cue in enumerate(curated_sfx):
+                sfx_file = cue.get("file") or cue.get("path") or ""
+                if not sfx_file:
+                    continue
+                sfx_name = Path(sfx_file).name
+                cache_key = str(sfx_file)
+                sfx_media_id = sfx_media_cache.get(cache_key)
+                if not sfx_media_id:
+                    sfx_media_id = f"media_sfx_cue_{uuid.uuid4().hex[:8]}"
+                    sfx_media_cache[cache_key] = sfx_media_id
+                    sfx_http_url = (
+                        f"{base_asset_url}/{urllib.parse.quote(sfx_name)}"
+                        if base_asset_url
+                        else f"file:///{Path(sfx_file).as_posix()}"
+                    )
+                    media_items.append({
+                        "id": sfx_media_id,
+                        "name": sfx_name,
+                        "type": "audio",
+                        "metadata": {
+                            "duration": float(cue.get("duration", 0.8)),
+                            "sampleRate": 48000,
+                            "channels": 2,
+                            "codec": "wav" if sfx_name.lower().endswith(".wav") else "mp3",
+                            "fileSize": 0,
+                            "hasAudio": True,
+                            "hasVideo": False,
+                        },
+                        "fileHandle": None,
+                        "blob": None,
+                        "thumbnailUrl": None,
+                        "waveformData": None,
+                        "isPlaceholder": False,
+                        "url": sfx_http_url,
+                        "originalUrl": sfx_http_url,
+                        "sourceFile": {
+                            "name": sfx_name,
+                            "size": 0,
+                            "lastModified": now_ms,
+                        },
+                    })
+
+                cue_id = str(cue.get("id") or cue.get("cue_id") or f"sfx_{idx+1}")
+                sfx_start = max(0.0, float(cue.get("time", cue.get("timestamp", 0.0))))
+                sfx_duration = max(0.05, float(cue.get("duration", 0.8)))
+                track_sfx["clips"].append({
+                    "id": f"clip_sfx_{cue_id}",
+                    "mediaId": sfx_media_id,
+                    "trackId": "track_audio_sfx",
+                    "startTime": sfx_start,
+                    "duration": sfx_duration,
+                    "inPoint": 0.0,
+                    "outPoint": sfx_duration,
+                    "effects": [],
+                    "audioEffects": [],
+                    "transform": {
+                        "position": {"x": 0.5, "y": 0.5},
+                        "scale": {"x": 1.0, "y": 1.0},
+                        "rotation": 0,
+                        "anchor": {"x": 0.5, "y": 0.5},
+                        "opacity": 1.0,
+                    },
+                    "volume": float(cue.get("volume", 0.7)),
+                    "keyframes": [],
+                    "metadata": {
+                        "cueId": cue_id,
+                        "eventType": cue.get("event_type") or cue.get("cue_type", "sfx"),
+                        "justification": cue.get("justification", ""),
+                        "syncTarget": cue.get("sync_target", ""),
+                        "category": cue.get("category", "accent"),
+                        "sourceFile": sfx_file,
+                    },
+                })
+
         # 5. Subtitles Structure with Word-Level Timestamps
         openreel_subtitles = []
         for s in edit_plan.subtitles:
@@ -501,8 +621,77 @@ class OpenReelAdapter(EditorAdapter):
                 "keyframes": [],
             })
 
+        # Mirror captions/text into real OpenReel TextClips. OpenReel's
+        # preview can consume timeline.subtitles, but the timeline editor renders
+        # editable text from project.textClips and their trackId.
+        caption_text_clips = []
+        for s in edit_plan.subtitles:
+            sub_id = s.get("id", f"sub_{uuid.uuid4().hex[:6]}")
+            sub_st = float(s.get("startTime", s.get("start", 0.0)))
+            sub_et = float(s.get("endTime", s.get("end", sub_st + 1.0)))
+            sub_dur = max(0.05, sub_et - sub_st)
+            src_style = s.get("style") or {}
+            sub_style = {
+                "fontFamily": src_style.get("fontFamily", edit_plan.style.get("font_family", "Montserrat")),
+                "fontSize": int(src_style.get("fontSize", 54)),
+                "fontWeight": src_style.get("fontWeight", "bold"),
+                "fontStyle": src_style.get("fontStyle", "normal"),
+                "color": src_style.get("color", "#FFFFFF"),
+                "backgroundColor": src_style.get("backgroundColor", "transparent"),
+                "strokeColor": src_style.get("strokeColor", "#000000"),
+                "strokeWidth": float(src_style.get("strokeWidth", 4)),
+                "shadowColor": src_style.get("shadowColor", "rgba(0,0,0,0.8)"),
+                "shadowBlur": float(src_style.get("shadowBlur", 8)),
+                "textAlign": src_style.get("textAlign", "center"),
+                "verticalAlign": src_style.get("verticalAlign", "middle"),
+                "lineHeight": float(src_style.get("lineHeight", 1.1)),
+                "letterSpacing": float(src_style.get("letterSpacing", 0)),
+            }
+            behind_subject = bool(s.get("behind_subject", s.get("behindSubject", False)))
+            caption_text_clips.append({
+                "id": sub_id,
+                "trackId": "track_captions",
+                "startTime": sub_st,
+                "duration": sub_dur,
+                "text": s.get("text", ""),
+                "style": sub_style,
+                "transform": {
+                    "position": {"x": 0.5, "y": 0.35 if behind_subject else 0.82},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                },
+                "animation": {
+                    "preset": s.get("motionProfile", "word-pop"),
+                    "params": {"wordDelay": 0.0},
+                    "inDuration": 0.08,
+                    "outDuration": 0.08,
+                    "unit": "word",
+                },
+                "keyframes": [],
+                "behindSubject": behind_subject,
+                "metadata": {
+                    "captionSource": "stockpile",
+                    "subtitleId": sub_id,
+                    "animationStyle": s.get("animationStyle", "word-highlight"),
+                    "motionProfile": s.get("motionProfile", "word-pop"),
+                    "motionRecipe": s.get("motionRecipe", "motion-anything:word-pop"),
+                    "words": s.get("words", []),
+                },
+            })
+
+        track_captions["clips"] = []
+        track_overlay_text["clips"] = []
+
         # Assemble full Project model conforming to OpenReel Schema 1.2.0
-        tracks_list = [track_main_video, track_broll_video, track_bgm]
+        tracks_list = [
+            track_main_video,
+            track_broll_video,
+            track_overlay_text,
+            track_captions,
+            track_bgm,
+        ]
         if track_sfx["clips"]:
             tracks_list.append(track_sfx)
 
@@ -536,7 +725,7 @@ class OpenReelAdapter(EditorAdapter):
             "mediaLibrary": {
                 "items": media_items,
             },
-            "textClips": text_clips,
+            "textClips": text_clips + caption_text_clips,
             "shapeClips": [],
             "svgClips": [],
             "stickerClips": [],
