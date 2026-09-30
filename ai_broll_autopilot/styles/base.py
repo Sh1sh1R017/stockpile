@@ -38,6 +38,15 @@ class StyleProfile:
     transition_type: str = "cut"         # "cut", "crossfade", "slide", "zoom", "glitch", "whip"
     color_grading_preset: Optional[str] = None # e.g. "punchy_contrast", "cinematic_warm", "cool_tech"
 
+    # Reference-style framing / motion
+    frame_scale: float = 1.0             # Normalized clip scale inside the 9:16 canvas
+    frame_border_radius: float = 0.0     # OpenReel border radius in project pixels
+    canvas_background: str = "#000000"
+    caption_layout: str = "bottom"       # "bottom", "center_stack", "top"
+    caption_words_per_line: int = 4
+    caption_highlight_mode: str = "word" # "word", "phrase", "none"
+    editorial_guidelines: List[str] = field(default_factory=list)
+
     # Audio Mix
     sound_effects_enabled: bool = True
     bgm_ducking_volume: float = 0.15     # Music volume during active speech (0.0 to 1.0)
@@ -68,6 +77,13 @@ class StyleProfile:
             "zoom_intensity": self.zoom_intensity,
             "transition_type": self.transition_type,
             "color_grading_preset": self.color_grading_preset,
+            "frame_scale": self.frame_scale,
+            "frame_border_radius": self.frame_border_radius,
+            "canvas_background": self.canvas_background,
+            "caption_layout": self.caption_layout,
+            "caption_words_per_line": self.caption_words_per_line,
+            "caption_highlight_mode": self.caption_highlight_mode,
+            "editorial_guidelines": self.editorial_guidelines,
             "sound_effects_enabled": self.sound_effects_enabled,
             "bgm_ducking_volume": self.bgm_ducking_volume,
             "bgm_normal_volume": self.bgm_normal_volume,

@@ -8,6 +8,7 @@ and multi-track audio mix (Dialogue, BGM ducking, SFX).
 
 import json
 import logging
+import math
 import time
 import urllib.parse
 import uuid
@@ -17,10 +18,128 @@ from typing import Dict, Any, List, Optional
 from ai_broll_autopilot.services.edit_director import EditPlan
 from ai_broll_autopilot.services.editor_base import EditorAdapter
 from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+from ai_broll_autopilot.styles import style_registry
 
 logger = logging.getLogger(__name__)
 
 OPENREEL_SCHEMA_VERSION = "1.2.0"
+
+
+def _center_square_crop(width: float, height: float) -> Dict[str, float]:
+    """Return a normalized centered square crop for arbitrary source media."""
+    width = max(1.0, float(width))
+    height = max(1.0, float(height))
+    side = min(width, height)
+    return {
+        "x": (width - side) / (2.0 * width),
+        "y": (height - side) / (2.0 * height),
+        "width": side / width,
+        "height": side / height,
+    }
+
+
+def _rounded_card_path(
+    card_width_ratio: float,
+    card_height_ratio: float,
+    border_radius_px: float,
+    canvas_width: int,
+    canvas_height: int,
+) -> Dict[str, Any]:
+    """Build a normalized rounded-rectangle Bezier path for OpenReel masks."""
+    x = (1.0 - card_width_ratio) / 2.0
+    y = (1.0 - card_height_ratio) / 2.0
+    w = card_width_ratio
+    h = card_height_ratio
+
+    rx = min(w / 2.0, border_radius_px / max(1.0, canvas_width))
+    ry = min(h / 2.0, border_radius_px / max(1.0, canvas_height))
+    k = 0.5522847498
+
+    points = [
+        {"x": x + rx, "y": y},
+        {"x": x + w - rx, "y": y},
+        {"x": x + w, "y": y + ry},
+        {"x": x + w, "y": y + h - ry},
+        {"x": x + w - rx, "y": y + h},
+        {"x": x + rx, "y": y + h},
+        {"x": x, "y": y + h - ry},
+        {"x": x, "y": y + ry},
+    ]
+
+    # Horizontal/vertical segments need no handles.
+    # Corner pairs use cubic handles approximating a quarter circle.
+    points[1]["handleOut"] = {"x": points[1]["x"] + k * rx, "y": points[1]["y"]}
+    points[2]["handleIn"] = {"x": points[2]["x"], "y": points[2]["y"] - k * ry}
+
+    points[3]["handleOut"] = {"x": points[3]["x"], "y": points[3]["y"] + k * ry}
+    points[4]["handleIn"] = {"x": points[4]["x"] + k * rx, "y": points[4]["y"]}
+
+    points[5]["handleOut"] = {"x": points[5]["x"] - k * rx, "y": points[5]["y"]}
+    points[6]["handleIn"] = {"x": points[6]["x"], "y": points[6]["y"] + k * ry}
+
+    points[7]["handleOut"] = {"x": points[7]["x"], "y": points[7]["y"] - k * ry}
+    points[0]["handleIn"] = {"x": points[0]["x"] - k * rx, "y": points[0]["y"]}
+
+    return {"points": points, "closed": True}
+
+
+def _cinematic_card_geometry(
+    style: Any,
+    source_width: float,
+    source_height: float,
+    canvas_width: int,
+    canvas_height: int,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Return square-card transform + rounded mask for the cinematic social style."""
+    frame_scale = float(getattr(style, "frame_scale", 1.0) or 1.0)
+    radius = float(getattr(style, "frame_border_radius", 0.0) or 0.0)
+    if frame_scale >= 0.999 and radius <= 0:
+        return {
+            "position": {"x": 0.5, "y": 0.5},
+            "scale": {"x": 1.0, "y": 1.0},
+            "rotation": 0,
+            "anchor": {"x": 0.5, "y": 0.5},
+            "opacity": 1.0,
+            "fitMode": "cover",
+        }, None
+
+    crop = _center_square_crop(source_width, source_height)
+    crop_side = min(float(source_width), float(source_height))
+    target_card_px = canvas_width * max(0.5, min(1.0, frame_scale))
+    render_scale = target_card_px / max(1.0, crop_side)
+    card_height_ratio = target_card_px / max(1.0, canvas_height)
+
+    transform = {
+        "position": {"x": 0.5, "y": 0.5},
+        "scale": {"x": render_scale, "y": render_scale},
+        "rotation": 0,
+        "anchor": {"x": 0.5, "y": 0.5},
+        "opacity": 1.0,
+        "fitMode": "none",
+        "crop": crop,
+        "borderRadius": radius,
+    }
+
+    clip_mask = None
+    if radius > 0:
+        clip_mask = {
+            "id": f"mask_card_{uuid.uuid4().hex[:10]}",
+            "clipId": "",
+            "type": "shape",
+            "path": _rounded_card_path(
+                card_width_ratio=max(0.5, min(1.0, frame_scale)),
+                card_height_ratio=max(0.05, card_height_ratio),
+                border_radius_px=radius,
+                canvas_width=canvas_width,
+                canvas_height=canvas_height,
+            ),
+            "feathering": 0,
+            "inverted": False,
+            "expansion": 0,
+            "opacity": 1.0,
+            "keyframes": [],
+        }
+    return transform, clip_mask
 
 
 def extract_subtitles_from_ass(ass_path: Path) -> List[Dict[str, Any]]:

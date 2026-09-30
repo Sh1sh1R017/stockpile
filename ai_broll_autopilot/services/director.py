@@ -81,6 +81,15 @@ class Director:
             else:
                 niche = niche_registry.get_profile("generic")
 
+        # Resolve the visual treatment independently from the subtitle preset.
+        from ai_broll_autopilot.services.niche_detector import NICHE_TO_STYLE_MAP
+        from ai_broll_autopilot.styles import style_registry
+        style_id = NICHE_TO_STYLE_MAP.get(
+            niche.id if niche else "generic",
+            "cinematic_social_editorial",
+        )
+        style_profile = style_registry.get_style(style_id)
+
         # Target calculations based on campaign or niche rules
         target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
 
@@ -145,26 +154,22 @@ CONTENT DOMAIN: {niche_desc}
 RELEVANT VISUAL THEMES: {niche_keywords_hint}
 
 MANDATORY DIRECTING OBJECTIVES:
-1. FULL-DURATION UNIFORM PACING & TIMELINE SPREAD (CRITICAL):
+1. RHYTHMIC EDITING, NOT A MECHANICAL GRID:
    - Total Video Duration: {video_duration:.2f} seconds.
    - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
    - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
-   - Generate EXACTLY {target_shots} rapid, snappy cuts (1.5s to 2.4s each).
-   - ABSOLUTE PROHIBITION ON FRONT-LOADING:
-     DO NOT cluster all cuts in the first 10-15 seconds and leave the second half empty!
-     You MUST spread B-roll cutaways across the ENTIRE video from start to finish!
-   - MANDATORY DISTRIBUTION PER ACT:
-     • Act 1 (0.0s to {t_act1:.1f}s): MUST place {quota_act1} cutaway(s)
-     • Act 2 ({t_act1:.1f}s to {t_act2:.1f}s): MUST place {quota_act2} cutaway(s)
-     • Act 3 ({t_act2:.1f}s to {video_duration:.1f}s): MUST place {quota_act3} cutaway(s)
-   - MAXIMUM SPEAKER STAGNATION GAP:
-     Never leave more than 4.0 seconds of continuous speaker alone without a B-roll cutaway or visual event.
-   - SPEAKER BREATHING ROOM:
-     Leave at least 1.0s to 1.8s of speaker on screen between cutaways so the edit breathes naturally.
-   - Keep speaker on screen for the first 0.8s to 1.5s opening hook.
-   - Cutaway duration: 1.5s to 2.4s. NEVER let any cutaway drag out longer than 2.5 seconds. Cut back to speaker smoothly.
+   - Generate EXACTLY {target_shots} contextual cutaways, but do NOT force equal spacing.
+   - Build the sequence around the speech: setup -> literal context -> reaction/consequence -> narrative hold -> payoff.
+   - Most cutaways should be 0.8s to 1.8s; reserve 2.5s to 4.0s holds for strong visual/story beats.
+   - The speaker should usually appear for ~0.6s to 1.0s before the first cutaway.
+   - Avoid large digital zooms; use only restrained emphasis around important words.
+   - Do not fire an SFX on every cut. Use sound accents for meaningful transitions/reveals only.
 
-2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
+2. REFERENCE VISUAL LANGUAGE:
+   - {style_profile.name}: {style_profile.description}
+   - {chr(10).join(f"- {g}" for g in style_profile.editorial_guidelines)}
+
+3. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
    - Select real, photogenic visual metaphors directly tied to the spoken words.
    - ABSOLUTE PROHIBITION ON UNRELATED SPORTS / BASKETBALL:
@@ -398,6 +403,9 @@ Return ONLY a valid JSON object matching this schema:
                 "summary": plan_data.get("summary", f"{campaign.name} Contextual Edit Plan"),
                 "hook_text": chosen_hook or plan_data.get("hook_text"),
                 "campaign_id": campaign.id,
+                "niche": niche.to_dict() if niche and hasattr(niche, "to_dict") else {"id": "generic", "name": "General Video & Podcast"},
+                "style": style_profile.to_dict(),
+                "style_guidelines": list(style_profile.editorial_guidelines),
                 "shots": clean_shots,
                 "text_emphasis_graphics": emphasis_graphics,
             }
