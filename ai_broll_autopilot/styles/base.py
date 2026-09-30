@@ -38,6 +38,16 @@ class StyleProfile:
     transition_type: str = "cut"         # "cut", "crossfade", "slide", "zoom", "glitch", "whip"
     color_grading_preset: Optional[str] = None # e.g. "punchy_contrast", "cinematic_warm", "cool_tech"
 
+    # Reference-style editorial controls
+    caption_words_per_group: int = 3
+    caption_y_percent: float = 58.0
+    broll_min_duration: float = 0.8
+    broll_max_duration: float = 2.2
+    max_continuous_aroll_seconds: float = 3.5
+    max_zoom_scale: float = 1.05
+    visual_container_scale: float = 0.92
+    use_black_canvas: bool = False
+
     # Audio Mix
     sound_effects_enabled: bool = True
     bgm_ducking_volume: float = 0.15     # Music volume during active speech (0.0 to 1.0)
@@ -68,6 +78,14 @@ class StyleProfile:
             "zoom_intensity": self.zoom_intensity,
             "transition_type": self.transition_type,
             "color_grading_preset": self.color_grading_preset,
+            "caption_words_per_group": self.caption_words_per_group,
+            "caption_y_percent": self.caption_y_percent,
+            "broll_min_duration": self.broll_min_duration,
+            "broll_max_duration": self.broll_max_duration,
+            "max_continuous_aroll_seconds": self.max_continuous_aroll_seconds,
+            "max_zoom_scale": self.max_zoom_scale,
+            "visual_container_scale": self.visual_container_scale,
+            "use_black_canvas": self.use_black_canvas,
             "sound_effects_enabled": self.sound_effects_enabled,
             "bgm_ducking_volume": self.bgm_ducking_volume,
             "bgm_normal_volume": self.bgm_normal_volume,
