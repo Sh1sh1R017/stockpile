@@ -657,53 +657,6 @@ class OpenReelAdapter(EditorAdapter):
                 },
                 "keyframes": [],
             })
-
-        # 6b. Consolidated Subtitle / Kinetic Caption Clips onto Captions Track
-        for idx, sub in enumerate(openreel_subtitles):
-            sub_st = float(sub.get("startTime", 0.0))
-            sub_et = float(sub.get("endTime", sub_st + 1.5))
-            sub_dur = max(0.1, sub_et - sub_st)
-            sub_text = sub.get("text", "")
-            sub_style = sub.get("style", {})
-
-            text_clips.append({
-                "id": sub.get("id", f"clip_cap_{idx+1}"),
-                "trackId": "track_captions",
-                "startTime": sub_st,
-                "duration": sub_dur,
-                "text": sub_text,
-                "behindSubject": bool(sub.get("behindSubject", False)),
-                "animation": {
-                    "preset": sub.get("motionProfile", "word-pop"),
-                    "params": {"popOvershoot": 1.12, "bounceHeight": 10, "slideDistance": 15},
-                    "inDuration": 0.15,
-                    "outDuration": 0.15,
-                },
-                "style": {
-                    "fontFamily": sub_style.get("fontFamily") or edit_plan.style.get("font_family", "Impact"),
-                    "fontSize": sub_style.get("fontSize", 58),
-                    "fontWeight": "bold",
-                    "fontStyle": "normal",
-                    "color": sub_style.get("color", "#FFFFFF"),
-                    "strokeColor": "#000000",
-                    "strokeWidth": 5,
-                    "shadowColor": "rgba(0, 0, 0, 0.85)",
-                    "shadowBlur": 10,
-                    "textAlign": "center",
-                    "verticalAlign": "bottom",
-                    "lineHeight": 1.15,
-                    "letterSpacing": 0.8,
-                },
-                "transform": {
-                    "position": {"x": 0.5, "y": 0.82},
-                    "scale": {"x": 1.0, "y": 1.0},
-                    "rotation": 0,
-                    "anchor": {"x": 0.5, "y": 0.5},
-                    "opacity": 1.0,
-                },
-                "keyframes": [],
-            })
-
         for i, ov in enumerate(edit_plan.text_overlays):
             ov_pos = ov.get("position", "center")
             # Upper third (behind head/neck) vs center vs lower third

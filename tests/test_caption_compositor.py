@@ -387,8 +387,10 @@ class TestOpenReelRoundTrip:
         adapter = OpenReelAdapter()
         project = adapter.create_openreel_project(plan)
 
-        # Inspect subtitles in created project
-        subs = project["project"]["timeline"]["subtitles"]
+        # Inspect subtitles in created project (captions track text clips or timeline subtitles)
+        subs = project["project"]["timeline"]["subtitles"] or [
+            c for c in project["project"]["textClips"] if c.get("trackId") == "track_captions"
+        ]
         assert len(subs) >= 1
         assert subs[0].get("behindSubject") is True
         assert "subtitle-behind-subject" in project["project"]["capabilities"]
