@@ -15,7 +15,6 @@ from ai_broll_autopilot.services.editorial.types import (
 )
 
 
-@dataclass
 class CreativeDirector:
     """Master attention allocator for the editorial pipeline."""
 
