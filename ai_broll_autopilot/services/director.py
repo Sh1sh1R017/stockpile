@@ -90,14 +90,27 @@ class Director:
         )
         style_profile = style_registry.get_style(style_id)
 
-        # Target calculations based on campaign or niche rules
-        target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        # Target calculations: a reference style can intentionally override the
+        # generic niche's conservative B-roll ratio.
+        style_broll_ratio = getattr(style_profile, "broll_target_ratio", None)
+        target_broll_ratio = (
+            float(style_broll_ratio)
+            if style_broll_ratio is not None
+            else (niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio)
+        )
 
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        # Scaled shot count based on duration and pacing (~2.0s average cutaway)
-        max_possible_shots = max(3, int(video_duration / 2.8))
-        target_shots = max(3, min(max_possible_shots, int(round(target_broll_seconds / 2.0))))
+
+        # The reference edit uses a handful of deliberate visual scenes rather than
+        # a constant stream of 0.5s cuts. Keep roughly one visual opportunity per
+        # 2.8s, while allowing a longer hero hold to carry the ending/payoff.
+        avg_cut_seconds = 2.8 if not getattr(style_profile, "reference_style", False) else 2.6
+        max_possible_shots = max(3, int(video_duration / avg_cut_seconds))
+        target_shots = max(
+            3,
+            min(max_possible_shots, int(round(target_broll_seconds / (1.8 if getattr(style_profile, "reference_style", False) else 2.0))))
+        )
 
         # Partition video duration into 3 narrative acts for uniform timeline distribution
         t_act1 = round(video_duration * 0.33, 1)
@@ -160,13 +173,16 @@ MANDATORY DIRECTING OBJECTIVES:
    - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
    - Generate EXACTLY {target_shots} contextual cutaways, but do NOT force equal spacing.
    - Build the sequence around the speech: setup -> literal context -> reaction/consequence -> narrative hold -> payoff.
-   - Most cutaways should be 0.8s to 1.8s; reserve 2.5s to 4.0s holds for strong visual/story beats.
-   - The speaker should usually appear for ~0.6s to 1.0s before the first cutaway.
+   - For the reference treatment, favor 0.8-2.2s micro cutaways and permit occasional 3-8s hero holds when one visual can carry a whole thought or payoff.
+   - Do not manufacture lots of tiny cuts just to hit a shot count.
+   - When the reference treatment is active, the first visual can be B-roll immediately; a mandatory A-roll intro is NOT required.
+   - Keep the speaker visible only where it strengthens authenticity, timing, or an emotional beat.
    - Avoid large digital zooms; use only restrained emphasis around important words.
    - Do not fire an SFX on every cut. Use sound accents for meaningful transitions/reveals only.
 
 2. REFERENCE VISUAL LANGUAGE:
    - {style_profile.name}: {style_profile.description}
+   - Reference-style settings: reference_style={getattr(style_profile, "reference_style", False)}, target_broll_ratio={getattr(style_profile, "broll_target_ratio", None)}, hero_broll_max_duration={getattr(style_profile, "hero_broll_max_duration", 2.6)}
    - {chr(10).join(f"- {g}" for g in style_profile.editorial_guidelines)}
 
 3. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
@@ -405,7 +421,9 @@ Return ONLY a valid JSON object matching this schema:
                 "campaign_id": campaign.id,
                 "niche": niche.to_dict() if niche and hasattr(niche, "to_dict") else {"id": "generic", "name": "General Video & Podcast"},
                 "style": style_profile.to_dict(),
-                "style_guidelines": list(style_profile.editorial_guidelines),
+                "editing_style": style_profile.id,
+                "reference_editing": bool(getattr(style_profile, "reference_style", False)),
+                "style_guidelines": list(getattr(style_profile, "editorial_guidelines", [])),
                 "shots": clean_shots,
                 "text_emphasis_graphics": emphasis_graphics,
             }
@@ -429,7 +447,15 @@ Return ONLY a valid JSON object matching this schema:
     ) -> Dict[str, Any]:
         """Deterministic fallback edit plan ensuring campaign constraints and contextual keywords."""
         shots = []
-        target_ratio = campaign.max_broll_ratio if campaign else Config.TARGET_BROLL_RATIO
+        style_id = str(((campaign.__dict__ if campaign else {}) or {}).get("editing_style") or "")
+        from ai_broll_autopilot.styles import style_registry
+        style_profile = style_registry.get_style(style_id) if style_id else None
+        style_ratio = getattr(style_profile, "broll_target_ratio", None) if style_profile else None
+        target_ratio = (
+            float(style_ratio)
+            if style_ratio is not None
+            else (campaign.max_broll_ratio if campaign else Config.TARGET_BROLL_RATIO)
+        )
         target_broll_dur = video_duration * target_ratio
         shot_dur = 2.0
         is_low_broll = campaign and campaign.max_broll_ratio <= 0.35
