@@ -2,8 +2,7 @@
 
 The editor can use a fixed profile (boom/slide/bounce/etc.) or ``impact-auto``.
 In impact-auto mode the caption's semantic classification selects a matching
-motion recipe, so strong words can drive the visual treatment without manually
-keyframing every caption.
+motion recipe, including a dedicated camera-impact treatment for extreme words.
 """
 
 from typing import Dict, Any
@@ -19,14 +18,37 @@ CAPTION_MOTION_PROFILES: Dict[str, Dict[str, Any]] = {
     "bounce": {"label": "Bounce", "openreel": "bounce", "recipe": "kinetic:bounce", "description": "Spring-like overshoot and settle."},
     "zoom": {"label": "Zoom Punch", "openreel": "zoom-punch", "recipe": "kinetic:zoom-punch", "description": "Rapid punch toward the impact word."},
     "shake": {"label": "Shake", "openreel": "impact-shake", "recipe": "kinetic:shake", "description": "Short decaying impact shake."},
+    "word-impact-camera": {
+        "label": "Word Impact — Camera",
+        "openreel": "impact-camera",
+        "recipe": "kinetic:word-impact-camera",
+        "description": "Extreme impact word flies toward the viewer, overshoots the frame and hits with a camera punch.",
+        "params": {
+            "start_scale": 0.18,
+            "impact_scale": 1.72,
+            "overshoot_scale": 1.12,
+            "duration_ms": 560,
+            "rotation_deg": -4.0,
+            "motion_blur": 0.72,
+            "camera_punch": 0.82,
+            "camera_shake": 0.68,
+            "flash": 0.16,
+            "perspective": 0.35,
+        },
+    },
     "typewriter": {"label": "Typewriter", "openreel": "typewriter", "recipe": "kinetic:typewriter", "description": "Sequential reveal."},
     "focus": {"label": "True Focus", "openreel": "word-highlight", "recipe": "kinetic:true-focus", "description": "Stable line with active-word emphasis."},
     "scramble": {"label": "Text Scramble", "openreel": "word-by-word", "recipe": "kinetic:scramble", "description": "Fast decode-style word transition."},
     "impact-auto": {"label": "AI Impact Auto", "openreel": "impact-auto", "recipe": "kinetic:impact-auto", "description": "Automatically chooses an effect from the impact word's semantic type."},
 }
 
+# Semantic categories that deserve the most aggressive treatment. The extreme
+# camera-impact recipe is intentionally sparse: it should feel like the editor
+# suddenly lost its mind, not like every subtitle is a transition.
 IMPACT_EFFECTS: Dict[str, str] = {
-    "hook": "boom",
+    "hook": "word-impact-camera",
+    "chaos": "word-impact-camera",
+    "extreme": "word-impact-camera",
     "money": "zoom",
     "number": "zoom",
     "negation": "slam",
@@ -39,15 +61,15 @@ IMPACT_EFFECTS: Dict[str, str] = {
 
 def normalize_motion_profile(name: str) -> str:
     key = (name or "word-pop").strip().lower()
-    # The existing editor calls its default mode "pop". Keep that UI unchanged,
-    # but make the default pop mode intelligent: impact words now select their own
-    # treatment while ordinary words retain the familiar word-pop behavior.
     aliases = {
         "pop": "impact-auto",
         "impact": "impact-auto",
         "auto": "impact-auto",
         "boom/pop": "boom",
         "slide": "slide-left",
+        "camera-impact": "word-impact-camera",
+        "impact-camera": "word-impact-camera",
+        "hit": "word-impact-camera",
     }
     key = aliases.get(key, key)
     return key if key in CAPTION_MOTION_PROFILES else "word-pop"
@@ -71,5 +93,7 @@ def apply_caption_motion(subtitles: list, profile: str) -> list:
         item["motionRecipe"] = cfg["recipe"]
         item["impactEffect"] = selected
         item["impactSemanticType"] = semantic_type
+        if cfg.get("params"):
+            item["motionParams"] = dict(cfg["params"])
         result.append(item)
     return result
