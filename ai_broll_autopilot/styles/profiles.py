@@ -57,6 +57,46 @@ PROFILES = [
         bgm_ducking_volume=0.15,
     ),
 
+    # 3. CINEMATIC SOCIAL EDITORIAL (Reference-matched: black canvas, story montage, restrained kinetic type)
+    StyleProfile(
+        id="cinematic_social_editorial",
+        name="Cinematic Social Editorial",
+        description=(
+            "Reference-inspired narrative short-form style: black canvas, editorial vertical imagery, "
+            "rapid but deliberate story cutaways, large white kinetic captions, selective pale-green emphasis, "
+            "and restrained camera motion. B-roll behaves like visual punctuation rather than generic filler."
+        ),
+        font_family="Inter",
+        font_size=56,
+        font_weight="bold",
+        font_style="normal",
+        primary_color="#F7F7F2",
+        highlight_color="#B8D77A",
+        upcoming_color="rgba(247, 247, 242, 0.68)",
+        background_color="transparent",
+        stroke_color="#0A0A0A",
+        stroke_width=2,
+        shadow_color="rgba(0, 0, 0, 0.78)",
+        shadow_blur=8,
+        caption_animation_style="word-pop",
+        caption_position="center",
+        broll_cut_pacing="dynamic",
+        default_broll_duration=1.6,
+        zoom_intensity=1.035,
+        transition_type="cut",
+        color_grading_preset="cinematic_warm",
+        caption_words_per_group=3,
+        caption_y_percent=58.0,
+        broll_min_duration=0.8,
+        broll_max_duration=2.2,
+        max_continuous_aroll_seconds=3.5,
+        max_zoom_scale=1.045,
+        visual_container_scale=0.92,
+        use_black_canvas=True,
+        sound_effects_enabled=True,
+        bgm_ducking_volume=0.12,
+    ),
+
     # 3. BUSINESS EDITORIAL (Polished, executive, authoritative, gold/navy highlights)
     StyleProfile(
         id="business_editorial",
