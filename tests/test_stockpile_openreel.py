@@ -210,19 +210,19 @@ def test_edit_director_and_openreel_export_all_5_niches():
             assert bc["duration"] > 0
             assert bc["startTime"] >= 0
 
-        # Validate timed subtitles with word highlights
-        subs = proj["timeline"]["subtitles"]
-        assert len(subs) == 3
-        for sub in subs:
-            assert "words" in sub
-            assert len(sub["words"]) > 0
-            assert "style" in sub
-            assert "highlightColor" in sub["style"]
-
-        # Validate text callouts
+        # Validate captions as editable TextClips on the dedicated Captions track.
+        # timeline.subtitles is intentionally empty to avoid OpenReel rendering captions twice.
+        assert proj["timeline"]["subtitles"] == []
         text_clips = proj["textClips"]
-        assert len(text_clips) >= 1
-        assert text_clips[0]["style"]["fontFamily"] != ""
+        caption_clips = [c for c in text_clips if c["trackId"] == "track_captions"]
+        overlay_clips = [c for c in text_clips if c["trackId"] == "track_overlay_text"]
+        assert len(caption_clips) == 3
+        assert len(overlay_clips) >= 1
+        for clip in caption_clips:
+            assert "metadata" in clip
+            assert "words" in clip["metadata"]
+            assert "style" in clip
+            assert clip["style"]["fontFamily"] != ""
 
         # Validate manifest
         with open(files["manifest"], "r", encoding="utf-8") as f:
