@@ -411,6 +411,20 @@ TRANSCRIPT CONTEXT:
                     min(float(item.get(key, 0) or 0), 100.0),
                 )
 
+            # Recompute the final B-roll priority from the model's evidence.
+            # This prevents a single arbitrary model score from dominating:
+            # dialogue impact > visualizability > tone intensity.
+            evidence_priority = (
+                item["impact_score"] * 0.48
+                + item["visualizability"] * 0.32
+                + item["tone_intensity"] * 0.12
+            )
+            model_priority = item["broll_priority"]
+            item["broll_priority"] = round(
+                max(evidence_priority, model_priority * 0.85),
+                2,
+            )
+
             item["search_queries"] = [
                 str(q).strip()
                 for q in (item.get("search_queries") or [])
