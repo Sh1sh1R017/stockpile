@@ -31,7 +31,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     allow_ai_broll=False,
     max_broll_ratio=0.45,
     max_cutaway_seconds=2.5,
-    speed_multiplier=1.25,
+    speed_multiplier=1.0,
     niche_id="generic",
 
     # Watermark rules
@@ -43,13 +43,16 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     subtitles_required=True,
     subtitle_style="cinematic_social",
     subtitle_position="center",
-    subtitle_margin_v=280,
+    subtitle_margin_v=0,
     hook_required=False,
 
     rules_checklist=[
-        "Keep pacing rapid with cuts every 1.5s to 2.4s.",
-        "Include punchy creator reaction memes in first 5s.",
-        "Word-by-word kinetic subtitle highlighting.",
+        "Use a black 9:16 canvas with centered square/near-square rounded visual cards.",
+        "Open on the speaker for about 0.6s to 1.0s, then cut on meaningful dialogue beats.",
+        "Prefer short 0.8s to 1.8s contextual inserts with occasional 2.5s to 4.0s narrative holds.",
+        "Center-stack captions in short 1-3 word lines with restrained warm emphasis.",
+        "Avoid generic filler B-roll, large digital zooms, and constant glitch effects.",
+        "Use SFX selectively on meaningful cuts and reveals.",
         "Sidechain audio auto-ducking under dialogue."
     ],
     instant_rejections=[],
