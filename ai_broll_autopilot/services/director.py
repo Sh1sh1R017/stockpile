@@ -301,9 +301,11 @@ Return ONLY a valid JSON object matching this schema:
                     continue
 
                 start = max(0.0, float(shot.get("start_time", 0.0)))
-                # Prevent overlap with previous shot (keep minimum 0.4s speaker gap)
-                if start < last_end + 0.4:
-                    start = last_end + 0.4
+                # Protect a short A-roll breathing gap while allowing faster
+                # sentence-aware editorial cadence for the reference style.
+                speaker_gap = 0.30 if style and style.id == "cinematic_social_editorial" else 0.40
+                if start < last_end + speaker_gap:
+                    start = last_end + speaker_gap
 
                 if start >= video_duration - 0.8:
                     break
@@ -312,15 +314,18 @@ Return ONLY a valid JSON object matching this schema:
                 if not campaign.allow_ai_broll or style not in ("stockpile", "collage", "meme"):
                     style = "stockpile"
 
-                # Fast-paced short-form duration: 1.4s to 2.4s (snappy cuts)
-                max_clip = min(campaign.max_cutaway_seconds, max_dur)
-                duration = min(max_clip, max(1.2, float(shot.get("duration", 2.0))))
+                # Style-specific duration envelope. The reference preset uses
+                # short editorial punctuation (0.8–2.2s) rather than fixed 2s holds.
+                style_min_dur = float(getattr(style, "broll_min_duration", 1.2))
+                style_max_dur = float(getattr(style, "broll_max_duration", 2.4))
+                max_clip = min(campaign.max_cutaway_seconds, max_dur, style_max_dur)
+                duration = min(max_clip, max(style_min_dur, float(shot.get("duration", style.default_broll_duration))))
                 if style == "meme":
-                    duration = min(2.0, max(1.3, duration))
+                    duration = min(2.0, max(1.0, duration))
                 end = min(video_duration, start + duration)
                 duration = round(end - start, 2)
 
-                if duration < 1.0:
+                if duration < max(0.5, style_min_dur * 0.75):
                     continue
 
                 # Extract and clean micro_prompts (3-5 rapid cuts)
