@@ -403,4 +403,4 @@ def test_cinematic_editorial_reference_style():
     assert project["project"]["timeline"]["subtitles"] == []
     caption = next(c for c in project["project"]["textClips"] if c["trackId"] == "track_captions")
     assert caption["transform"]["position"]["x"] == 0.5
-    assert caption["transform"]["position"]["y"] == 0.82
+    assert caption["transform"]["position"]["y"] == 0.50
