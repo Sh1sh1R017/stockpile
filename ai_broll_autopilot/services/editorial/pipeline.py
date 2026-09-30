@@ -28,6 +28,7 @@ from ai_broll_autopilot.services.editorial.types import (
     HookCandidate,
     NarrativeRole,
     QualityAuditReport,
+    EditIntent,
 )
 from ai_broll_autopilot.services.editorial.visual_variety import VisualVarietyEngine
 from ai_broll_autopilot.services.editorial.creative_director import creative_director
@@ -136,8 +137,7 @@ class EditorialIntelligencePipeline:
         for moment, intent in zip(moments, edit_intents):
             # The dataclass contract lives in editorial.types; copy the
             # provider-agnostic decision into the moment for serialization.
-            from ai_broll_autopilot.services.editorial.types import EditIntent
-            moment.edit_intent = EditIntent(**intent.to_dict())
+            moment.edit_intent = intent
 
         # -------------------------------------------------------------
         # STEP 4: CONTEXTUAL, SENTIMENT-AWARE B-ROLL SELECTION
