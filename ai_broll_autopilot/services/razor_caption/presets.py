@@ -455,7 +455,6 @@ ZAPCAP_PRESETS: Dict[str, ZapCapPreset] = {
         default_animation="fade",
         description="Regal cinematic title preset with deep velvet fuchsia brilliance.",
     ),
-,
     "editorial_story": ZapCapPreset(
         key="editorial_story",
         name="Editorial Story",
