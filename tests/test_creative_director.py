@@ -39,7 +39,7 @@ def test_creative_director_returns_shared_intent_contract():
 def test_creative_director_preserves_quiet_moments():
     moment = make_moment(
         text="And then I sat there for a while.",
-        narrative_role=NarrativeRole.REFLECTIVE if hasattr(NarrativeRole, "REFLECTIVE") else NarrativeRole.EXPLANATION,
+        narrative_role=NarrativeRole.EXPLANATION,
         sentiment=SentimentCategory.REFLECTIVE,
         emotional_intensity=0.1,
         speaker_emphasis=0.1,
