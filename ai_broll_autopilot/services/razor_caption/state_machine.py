@@ -12,6 +12,7 @@ viewer rather than merely scale up.
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Optional
 
 from .caption_event import (
@@ -34,6 +35,14 @@ CAMERA_IMPACT_PARAMS = {
     "camera_shake": 0.68,
     "flash": 0.16,
     "perspective": 0.35,
+}
+
+# Words that are intentionally allowed to break the normal caption rhythm.
+# Keep this set small; the joke depends on these moments being rare.
+CHAOS_IMPACT_WORDS = {
+    "chaos", "insane", "unhinged", "absurd", "ridiculous", "wild",
+    "nuts", "bonkers", "destroyed", "exploded", "massive", "crazy",
+    "wtf", "what", "never", "impossible",
 }
 
 
@@ -65,7 +74,12 @@ class CaptionStateMachine:
     def _apply_impact_recipe(ev: CaptionEvent) -> None:
         """Attach explicit render instructions to extreme impact words."""
         semantic = (ev.semantic_type or "normal").strip().lower()
-        is_extreme = semantic in {"hook", "chaos", "extreme"} or ev.emphasis == EmphasisLevel.HOOK
+        clean_word = re.sub(r"[^a-z0-9$%]+", "", str(ev.word).lower())
+        is_extreme = (
+            semantic in {"hook", "chaos", "extreme"}
+            or ev.emphasis == EmphasisLevel.HOOK
+            or clean_word in CHAOS_IMPACT_WORDS
+        )
         is_strong = semantic in {"strong", "action"} or ev.emphasis == EmphasisLevel.STRONG
 
         if is_extreme:
