@@ -15,6 +15,10 @@ class StyleRegistry:
         self._styles: Dict[str, StyleProfile] = {}
         for style in PROFILES:
             self.register(style)
+        # Backward-compatible alias used by older cinematic editorial branches.
+        cinematic = self._styles.get("cinematic_social_editorial")
+        if cinematic:
+            self._styles["cinematic_editorial"] = cinematic
 
     def register(self, style: StyleProfile):
         """Register a visual style profile."""
