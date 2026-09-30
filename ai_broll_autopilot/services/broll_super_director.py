@@ -54,6 +54,7 @@ class BrollSuperDirector:
             return {"model": "fallback", "moments": [], "reason": "GEMINI_API_KEY unavailable"}
 
         audio_path = output_dir / "broll_super_audio.mp3"
+        uploaded = None
         try:
             await asyncio.to_thread(self._extract_audio, source_video, audio_path)
             uploaded = await asyncio.to_thread(self.client.files.upload, file=str(audio_path))
@@ -112,6 +113,11 @@ class BrollSuperDirector:
             logger.warning("B-roll Super Director analysis failed: %s", exc)
             return {"model": "fallback", "moments": [], "reason": str(exc)}
         finally:
+            if uploaded is not None:
+                try:
+                    await asyncio.to_thread(self.client.files.delete, name=uploaded.name)
+                except Exception:
+                    pass
             try:
                 audio_path.unlink(missing_ok=True)
             except Exception:
