@@ -136,7 +136,11 @@ class Renderer:
         # 2. Level 3 Graphic Impact SFX
         for item in edit_plan.get("text_emphasis_graphics", []):
             start_t = float(item.get("start_time", 0.0))
-            impact_path = item.get("sfx_path", "assets/sfx/impact.mp3")
+            impact_path = (
+                item.get("sfx_path")
+                if reference_style
+                else item.get("sfx_path", "assets/sfx/impact.mp3")
+            )
             if impact_path and os.path.exists(impact_path):
                 audio_sfx_list.append({
                     "path": impact_path,
