@@ -806,10 +806,10 @@ class OpenReelAdapter(EditorAdapter):
                             else 0.5
                         ),
                         "y": (
-                            0.16 if str(s.get("position", s.get("spatial_region", ""))).startswith("top")
-                            else 0.82 if str(s.get("position", s.get("spatial_region", ""))).startswith("lower")
-                            else 0.35 if behind_subject or "center" in str(s.get("position", s.get("spatial_region", "")))
-                            else 0.82
+                            0.31 if str(s.get("position", s.get("spatial_region", ""))).startswith("top")
+                            else 0.69 if str(s.get("position", s.get("spatial_region", ""))).startswith("lower")
+                            else 0.35 if behind_subject
+                            else 0.50
                         ),
                     },
                     "scale": {"x": 1.0, "y": 1.0},
