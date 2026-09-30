@@ -26,7 +26,7 @@ class NicheDetectionResult:
     niche_name: str
     confidence: float
     detected_keywords: List[str] = field(default_factory=list)
-    suggested_style_id: str = "clean_podcast"
+    suggested_style_id: str = "cinematic_social_editorial"
     secondary_niches: List[Dict[str, Any]] = field(default_factory=list)
     explanation: str = ""
 
@@ -90,7 +90,7 @@ NICHE_TO_STYLE_MAP = {
     "fitness": "sports_editorial",
     "law": "business_editorial",
     "news": "news_editorial",
-    "generic": "clean_podcast",
+    "generic": "cinematic_social_editorial",
 }
 
 
@@ -192,7 +192,7 @@ Respond ONLY with valid JSON matching this schema:
 
         niche_id = data.get("niche_id", "generic")
         profile = niche_registry.get_profile(niche_id)
-        suggested_style = NICHE_TO_STYLE_MAP.get(profile.id, "clean_podcast")
+        suggested_style = NICHE_TO_STYLE_MAP.get(profile.id, "cinematic_social_editorial")
 
         return NicheDetectionResult(
             niche_id=profile.id,
@@ -268,7 +268,7 @@ Respond ONLY with valid JSON matching this schema:
                 niche_name=generic_profile.name,
                 confidence=0.5,
                 detected_keywords=[],
-                suggested_style_id="clean_podcast",
+                suggested_style_id="cinematic_social_editorial",
                 secondary_niches=[],
                 explanation="No specific domain keywords identified with high confidence; defaulted to generic.",
             )
@@ -290,7 +290,7 @@ Respond ONLY with valid JSON matching this schema:
                     "confidence": round(s["score"] / (total_score + 1e-5), 2),
                 })
 
-        suggested_style = NICHE_TO_STYLE_MAP.get(top_profile.id, "clean_podcast")
+        suggested_style = NICHE_TO_STYLE_MAP.get(top_profile.id, "cinematic_social_editorial")
 
         return NicheDetectionResult(
             niche_id=top_profile.id,
