@@ -149,6 +149,8 @@ class HookCandidate:
 @dataclass
 class EditIntent:
     """Shared editorial attention allocation for one moment."""
+    start_time: float = 0.0
+    end_time: float = 0.0
     semantic_importance: float = 0.0
     emotional_importance: float = 0.0
     hook_relevance: float = 0.0
@@ -159,12 +161,16 @@ class EditIntent:
     broll_pressure: float = 0.0
     sfx_opportunity: float = 0.0
     chaos_score: float = 0.0
+    chaos_tier: str = "normal"
+    chaos_budget_remaining: float = 1.0
     quietness_score: float = 1.0
     treatment: str = "normal"
     reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "start_time": round(self.start_time, 3),
+            "end_time": round(self.end_time, 3),
             "semantic_importance": round(self.semantic_importance, 3),
             "emotional_importance": round(self.emotional_importance, 3),
             "hook_relevance": round(self.hook_relevance, 3),
@@ -175,12 +181,15 @@ class EditIntent:
             "broll_pressure": round(self.broll_pressure, 3),
             "sfx_opportunity": round(self.sfx_opportunity, 3),
             "chaos_score": round(self.chaos_score, 3),
+            "chaos_tier": self.chaos_tier,
+            "chaos_budget_remaining": round(self.chaos_budget_remaining, 3),
             "quietness_score": round(self.quietness_score, 3),
             "treatment": self.treatment,
             "reason": self.reason,
         }
 
 
+@dataclass
 class EditorialMoment:
     """Granular narrative unit representing an editorial beat in the speech."""
     moment_id: str
