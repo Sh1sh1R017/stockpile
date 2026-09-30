@@ -71,3 +71,20 @@ def test_creative_director_serializes_every_attention_dimension():
         "treatment",
     ):
         assert key in payload
+
+
+def test_creative_director_owns_timeline_chaos_budget():
+    first = make_moment(moment_id="m1", start_time=0.0, end_time=1.5)
+    second = make_moment(
+        moment_id="m2",
+        start_time=0.2,
+        end_time=1.7,
+        text="This is absolutely ridiculous",
+    )
+    intents = CreativeDirector().analyze([first, second], hook_moment_id="m1")
+
+    assert intents[0].start_time == 0.0
+    assert intents[0].end_time == 1.5
+    assert intents[0].chaos_tier == intents[0].treatment
+    assert 0.0 <= intents[0].chaos_budget_remaining <= 1.0
+    assert intents[1].chaos_budget_remaining <= intents[0].chaos_budget_remaining
