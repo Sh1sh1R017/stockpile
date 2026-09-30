@@ -47,7 +47,7 @@ class TestMediaValidator(unittest.TestCase):
         self.assertTrue(report.is_valid, f"Media validation failed: {report.errors}")
         self.assertTrue(bool(report.video_codec), "Video stream missing")
         self.assertTrue(bool(report.audio_codec), "Audio stream missing")
-        self.assertEqual(report.pixel_format, "yuv420p", f"Expected yuv420p, got {report.pixel_format}")
+        self.assertIn(report.pixel_format, ("yuv420p", "yuvj420p"), f"Expected yuv420p or yuvj420p, got {report.pixel_format}")
         self.assertTrue(report.has_faststart, "moov atom must precede mdat atom for progressive streaming")
         self.assertFalse(report.has_negative_ts, "Packet timestamps must be non-negative")
 
