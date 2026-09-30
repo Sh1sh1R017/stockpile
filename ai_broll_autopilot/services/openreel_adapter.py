@@ -149,9 +149,35 @@ class OpenReelAdapter(EditorAdapter):
             if isinstance(edit_plan.style, dict) else ""
         ).lower()
         reference_style = style_id == "cinematic_social_editorial"
-        visual_scale = 0.92 if reference_style else 1.0
-        border_radius = 28 if reference_style else 0
+        visual_scale = 0.574 if reference_style else 1.0
+        border_radius = 52 if reference_style else 0
         caption_y = 0.58 if reference_style else 0.82
+        card_aspect = (self.default_width * 0.944) / (self.default_height * 0.574)
+
+        def center_crop_for_card(width: float, height: float) -> Dict[str, float]:
+            if not reference_style or width <= 0 or height <= 0:
+                return {}
+            source_aspect = width / height
+            if source_aspect > card_aspect:
+                visible_w = max(0.01, min(1.0, card_aspect / source_aspect))
+                return {
+                    "x": round((1.0 - visible_w) / 2.0, 5),
+                    "y": 0.0,
+                    "width": round(visible_w, 5),
+                    "height": 1.0,
+                }
+            visible_h = max(0.01, min(1.0, source_aspect / card_aspect))
+            return {
+                "x": 0.0,
+                "y": round((1.0 - visible_h) / 2.0, 5),
+                "width": 1.0,
+                "height": round(visible_h, 5),
+            }
+
+        main_crop = center_crop_for_card(
+            float(edit_plan.source_media.get("width", self.default_width)),
+            float(edit_plan.source_media.get("height", self.default_height)),
+        )
 
         # 1. Media Library Setup
         media_items: List[Dict[str, Any]] = []
@@ -391,13 +417,14 @@ class OpenReelAdapter(EditorAdapter):
                     "effects": [],
                     "audioEffects": [],
                     "transform": {
-                        "position": {"x": 0.5, "y": 0.5},
+                        "position": {"x": 0.0, "y": 0.0},
                         "scale": {"x": visual_scale, "y": visual_scale},
                         "rotation": 0,
                         "anchor": {"x": 0.5, "y": 0.5},
                         "opacity": 1.0,
                         "borderRadius": border_radius,
                         "fitMode": "cover",
+                        **({"crop": main_crop} if main_crop else {}),
                     },
                     "volume": 1.0,
                     "keyframes": seg_keyframes,
@@ -414,13 +441,14 @@ class OpenReelAdapter(EditorAdapter):
                 "effects": [],
                 "audioEffects": [],
                 "transform": {
-                    "position": {"x": 0.5, "y": 0.5},
+                    "position": {"x": 0.0, "y": 0.0},
                     "scale": {"x": visual_scale, "y": visual_scale},
                     "rotation": 0,
                     "anchor": {"x": 0.5, "y": 0.5},
                     "opacity": 1.0,
                     "borderRadius": border_radius,
                     "fitMode": "cover",
+                    **({"crop": main_crop} if main_crop else {}),
                 },
                 "volume": 1.0,
                 "keyframes": keyframes,
@@ -447,14 +475,32 @@ class OpenReelAdapter(EditorAdapter):
                 "outPoint": dur,
                 "effects": [],
                 "audioEffects": [],
-                "transform": {
-                    "position": {"x": 0.5, "y": 0.5},
-                    "scale": {"x": 1.0, "y": 1.0},
-                    "rotation": 0,
-                    "anchor": {"x": 0.5, "y": 0.5},
-                    "opacity": 1.0,
-                    "fitMode": "cover",
-                },
+                "transform": (
+                    {
+                        "position": {"x": 0.0, "y": 0.0},
+                        "scale": {"x": visual_scale, "y": visual_scale},
+                        "rotation": 0,
+                        "anchor": {"x": 0.5, "y": 0.5},
+                        "opacity": 1.0,
+                        "borderRadius": border_radius,
+                        "fitMode": "cover",
+                        **({
+                            "crop": center_crop_for_card(
+                                float(shot.get("source_width", self.default_width)),
+                                float(shot.get("source_height", self.default_height)),
+                            )
+                        } if reference_style else {}),
+                    }
+                    if reference_style
+                    else {
+                        "position": {"x": 0.5, "y": 0.5},
+                        "scale": {"x": 1.0, "y": 1.0},
+                        "rotation": 0,
+                        "anchor": {"x": 0.5, "y": 0.5},
+                        "opacity": 1.0,
+                        "fitMode": "cover",
+                    }
+                ),
                 "volume": 0.0,
                 "keyframes": [],
                 "metadata": {
