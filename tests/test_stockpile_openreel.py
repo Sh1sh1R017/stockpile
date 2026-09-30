@@ -337,3 +337,19 @@ def test_openreel_two_way_sync():
     assert updated_plan.shots[1]["end_time"] == 10.0
 
 
+
+
+
+def test_reference_editing_guideline_profile():
+    style = style_registry.get_style("cinematic_social_editorial")
+    assert style is not None
+    assert style.reference_style is True
+    assert style.broll_target_ratio == 0.90
+    assert style.hero_broll_max_duration == 7.5
+    assert style.visual_container_width_ratio == 0.944
+    assert style.visual_container_height_ratio == 0.574
+    assert style.visual_container_radius == 52
+    assert style.caption_position == "center"
+    assert style.caption_words_per_group == 3
+    assert any("85-95%" in guideline for guideline in style.editorial_guidelines)
+
