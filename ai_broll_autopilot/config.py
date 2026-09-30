@@ -6,48 +6,34 @@ from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-
-# Load environment variables
 load_dotenv(PROJECT_ROOT / ".env")
 
 
 class Config:
     """Autopilot central configuration."""
-
     PROJECT_ROOT: Path = PROJECT_ROOT
     INPUT_DIR: Path = PROJECT_ROOT / os.getenv("LOCAL_INPUT_FOLDER", "input")
     OUTPUT_DIR: Path = PROJECT_ROOT / os.getenv("LOCAL_OUTPUT_FOLDER", "output")
     DB_PATH: Path = PROJECT_ROOT / "autopilot.db"
 
-    # Sub-projects
     STOCKPILE_DIR: Path = PROJECT_ROOT / "src"
     COLLAGE_DIR: Path = PROJECT_ROOT / "gbro-collage-broll"
     ERDUO_DIR: Path = PROJECT_ROOT / "erduo-broll-loop-engineering"
 
-    # AI & Models
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     GEMINI_BROLL_SUPER_MODEL: str = os.getenv("GEMINI_BROLL_SUPER_MODEL", "gemini-2.5-pro")
-    GEMINI_BROLL_SUPER_FALLBACK_MODELS: List[str] = [
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
-    ]
-    GEMINI_FALLBACK_MODELS: List[str] = [
-        "gemini-3.6-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.5-flash-lite",
-    ]
+    GEMINI_BROLL_SUPER_FALLBACK_MODELS: List[str] = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    GEMINI_FALLBACK_MODELS: List[str] = ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-3.5-flash-lite"]
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
 
-    # B-Roll Target Ratio & Duration Constraints
-    TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))  # 60% of total video duration
+    TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))
     MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "3"))
     STOCKPILE_START_OFFSET_SECONDS: float = float(os.getenv("STOCKPILE_START_OFFSET_SECONDS", "6.0"))
-    BROLL_SPEED_MULTIPLIER: float = float(os.getenv("BROLL_SPEED_MULTIPLIER", "1.25"))  # 1.25x high-velocity playback
-    STREAMER_SPEED_MULTIPLIER: float = float(os.getenv("STREAMER_SPEED_MULTIPLIER", "1.30"))  # 1.30x snappy reaction pace
+    BROLL_SPEED_MULTIPLIER: float = float(os.getenv("BROLL_SPEED_MULTIPLIER", "1.25"))
+    STREAMER_SPEED_MULTIPLIER: float = float(os.getenv("STREAMER_SPEED_MULTIPLIER", "1.30"))
     RAPID_FIRE_MONTAGE_ENABLED: bool = True
-    TARGET_MICRO_CLIPS_PER_SHOT: int = 4  # 3 to 5 rapid cuts per cutaway
+    TARGET_MICRO_CLIPS_PER_SHOT: int = 4
     MIN_MICRO_CLIP_DURATION: float = 0.4
     MAX_MICRO_CLIP_DURATION: float = 0.8
     REJECT_WATERMARKS: bool = True
@@ -57,43 +43,37 @@ class Config:
     WATERMARK_CV_FALLBACK: bool = True
     MAX_WATERMARK_CANDIDATE_RETRIES: int = 4
 
-    # Video Settings
     TARGET_WIDTH: int = 1080
     TARGET_HEIGHT: int = 1920
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
 
-    # Editor Engine Selection ("openreel" or "diffusion")
+    # Hardware encoding: auto detects h264_nvenc and falls back to CPU x264.
+    # Set STOCKPILE_NVENC=0 to force CPU encoding; set STOCKPILE_NVENC=1 to require NVENC.
+    NVENC_MODE: str = os.getenv("STOCKPILE_NVENC", "auto").strip().lower()
+    NVENC_PRESET: str = os.getenv("STOCKPILE_NVENC_PRESET", "p4")
+    NVENC_CQ: int = int(os.getenv("STOCKPILE_NVENC_CQ", str(VIDEO_CRF)))
+
     EDITOR_ENGINE: str = os.getenv("EDITOR_ENGINE", "openreel")
 
-    # SDR2HDR & Upscaling Engine
     HDR_ENABLED: bool = False
-    HDR_DEFAULT_SCALE: float = 1.0  # 1.0 (Native HDR10), 1.5 (2K QHD), 2.0 (4K UHD)
-    HDR_DEFAULT_TONE: str = "vivid"  # "vivid" (punchy viral pop) or "reference" (BT.2408)
-    HDR_DEFAULT_STYLE: str = "natural"  # "natural", "cinematic", "night"
+    HDR_DEFAULT_SCALE: float = 1.0
+    HDR_DEFAULT_TONE: str = "vivid"
+    HDR_DEFAULT_STYLE: str = "natural"
     HDR_FAST_MODE: bool = True
-    HDR_PROCESSING_SCALE: float = 0.6  # Optimal balance of speed and color fidelity
+    HDR_PROCESSING_SCALE: float = 0.6
     HDR_MODEL_PATH: Path = PROJECT_ROOT / "models" / "enhancement_model_reuse_v1.pt"
 
-    # Google Drive
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_OUTPUT_FOLDER_ID", "")
     GOOGLE_DRIVE_INPUT_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_INPUT_FOLDER_ID", "")
     GOOGLE_DRIVE_OUTPUT_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_OUTPUT_FOLDER_ID", "")
     NOTIFICATION_EMAIL: str = os.getenv("NOTIFICATION_EMAIL", "")
-
-    # Pexels Video API (Royalty-free & Watermark-free)
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
-
-    # Optional OpenShorts long-form clipping service
     OPENSHORTS_API_URL: str = os.getenv("OPENSHORTS_API_URL", "")
     OPENSHORTS_API_KEY: str = os.getenv("OPENSHORTS_API_KEY", "")
-
-    # Optional motion-anything recipe checkout used as a motion reference library
-    MOTION_ANYTHING_DIR: Path = Path(
-        os.getenv("MOTION_ANYTHING_DIR", str(PROJECT_ROOT / "motion-anything"))
-    )
+    MOTION_ANYTHING_DIR: Path = Path(os.getenv("MOTION_ANYTHING_DIR", str(PROJECT_ROOT / "motion-anything")))
 
     @classmethod
     def ensure_directories(cls):
