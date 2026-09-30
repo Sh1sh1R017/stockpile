@@ -157,7 +157,12 @@ def get_job_edit_plan(job: Job) -> EditPlan:
                 from ai_broll_autopilot.styles import style_registry
 
                 n_id = plan_dict.get("niche", {}).get("niche_id", "generic") if isinstance(plan_dict.get("niche"), dict) else "generic"
-                s_id = plan_dict.get("style", {}).get("style_id", "clean_podcast") if isinstance(plan_dict.get("style"), dict) else "clean_podcast"
+                s_id = (
+                    plan_dict.get("editing_style")
+                    or (plan_dict.get("style", {}) or {}).get("style_id")
+                    or (plan_dict.get("style", {}) or {}).get("id")
+                    or "clean_podcast"
+                )
                 n_prof = niche_registry.get_profile(n_id)
                 s_prof = style_registry.get_style(s_id)
 
