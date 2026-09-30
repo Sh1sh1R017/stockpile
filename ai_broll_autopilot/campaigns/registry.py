@@ -19,8 +19,8 @@ class CampaignRegistry:
         self.register(DEFAULT_VIRAL_CAMPAIGN)
         self.register(CURIOUS_MIKE_CAMPAIGN)
         self.register(CAPCUT_PODCAST_PRO_CAMPAIGN)
-        self._campaigns["capcut_cyber"] = CAPCUT_PODCAST_PRO_CAMPAIGN
-        self._campaigns["cyber_grid"] = CAPCUT_PODCAST_PRO_CAMPAIGN
+        # Legacy IDs are lookup aliases only; do not expose them in list_campaigns().
+        self._aliases = {"capcut_cyber": "capcut_podcast_pro", "cyber_grid": "capcut_podcast_pro"}
 
     def register(self, campaign: CampaignConfig):
         """Register a campaign preset."""
@@ -34,6 +34,8 @@ class CampaignRegistry:
         clean_id = campaign_id.strip().lower()
         if clean_id in self._campaigns:
             return self._campaigns[clean_id]
+        if clean_id in self._aliases:
+            return self._campaigns[self._aliases[clean_id]]
         logger.warning(f"Campaign '{campaign_id}' not found, falling back to default.")
         return self._campaigns.get("default", DEFAULT_VIRAL_CAMPAIGN)
 
