@@ -81,6 +81,16 @@ class Director:
             else:
                 niche = niche_registry.get_profile("generic")
 
+        # Resolve the editorial StyleProfile explicitly.
+        from ai_broll_autopilot.styles import style_registry
+        requested_style_id = str(getattr(campaign, "subtitle_style", "") or "").strip().lower()
+        if requested_style_id in style_registry.list_ids():
+            style = style_registry.get_style(requested_style_id)
+        elif niche and niche.id == "generic":
+            style = style_registry.get_style("cinematic_social_editorial")
+        else:
+            style = style_registry.get_style("clean_podcast")
+
         # Target calculations based on campaign or niche rules
         target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
 
@@ -310,9 +320,9 @@ Return ONLY a valid JSON object matching this schema:
                 if start >= video_duration - 0.8:
                     break
 
-                style = shot.get("style", "stockpile").lower()
-                if not campaign.allow_ai_broll or style not in ("stockpile", "collage", "meme"):
-                    style = "stockpile"
+                shot_style = shot.get("style", "stockpile").lower()
+                if not campaign.allow_ai_broll or shot_style not in ("stockpile", "collage", "meme"):
+                    shot_style = "stockpile"
 
                 # Style-specific duration envelope. The reference preset uses
                 # short editorial punctuation (0.8–2.2s) rather than fixed 2s holds.
@@ -320,7 +330,7 @@ Return ONLY a valid JSON object matching this schema:
                 style_max_dur = float(getattr(style, "broll_max_duration", 2.4))
                 max_clip = min(campaign.max_cutaway_seconds, max_dur, style_max_dur)
                 duration = min(max_clip, max(style_min_dur, float(shot.get("duration", style.default_broll_duration))))
-                if style == "meme":
+                if shot_style == "meme":
                     duration = min(2.0, max(1.0, duration))
                 end = min(video_duration, start + duration)
                 duration = round(end - start, 2)
@@ -354,7 +364,7 @@ Return ONLY a valid JSON object matching this schema:
                     "start_time": round(start, 2),
                     "end_time": round(end, 2),
                     "duration": duration,
-                    "style": style,
+                    "style": shot_style,
                     "dialogue_quote": shot.get("dialogue_quote", ""),
                     "emotional_core": shot.get("emotional_core", "Contextual Focus"),
                     "visceral_human_metaphor": shot.get("visceral_human_metaphor", "Topic illustration"),
@@ -363,7 +373,7 @@ Return ONLY a valid JSON object matching this schema:
                     "overlay_type": "cutaway",
                     "narrative_reason": shot.get("narrative_reason", "Narrative reinforcement"),
                 }
-                if style == "meme":
+                if shot_style == "meme":
                     shot_entry["meme_template"] = shot.get("meme_template", "stepped_in_shit")
                     shot_entry["meme_captions"] = shot.get("meme_captions", {})
 
