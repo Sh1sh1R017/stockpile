@@ -903,10 +903,10 @@ class OpenReelAdapter(EditorAdapter):
                     edit_plan.clip_interval["in_point"] = min(source_starts)
                     edit_plan.clip_interval["out_point"] = max(source_ends)
 
-                timeline_duration = float(timeline.get("duration", 0.0) or 0.0)
-                active_end = max(r["end"] for r in updated_ranges)
+                # Derive output duration from the edited A-roll sequence rather
+                # than trusting a stale serialized timeline.duration.
                 edit_plan.target_duration = round(
-                    max(active_end, timeline_duration) if timeline_duration > 0 else active_end,
+                    max(r["end"] for r in updated_ranges),
                     3,
                 )
 
