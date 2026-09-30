@@ -132,6 +132,27 @@ class Director:
             niche_desc = "General Video & Podcast (General dialogue, stories, real-world events, discussions)"
             niche_keywords_hint = "real-world context matching spoken dialogue literally (people, places, objects, actions)"
 
+        reference_style_guidelines = ""
+        if style and style.id == "cinematic_social_editorial":
+            reference_style_guidelines = """
+REFERENCE EDITING LANGUAGE — CINEMATIC SOCIAL EDITORIAL:
+- Treat the final short like a compact visual essay, not a generic podcast with occasional stock footage.
+- Start with a very short A-roll hook, then introduce a meaningful visual change whenever the sentence reaches a new idea, reveal, consequence, or imageable noun.
+- Use B-roll as sentence punctuation: prefer several highly specific, visually related cutaways over one generic clip held for too long.
+- Typical cutaway duration is 0.8–2.2s; shorten toward 0.8–1.3s for punchlines/reveals and allow up to ~2.2s for cinematic establishing or archival shots.
+- Do not front-load B-roll. Alternate A-roll and visual cutaways so the viewer repeatedly gets a fresh image while still hearing the complete spoken thought.
+- Favor literal, emotionally resonant imagery: archival footage, documentary scenes, objects, faces, locations, screens, crowds, money/property, architecture, or culturally relevant moments. Never use a random motivational stock clip.
+- When one sentence contains multiple visual beats, permit 2–3 micro-cutaways that each represent a different clause/beat while preserving chronological dialogue coverage.
+- Use the speaker's strongest facial reaction or the most informative original A-roll frame for the moments that should feel personal or important; do not cover every word with B-roll.
+- Typography should be large, elegant, centered or slightly above center, with 2–4 words visible at a time. Keep captions sentence-aware rather than rigidly dumping full transcript lines.
+- Prefer white text with restrained pale-green emphasis for important words. Use occasional italic/serif-style emphasis only for a genuinely meaningful phrase, not as decoration.
+- Avoid giant all-caps MrBeast captions, neon effects, noisy transitions, constant zooms, and fake kinetic movement.
+- Camera motion is restrained: use 1.02–1.045x punch-ins only on high-impact A-roll moments, never as filler.
+- Hard cuts are the default. Use whoosh/impact SFX selectively on major visual punctuation, not every B-roll transition.
+- Preserve a black or near-black visual breathing space around vertical imagery when the chosen composition calls for a framed/editorial-card look.
+- The edit should feel authored and cinematic: every visual switch must have a narrative reason.
+"""
+
         meme_instructions = ""
         if allow_memes:
             meme_instructions = """
@@ -144,12 +165,14 @@ CAMPAIGN: {campaign.name}
 CONTENT DOMAIN: {niche_desc}
 RELEVANT VISUAL THEMES: {niche_keywords_hint}
 
+{reference_style_guidelines}
+
 MANDATORY DIRECTING OBJECTIVES:
 1. FULL-DURATION UNIFORM PACING & TIMELINE SPREAD (CRITICAL):
    - Total Video Duration: {video_duration:.2f} seconds.
    - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
    - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
-   - Generate EXACTLY {target_shots} rapid, snappy cuts (1.5s to 2.4s each).
+   - Generate approximately {target_shots} cutaways, prioritizing narrative moments over a fixed quota; in cinematic social editorial mode use 0.8s–2.2s and allow micro-cut sequences when the sentence contains multiple distinct visual beats.
    - ABSOLUTE PROHIBITION ON FRONT-LOADING:
      DO NOT cluster all cuts in the first 10-15 seconds and leave the second half empty!
      You MUST spread B-roll cutaways across the ENTIRE video from start to finish!
@@ -162,7 +185,7 @@ MANDATORY DIRECTING OBJECTIVES:
    - SPEAKER BREATHING ROOM:
      Leave at least 1.0s to 1.8s of speaker on screen between cutaways so the edit breathes naturally.
    - Keep speaker on screen for the first 0.8s to 1.5s opening hook.
-   - Cutaway duration: 1.5s to 2.4s. NEVER let any cutaway drag out longer than 2.5 seconds. Cut back to speaker smoothly.
+   - Cutaway duration: {style.broll_min_duration:.1f}s to {style.broll_max_duration:.1f}s for the selected style. Never let a contextual cutaway drag without a visual reason.
 
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
