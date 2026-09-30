@@ -766,10 +766,14 @@ Return ONLY a valid JSON object matching this schema:
         if not clean_shots and not segments:
             return clean_shots, 0.0
 
-        min_speaker_gap = 1.0  # seconds of speaker face breathing space between cuts
-        max_gap_allowed = 4.0  # seconds: max continuous speaker time before a cutaway is needed
-        max_clip = min(float(getattr(campaign, "max_cutaway_seconds", 2.5)), float(Config.MAX_CLIP_DURATION_SECONDS))
-        min_clip = 1.4
+        is_cinematic = getattr(campaign, "editing_style", "") == "cinematic_editorial"
+        min_speaker_gap = 1.2 if is_cinematic else 1.0
+        max_gap_allowed = 5.2 if is_cinematic else 4.0
+        max_clip = min(
+            float(getattr(campaign, "max_cutaway_seconds", 2.5)),
+            5.0 if is_cinematic else float(Config.MAX_CLIP_DURATION_SECONDS),
+        )
+        min_clip = 1.2 if is_cinematic else 1.4
 
         # 1. Clean and space existing shots
         sorted_shots = sorted(clean_shots, key=lambda s: float(s.get("start_time", 0.0)))
@@ -829,19 +833,35 @@ Return ONLY a valid JSON object matching this schema:
         if tail_gap >= 3.8 and segments:
             tail_segs = [s for s in segments if s.get("end", 0.0) > last_end + 0.2]
             if tail_segs:
-                num_tail_shots = max(1, int(round((tail_gap - 0.8) / 3.4)))
-                step = max(1, len(tail_segs) // num_tail_shots)
-                cur_t = round(last_end + min_speaker_gap, 2)
-                for k in range(num_tail_shots):
-                    seg_idx = min(len(tail_segs) - 1, k * step)
-                    seg = tail_segs[seg_idx]
-                    rem_time = video_duration - 0.8 - cur_t
-                    if rem_time < min_clip:
-                        break
-                    shot_dur = min(max_clip, max(min_clip, round(min(2.0, rem_time), 2)))
-                    new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, cur_t, shot_dur, campaign, niche)
-                    cleaned.append(new_s)
-                    cur_t = round(new_s["end_time"] + min_speaker_gap, 2)
+                if is_cinematic:
+                    # Give the final narrative beat room to breathe instead of
+                    # forcing multiple short inserts into the ending.
+                    num_tail_shots = 1
+                    cur_t = round(last_end + min_speaker_gap, 2)
+                    rem_time = video_duration - 0.35 - cur_t
+                    if rem_time >= min_clip:
+                        seg = tail_segs[-1]
+                        shot_dur = min(max_clip, max(min_clip, round(rem_time, 2)))
+                        new_s = self._generate_contextual_shot_for_segment(
+                            seg, len(cleaned) + 1, cur_t, shot_dur, campaign, niche
+                        )
+                        cleaned.append(new_s)
+                else:
+                    num_tail_shots = max(1, int(round((tail_gap - 0.8) / 3.4)))
+                    step = max(1, len(tail_segs) // num_tail_shots)
+                    cur_t = round(last_end + min_speaker_gap, 2)
+                    for k in range(num_tail_shots):
+                        seg_idx = min(len(tail_segs) - 1, k * step)
+                        seg = tail_segs[seg_idx]
+                        rem_time = video_duration - 0.8 - cur_t
+                        if rem_time < min_clip:
+                            break
+                        shot_dur = min(max_clip, max(min_clip, round(min(2.0, rem_time), 2)))
+                        new_s = self._generate_contextual_shot_for_segment(
+                            seg, len(cleaned) + 1, cur_t, shot_dur, campaign, niche
+                        )
+                        cleaned.append(new_s)
+                        cur_t = round(new_s["end_time"] + min_speaker_gap, 2)
 
         # 5. Re-sort & Re-index shots sequentially
         cleaned = sorted(cleaned, key=lambda s: float(s.get("start_time", 0.0)))
@@ -849,7 +869,16 @@ Return ONLY a valid JSON object matching this schema:
             s["shot_id"] = f"broll_{idx+1}"
 
         # 6. Smooth Coverage Balancing (scale durations proportionally rather than deleting shots)
-        target_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        style_ratio = getattr(
+            active_style if "active_style" in locals() else None,
+            "broll_target_coverage",
+            None,
+        )
+        target_ratio = (
+            float(style_ratio)
+            if is_cinematic and style_ratio is not None
+            else niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        )
         target_broll_sec = video_duration * target_ratio
         total_broll = sum(s["duration"] for s in cleaned)
 
