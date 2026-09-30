@@ -228,6 +228,7 @@ class EditorialIntelligencePipeline:
             camera_moves=camera_moves,
             broll_shots=broll_decisions,
             video_duration=target_duration,
+            edit_intents=edit_intents,
         )
 
         # -------------------------------------------------------------
@@ -279,7 +280,7 @@ class EditorialIntelligencePipeline:
         )
 
         # -------------------------------------------------------------
-        # STEP 9: QUALITY GATE AUDIT & AUTO-REPAIR
+        # STEP 10: QUALITY GATE AUDIT & AUTO-REPAIR
         # -------------------------------------------------------------
         repaired_spec, quality_report = self.quality_gate.audit_and_repair(spec)
 
