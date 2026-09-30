@@ -3,14 +3,10 @@
 States:
   IDLE → ENTERING → VISIBLE → EMPHASIZED → EXITING → COMPLETE
 
-Transitions are triggered by the playback clock.  The state machine also
-resolves animation selection based on:
-  - EmphasisLevel (determines enter animation aggressiveness)
-  - EnergyLevel (HIGH → snappier transitions, LOW → gentler)
-  - Segment break (razor cut → SNAP/DIRECTIONAL instead of FADE)
-  - Position change (word moved to new region → SLIDE/DIRECTIONAL)
-
-All animation durations are clamped to 80–250 ms per spec.
+The state machine also resolves animation selection based on emphasis, energy,
+segment breaks and semantic impact. Extreme/hook words receive an explicit
+camera-impact recipe so renderers can make the word appear to fly toward the
+viewer rather than merely scale up.
 """
 
 from __future__ import annotations
@@ -25,7 +21,20 @@ from .caption_event import (
 logger = logging.getLogger(__name__)
 
 _MIN_ANIM_MS = 80
-_MAX_ANIM_MS = 250
+_MAX_ANIM_MS = 600
+
+CAMERA_IMPACT_PARAMS = {
+    "start_scale": 0.18,
+    "impact_scale": 1.72,
+    "overshoot_scale": 1.12,
+    "duration_ms": 560,
+    "rotation_deg": -4.0,
+    "motion_blur": 0.72,
+    "camera_punch": 0.82,
+    "camera_shake": 0.68,
+    "flash": 0.16,
+    "perspective": 0.35,
+}
 
 
 def _clamp_ms(v: int) -> int:
@@ -33,40 +42,55 @@ def _clamp_ms(v: int) -> int:
 
 
 class CaptionStateMachine:
-    """Assigns entry/exit animations and manages lifecycle state.
-
-    Call wire() once per render frame (or offline as a precompute pass).
-    """
+    """Assigns entry/exit animations and manages lifecycle state."""
 
     def wire(self, events: List[CaptionEvent]) -> List[CaptionEvent]:
-        """Resolve animations for all events.  Mutates in-place.
-
-        The state is set to IDLE initially; the renderer advances it.
-        """
+        """Resolve animations and impact recipes for all events."""
         prev: Optional[CaptionEvent] = None
 
         for ev in events:
             ev.state = CaptionState.IDLE
-
-            # ── Enter animation ────────────────────────────────────────────
             enter, enter_ms = self._select_enter(ev, prev)
             ev.enter_animation = enter
             ev.enter_duration_ms = _clamp_ms(enter_ms)
-
-            # ── Exit animation ─────────────────────────────────────────────
             exit_anim, exit_ms = self._select_exit(ev, prev)
             ev.exit_animation = exit_anim
             ev.exit_duration_ms = _clamp_ms(exit_ms)
-
+            self._apply_impact_recipe(ev)
             prev = ev
 
         return events
 
-    def advance(self, ev: CaptionEvent, current_time: float) -> CaptionState:
-        """Advance a single event's state based on current playback time.
+    @staticmethod
+    def _apply_impact_recipe(ev: CaptionEvent) -> None:
+        """Attach explicit render instructions to extreme impact words."""
+        semantic = (ev.semantic_type or "normal").strip().lower()
+        is_extreme = semantic in {"hook", "chaos", "extreme"} or ev.emphasis == EmphasisLevel.HOOK
+        is_strong = semantic in {"strong", "action"} or ev.emphasis == EmphasisLevel.STRONG
 
-        Returns the new state.  Caller responsible for rendering.
-        """
+        if is_extreme:
+            ev.motion_recipe = "kinetic:word-impact-camera"
+            ev.motion_params = dict(CAMERA_IMPACT_PARAMS)
+            ev.video_effect = "impact-camera-punch"
+            ev.emphasis_scale = max(ev.emphasis_scale, 1.55)
+            ev.font_size_scale = max(ev.font_size_scale, 1.35)
+            ev.enter_animation = AnimationType.OVERSHOOT
+            ev.enter_duration_ms = _clamp_ms(560)
+            ev.sfx_event = ev.sfx_event or "MAJOR_HOOK"
+            return
+
+        if is_strong:
+            ev.motion_recipe = "kinetic:boom"
+            ev.motion_params = {
+                "start_scale": 0.72,
+                "impact_scale": 1.24,
+                "duration_ms": 260,
+                "camera_punch": 0.22,
+            }
+            ev.video_effect = "impact-punch"
+
+    def advance(self, ev: CaptionEvent, current_time: float) -> CaptionState:
+        """Advance a single event's state based on current playback time."""
         enter_sec = ev.enter_duration_ms / 1000.0
         exit_sec = ev.exit_duration_ms / 1000.0
         visible_start = ev.start_time + enter_sec
@@ -88,60 +112,34 @@ class CaptionStateMachine:
 
         return ev.state
 
-    # ── Private ────────────────────────────────────────────────────────────
-
     @staticmethod
-    def _select_enter(
-        ev: CaptionEvent,
-        prev: Optional[CaptionEvent],
-    ) -> tuple[AnimationType, int]:
+    def _select_enter(ev: CaptionEvent, prev: Optional[CaptionEvent]) -> tuple[AnimationType, int]:
         """Select entry animation — justified by emphasis + energy + segment break."""
-
-        # Razor cut (new segment) → SNAP or DIRECTIONAL
         if ev.segment_break_before:
             if ev.energy == EnergyLevel.HIGH:
                 return AnimationType.SNAP, 90
             if ev.energy == EnergyLevel.LOW:
                 return AnimationType.FADE, 200
             return AnimationType.DIRECTIONAL, 120
-
-        # Hook words get the most dramatic entry
         if ev.emphasis == EmphasisLevel.HOOK:
-            return AnimationType.OVERSHOOT, 150
-
-        # Strong emphasis
+            return AnimationType.OVERSHOOT, 560
         if ev.emphasis == EmphasisLevel.STRONG:
             return AnimationType.POP, 120
-
-        # Moderate
         if ev.emphasis == EmphasisLevel.MODERATE:
             return AnimationType.SCALE, 110
-
-        # High energy normal words
         if ev.energy == EnergyLevel.HIGH:
             return AnimationType.SNAP, 90
-
-        # Low energy
         if ev.energy == EnergyLevel.LOW:
             return AnimationType.DRIFT, 200
-
-        # Default
         return AnimationType.SNAP, 110
 
     @staticmethod
-    def _select_exit(
-        ev: CaptionEvent,
-        prev: Optional[CaptionEvent],
-    ) -> tuple[AnimationType, int]:
+    def _select_exit(ev: CaptionEvent, prev: Optional[CaptionEvent]) -> tuple[AnimationType, int]:
         """Select exit animation — typically shorter and simpler than entry."""
-
         if ev.emphasis == EmphasisLevel.HOOK:
             return AnimationType.SCALE, 100
-
         if ev.energy == EnergyLevel.HIGH:
             return AnimationType.SNAP, 80
-
         if ev.energy == EnergyLevel.LOW:
             return AnimationType.FADE, 180
-
         return AnimationType.SNAP, 90
