@@ -28,6 +28,7 @@ from ai_broll_autopilot.services.edit_director import EditPlan
 from ai_broll_autopilot.services.subject_caption import annotate_segments_for_subject_captions, has_behind_subject_segments
 from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
 from ai_broll_autopilot.services.qc_service import edit_quality_service
+from ai_broll_autopilot.services.broll_super_director import broll_super_director
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +310,35 @@ class Orchestrator:
                 campaign_id=job.campaign_id,
                 curated_moment_id=moment_id_cand
             )
+
+            # Audio-aware B-roll Super Director: identify the most impactful
+            # dialogue moments from both words and vocal delivery before retrieval.
+            try:
+                niche_ctx = (edit_plan.get("niche") or {}).get("name") if isinstance(edit_plan, dict) else None
+                style_ctx = (edit_plan.get("style") or {}).get("name") if isinstance(edit_plan, dict) else None
+                super_analysis = await broll_super_director.analyze(
+                    source_video=job.source_file,
+                    transcript_segments=job.transcript_segments or [],
+                    video_duration=duration,
+                    output_dir=work_dir / "broll_super",
+                    niche=niche_ctx or getattr(campaign, "name", "generic"),
+                    style=style_ctx or getattr(campaign, "subtitle_style", "clean_podcast"),
+                    target_shots=max(3, len(edit_plan.get("shots", []) or [])),
+                )
+                edit_plan = broll_super_director.apply_to_plan(
+                    edit_plan,
+                    super_analysis,
+                    duration,
+                )
+                if super_analysis.get("moments"):
+                    logger.info(
+                        "B-roll Super Director selected %d emotional opportunities using %s",
+                        len(super_analysis["moments"]),
+                        super_analysis.get("model"),
+                    )
+            except Exception as super_err:
+                logger.warning("B-roll Super Director skipped; preserving existing Director plan: %s", super_err)
+
             job.edit_plan = edit_plan
             self.db.save_job(job)
 
@@ -623,6 +653,24 @@ class Orchestrator:
                 custom_hook=workflow.get("title") or None,
             )
             plan = plan_obj.to_dict()
+
+            try:
+                super_analysis = await broll_super_director.analyze(
+                    source_video=job.source_file,
+                    transcript_segments=job.transcript_segments or [],
+                    video_duration=full_duration,
+                    output_dir=work_dir / "broll_super",
+                    niche=niche_id,
+                    style=style_id,
+                    target_shots=max(3, len(plan.get("shots", []) or [])),
+                )
+                plan = broll_super_director.apply_to_plan(
+                    plan,
+                    super_analysis,
+                    full_duration,
+                )
+            except Exception as super_err:
+                logger.warning("Child B-roll Super Director skipped: %s", super_err)
 
             render_settings = plan.setdefault("render_settings", {})
             render_settings["caption_engine"] = "rapid_razor"
