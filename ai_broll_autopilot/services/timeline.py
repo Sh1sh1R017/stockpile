@@ -36,6 +36,9 @@ class TimelineEngine:
         cyber_grid_mask_after_idx: int = None,
         reference_style: bool = False,
         reference_card_mask_idx: int = None,
+        reference_card_width_ratio: float = 0.944,
+        reference_card_height_ratio: float = 0.574,
+        reference_card_radius: int = 52,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
         subject-aware typography and behind-subject captions, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
@@ -115,8 +118,8 @@ class TimelineEngine:
                 # Reference style: a centered editorial card on a near-black canvas.
                 # Measurements are based on the supplied final edit: ~94% canvas width
                 # and ~57% canvas height, with strongly rounded corners.
-                card_w = int(round(self.width * 0.944))
-                card_h = int(round(self.height * 0.574))
+                card_w = int(round(self.width * reference_card_width_ratio))
+                card_h = int(round(self.height * reference_card_height_ratio))
                 card_w -= card_w % 2
                 card_h -= card_h % 2
                 card_x = (self.width - card_w) // 2
