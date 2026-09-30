@@ -5,10 +5,10 @@ anything; it decides how much visual/audio attention each moment deserves so the
 caption, B-roll, meme, SFX, and camera systems can share one editorial language.
 """
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from ai_broll_autopilot.services.editorial.types import (
+    EditIntent,
     EditorialMoment,
     NarrativeRole,
     SentimentCategory,
@@ -16,39 +16,6 @@ from ai_broll_autopilot.services.editorial.types import (
 
 
 @dataclass
-class EditIntent:
-    semantic_importance: float
-    emotional_importance: float
-    hook_relevance: float
-    speaker_emphasis: float
-    visual_opportunity: float
-    meme_opportunity: float
-    caption_energy: float
-    broll_pressure: float
-    sfx_opportunity: float
-    chaos_score: float
-    quietness_score: float
-    treatment: str
-    reason: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "semantic_importance": round(self.semantic_importance, 3),
-            "emotional_importance": round(self.emotional_importance, 3),
-            "hook_relevance": round(self.hook_relevance, 3),
-            "speaker_emphasis": round(self.speaker_emphasis, 3),
-            "visual_opportunity": round(self.visual_opportunity, 3),
-            "meme_opportunity": round(self.meme_opportunity, 3),
-            "caption_energy": round(self.caption_energy, 3),
-            "broll_pressure": round(self.broll_pressure, 3),
-            "sfx_opportunity": round(self.sfx_opportunity, 3),
-            "chaos_score": round(self.chaos_score, 3),
-            "quietness_score": round(self.quietness_score, 3),
-            "treatment": self.treatment,
-            "reason": self.reason,
-        }
-
-
 class CreativeDirector:
     """Master attention allocator for the editorial pipeline."""
 
