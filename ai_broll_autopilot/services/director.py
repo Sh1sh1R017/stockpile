@@ -411,6 +411,9 @@ Return ONLY a valid JSON object matching this schema:
             # Preserve or detect Level 3 typographic emphasis graphics
             emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
 
+            from ai_broll_autopilot.styles import style_registry
+            active_style = style_registry.get_style(editing_style_id)
+
             plan_result = {
                 "total_duration": video_duration,
                 "broll_shot_count": len(clean_shots),
@@ -422,10 +425,7 @@ Return ONLY a valid JSON object matching this schema:
                 "editing_style": editing_style_id,
                 "shots": clean_shots,
                 "text_emphasis_graphics": emphasis_graphics,
-                "style": {
-                    "id": editing_style_id,
-                    "style_id": editing_style_id,
-                },
+                "style": active_style.to_dict(),
             }
 
             logger.info(f"AI Director planned {len(clean_shots)} B-roll cutaways covering {total_broll_time:.1f}s ({coverage_pct}% of {video_duration:.1f}s)")
