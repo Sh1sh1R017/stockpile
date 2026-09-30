@@ -83,7 +83,11 @@ class Renderer:
         style_id = ""
         if isinstance(style_meta, dict):
             style_id = str(style_meta.get("id") or style_meta.get("style_id") or "").lower()
-        reference_style = style_id == "cinematic_social_editorial"
+        reference_style = (
+            style_id == "cinematic_social_editorial"
+            or str(edit_plan.get("render_settings", {}).get("preset", "")).lower() == "cinematic_editorial"
+            or str(edit_plan.get("render_settings", {}).get("subtitle_style", "")).lower() == "cinematic_editorial"
+        )
         reference_card = (
             edit_plan.get("render_settings", {}).get("reference_card", {})
             if reference_style
