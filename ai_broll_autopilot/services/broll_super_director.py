@@ -162,7 +162,8 @@ class BrollSuperDirector:
         merged: List[Dict[str, Any]] = []
         for idx, original in enumerate(existing):
             if idx >= len(selected):
-                merged.append(dict(original))
+                # Do not preserve low-value Director filler when the super model
+                # explicitly found fewer strong visual opportunities.
                 continue
 
             moment = selected[idx]
