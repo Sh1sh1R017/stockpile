@@ -54,7 +54,7 @@ class TimelineEngine:
         if reference_style and reference_card_mask_idx is not None:
             reference_mask_labels = [f"ref_mask_{i}" for i in range(len(shots) + 1)]
             filters.append(
-                f"[{reference_card_mask_idx}:v]format=gray,"
+                f"[{reference_card_mask_idx}:v]fps={self.fps},format=gray,"
                 f"split={len(reference_mask_labels)}"
                 + "".join(f"[{label}]" for label in reference_mask_labels)
             )
