@@ -30,6 +30,7 @@ from ai_broll_autopilot.services.editorial.types import (
     QualityAuditReport,
 )
 from ai_broll_autopilot.services.editorial.visual_variety import VisualVarietyEngine
+from ai_broll_autopilot.services.editorial.creative_director import creative_director
 
 logger = logging.getLogger("autopilot.editorial.pipeline")
 
@@ -116,11 +117,39 @@ class EditorialIntelligencePipeline:
         )
 
         # -------------------------------------------------------------
-        # STEP 3: CONTEXTUAL, SENTIMENT-AWARE B-ROLL SELECTION
+        # STEP 3: CENTRAL CREATIVE DIRECTOR / EDIT INTENT
+        # -------------------------------------------------------------
+        # Every downstream system receives the same attention allocation.
+        # This prevents captions, B-roll, memes, SFX, and camera motion from
+        # independently deciding that the same sentence deserves maximum impact.
+        hook_moment_id = ""
+        if selected_hook:
+            hook_start = float(selected_hook.start_time)
+            hook_moment = min(
+                moments,
+                key=lambda m: abs(float(m.start_time) - hook_start),
+                default=None,
+            )
+            hook_moment_id = hook_moment.moment_id if hook_moment else ""
+
+        edit_intents = creative_director.analyze(moments, hook_moment_id=hook_moment_id)
+        for moment, intent in zip(moments, edit_intents):
+            # The dataclass contract lives in editorial.types; copy the
+            # provider-agnostic decision into the moment for serialization.
+            from ai_broll_autopilot.services.editorial.types import EditIntent
+            moment.edit_intent = EditIntent(**intent.to_dict())
+
+        # -------------------------------------------------------------
+        # STEP 4: CONTEXTUAL, SENTIMENT-AWARE B-ROLL SELECTION
         # -------------------------------------------------------------
         broll_decisions: List[ContextualBrollDecision] = []
 
         for idx, moment in enumerate(moments):
+            intent = moment.edit_intent
+            # Keep high-value visual opportunities while allowing genuinely
+            # quiet moments to remain A-roll instead of filling the timeline.
+            if intent and intent.broll_pressure < 0.30 and idx != 0:
+                continue
             decision = self.broll_intelligence.evaluate_and_plan_shot(
                 moment=moment,
                 available_assets=assets,
@@ -131,7 +160,7 @@ class EditorialIntelligencePipeline:
                 broll_decisions.append(decision)
 
         # -------------------------------------------------------------
-        # STEP 4: KINETIC TEXT OVERLAYS & HOOK CARD
+        # STEP 5: KINETIC TEXT OVERLAYS & HOOK CARD
         # -------------------------------------------------------------
         captions: List[EditorialCaptionSpec] = []
         hook_title_text = custom_hook or selected_hook.tightened_text
@@ -172,12 +201,14 @@ class EditorialIntelligencePipeline:
                 break  # Max 1 additional callout to avoid text clutter
 
         # -------------------------------------------------------------
-        # STEP 5: CAMERA PUNCH-IN ZOOMS
+        # STEP 6: CAMERA PUNCH-IN ZOOMS
         # -------------------------------------------------------------
         camera_moves: List[EditorialCameraSpec] = []
         for m in moments:
-            # Emphatic statement or climactic reveal warrants a punch-in zoom
-            if m.speaker_emphasis >= 0.70 or m.narrative_role in [NarrativeRole.CLAIM, NarrativeRole.REVEAL]:
+            # Camera punches now require Creative Director approval instead of
+            # firing on every claim/reveal independently.
+            intent = m.edit_intent
+            if intent and intent.treatment in {"impact", "absurd"} and m.speaker_emphasis >= 0.62:
                 camera_moves.append(
                     EditorialCameraSpec(
                         camera_id=f"cam_punch_{m.moment_id}",
@@ -189,7 +220,7 @@ class EditorialIntelligencePipeline:
                 )
 
         # -------------------------------------------------------------
-        # STEP 6: SOUND DESIGN & SYNCHRONIZATION
+        # STEP 7: SOUND DESIGN & SYNCHRONIZATION
         # -------------------------------------------------------------
         sfx_cues = self.sound_designer.design_soundscape(
             moments=moments,
@@ -200,7 +231,7 @@ class EditorialIntelligencePipeline:
         )
 
         # -------------------------------------------------------------
-        # STEP 7: PACING & COGNITIVE PROCESSING LOAD BALANCING
+        # STEP 8: PACING & COGNITIVE PROCESSING LOAD BALANCING
         # -------------------------------------------------------------
         broll_decisions, camera_moves, sfx_cues = self.pacing_model.audit_and_balance_load(
             moments=moments,
@@ -212,7 +243,7 @@ class EditorialIntelligencePipeline:
         energy_curve = self.pacing_model.build_energy_curve(moments)
 
         # -------------------------------------------------------------
-        # STEP 8: ASSEMBLE MASTER EDIT SPECIFICATION
+        # STEP 9: ASSEMBLE MASTER EDIT SPECIFICATION
         # -------------------------------------------------------------
         spec = EditorialEditSpecification(
             spec_id=spec_id,
@@ -225,6 +256,7 @@ class EditorialIntelligencePipeline:
             sfx_cues=sfx_cues,
             camera_moves=camera_moves,
             energy_curve=energy_curve,
+            edit_intents=edit_intents,
             metadata={
                 "generator": "Stockpile Editorial Intelligence Pipeline",
                 "version": "2.0.0",
@@ -234,6 +266,15 @@ class EditorialIntelligencePipeline:
                 "sfx_count": len(sfx_cues),
                 "niche": getattr(niche_profile, "name", "generic"),
                 "style": getattr(style_profile, "name", "clean_podcast"),
+                "creative_director": {
+                    "version": "1.0",
+                    "intent_count": len(edit_intents),
+                    "treatment_counts": {
+                        treatment: sum(1 for i in edit_intents if i.treatment == treatment)
+                        for treatment in ("quiet", "normal", "kinetic", "impact", "absurd")
+                    },
+                    "average_chaos": round(sum(i.chaos_score for i in edit_intents) / max(1, len(edit_intents)), 3),
+                },
             },
         )
 
