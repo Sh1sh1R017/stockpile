@@ -138,6 +138,12 @@ class BrollSuperDirector:
             plan["broll_super_analysis"] = analysis
             return plan
 
+        reference_style = "cinematic social editorial" in str(plan.get("style", "")).lower() or str(plan.get("style_id", "")).lower() == "cinematic_social_editorial"
+        if not reference_style:
+            style_meta = plan.get("style") or {}
+            if isinstance(style_meta, dict):
+                reference_style = str(style_meta.get("id", style_meta.get("style_id", ""))).lower() == "cinematic_social_editorial"
+
         existing = list(plan.get("shots") or [])
         if not existing:
             existing = [{} for _ in range(min(8, len(moments)))]
@@ -175,14 +181,16 @@ class BrollSuperDirector:
             moment = selected[idx]
             shot = dict(original)
             start = float(moment["start"])
+            min_duration = 0.8 if reference_style else 1.2
+            max_duration = 2.2 if reference_style else 2.6
             duration = min(
-                float(shot.get("duration", 2.0) or 2.0),
-                float(moment.get("recommended_duration", 2.2) or 2.2),
-                2.6,
+                float(shot.get("duration", max_duration) or max_duration),
+                float(moment.get("recommended_duration", max_duration) or max_duration),
+                max_duration,
             )
-            duration = max(1.2, duration)
+            duration = max(min_duration, duration)
             end = min(video_duration, start + duration)
-            if end - start < 1.0:
+            if end - start < max(0.5, min_duration * 0.75):
                 continue
 
             shot.update({
@@ -216,7 +224,7 @@ class BrollSuperDirector:
         cleaned: List[Dict[str, Any]] = []
         last_end = 0.0
         for shot in merged:
-            start = max(float(shot.get("start_time", 0)), last_end + 0.15)
+            start = max(float(shot.get("start_time", 0)), last_end + (0.10 if reference_style else 0.15))
             end = min(video_duration, float(shot.get("end_time", start + 1.2)))
             if end - start < 1.0:
                 continue
