@@ -404,3 +404,14 @@ def test_cinematic_editorial_reference_style():
     caption = next(c for c in project["project"]["textClips"] if c["trackId"] == "track_captions")
     assert caption["transform"]["position"]["x"] == 0.5
     assert caption["transform"]["position"]["y"] == 0.50
+
+
+def test_default_campaign_uses_cinematic_editorial_reference_style():
+    from ai_broll_autopilot.campaigns import campaign_registry
+
+    campaign = campaign_registry.get_campaign("default")
+    assert campaign.editing_style == "cinematic_editorial"
+    assert campaign.subtitle_style == "editorial_story"
+    assert campaign.subtitle_position == "center"
+    assert campaign.frame_viewport == (20, 410, 1040, 1100)
+    assert campaign.max_cutaway_seconds == 5.0
