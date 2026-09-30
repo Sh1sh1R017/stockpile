@@ -139,22 +139,15 @@ class StockSwapRequest(BaseModel):
 
 class JobSettingsRequest(BaseModel):
     subtitles_enabled: Optional[bool] = Field(None, description="Toggle kinetic subtitles on/off")
-    subtitle_style: Optional[str] = Field(None, description="Subtitle style / ZapCap preset: hormozi, beast, clean, etc.")
-    preset: Optional[str] = Field(None, description="ZapCap preset alias for subtitle_style")
+    subtitle_style: Optional[str] = Field(None, description="Subtitle style: hormozi, beast, clean")
     subtitle_position: Optional[str] = Field(None, description="Subtitle position: bottom, center, top")
     subtitles_behind_subject: Optional[bool] = Field(None, description="Place kinetic captions behind the detected foreground subject")
-    custom_colors: Optional[Dict[str, str]] = Field(None, description="Custom 3-color palette {main, second, third}")
-    enable_emojis: Optional[bool] = Field(None, description="Toggle contextual emojis on/off")
-    words_per_beat: Optional[int] = Field(None, ge=1, le=8, description="Words grouped per caption beat (1-4 recommended)")
-    subtitle_y_percent: Optional[float] = Field(None, ge=0.0, le=100.0, description="Vertical position percentage (0=top, 100=bottom)")
-    caption_motion: Optional[str] = Field(None, description="Caption motion profile: word-pop, bounce, scale, fade, snap")
     bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
     bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
     bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
     hdr_upscale_enabled: Optional[bool] = Field(None, description="Toggle SDR2HDR upscale & HDR10 output")
     hdr_output_scale: Optional[float] = Field(None, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)")
     hdr_tone: Optional[str] = Field(None, description="HDR tone: vivid or reference")
-
 
 
 class HdrUpscaleRequest(BaseModel):
@@ -246,43 +239,6 @@ async def list_jobs(limit: int = 50):
     return res
 
 
-def ensure_job_subtitles(job: Job) -> List[Dict[str, Any]]:
-    """Ensure job has rhythmic word-level subtitles from transcript or ASS file."""
-    if not job.edit_plan or not isinstance(job.edit_plan, dict):
-        return []
-    existing = job.edit_plan.get("subtitles")
-    if existing and len(existing) > 0:
-        return existing
-
-    subs = []
-    if getattr(job, "transcript_segments", None) and len(job.transcript_segments) > 0:
-        try:
-            from ai_broll_autopilot.services.razor_caption.engine import RazorCaptionEngine
-            engine = RazorCaptionEngine()
-            events = engine.process(job.transcript_segments)
-            subs = engine.to_subtitles(events, "hormozi")
-        except Exception as e:
-            logger.warning(f"Failed to generate razor subtitles from transcript: {e}")
-
-    if not subs:
-        wk_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
-        for ass_name in ("subtitles_kinetic.ass", "subtitles_normal.ass", "subtitles.ass"):
-            ass_p = wk_dir / ass_name
-            if ass_p.exists():
-                from ai_broll_autopilot.services.openreel_adapter import extract_subtitles_from_ass
-                subs = extract_subtitles_from_ass(ass_p)
-                if subs:
-                    break
-
-    if subs:
-        job.edit_plan["subtitles"] = subs
-        try:
-            db.update_job(job)
-        except Exception:
-            pass
-    return subs
-
-
 @app.get("/api/jobs/{job_id}")
 async def get_job_detail(job_id: str):
     """Retrieve full details, transcript, and edit plan for a specific job."""
@@ -301,9 +257,6 @@ async def get_job_detail(job_id: str):
                 survey_data = json.loads(survey_path.read_text(encoding="utf-8"))
             except Exception:
                 pass
-
-    # Ensure subtitles are hydrated
-    ensure_job_subtitles(job)
 
     # Enhance edit_plan shots with direct B-roll video preview URLs
     enhanced_edit_plan = None
@@ -625,22 +578,30 @@ async def get_job_openreel_project(job_id: str, mode: Optional[str] = None):
     except Exception:
         pass
 
-    # Ensure subtitles are hydrated from transcript or ASS file
-    ensure_job_subtitles(job)
-
-    # Use the canonical EditPlan reconstruction so OpenReel receives the
-    # complete v2.1 structure (A-roll ranges, graphics, captions, SFX, etc.).
-    plan_obj = get_job_edit_plan(job)
-    plan_obj.target_duration = total_dur
-    plan_obj.source_media = {
-        **(plan_obj.source_media or {}),
-        "path": job.source_file,
-        "duration": source_duration,
-        "title": job.source_filename,
-        "width": (plan_obj.source_media or {}).get("width", 1920),
-        "height": (plan_obj.source_media or {}).get("height", 1080),
-        "fps": (plan_obj.source_media or {}).get("fps", 30),
-    }
+    plan_obj = EditPlan(
+        plan_id=plan_dict.get("plan_id", f"plan_{job.job_id}"),
+        title=plan_dict.get("title", f"AI Edit: {Path(job.source_filename).stem}"),
+        target_duration=total_dur,
+        source_media={
+            "path": job.source_file,
+            "duration": source_duration,
+            "title": job.source_filename,
+            "width": plan_dict.get("source_media", {}).get("width", 1920),
+            "height": plan_dict.get("source_media", {}).get("height", 1080),
+            "fps": plan_dict.get("source_media", {}).get("fps", 30),
+        },
+        clip_interval=plan_dict.get(
+            "clip_interval",
+            {"in_point": 0.0, "out_point": total_dur},
+        ),
+        niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
+        style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
+        shots=plan_dict.get("shots", []),
+        text_overlays=plan_dict.get("text_overlays", []),
+        subtitles=plan_dict.get("subtitles", []),
+        zooms=plan_dict.get("zooms", []),
+        audio_cues=plan_dict.get("audio_cues", {}),
+    )
 
     oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
     oreel_dir.mkdir(parents=True, exist_ok=True)
@@ -709,8 +670,21 @@ async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
     # 3. Synchronize edit_plan in SQLite if job has one
     if job.edit_plan and isinstance(job.edit_plan, dict):
         plan_dict = job.edit_plan
-        # Rehydrate the canonical plan without dropping v2.1 timeline fields.
-        plan_obj = get_job_edit_plan(job)
+        plan_obj = EditPlan(
+            plan_id=f"plan_{job.job_id}",
+            title=plan_dict.get("title", f"Edit: {Path(job.source_filename).stem}"),
+            target_duration=float(plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0),
+            source_media={"path": job.source_file, "duration": float(plan_dict.get("total_duration") or 30.0), "title": job.source_filename},
+            clip_interval=plan_dict.get("clip_interval", {"in_point": 0.0, "out_point": 30.0}),
+            niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
+            style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
+            shots=plan_dict.get("shots", []),
+            text_overlays=plan_dict.get("text_overlays", []),
+            subtitles=plan_dict.get("subtitles", []),
+            zooms=plan_dict.get("zooms", []),
+            audio_cues=plan_dict.get("audio_cues", {}),
+        )
+
         updated_plan = openreel_adapter.update_edit_plan_from_openreel(plan_obj, save_data)
         updated_dict = updated_plan.to_dict()
         # Mark with OpenReel edit tag
@@ -2052,16 +2026,9 @@ async def get_bgm_track_audio(track_id: str):
     return FileResponse(path=str(p), media_type=media_type, filename=p.name)
 
 
-@app.get("/api/caption-presets")
-async def get_caption_presets():
-    """Return all 21 ZapCap-style typography and visual presets."""
-    from ai_broll_autopilot.services.razor_caption.presets import list_all_presets
-    return {"status": "success", "presets": list_all_presets()}
-
-
 @app.post("/api/jobs/{job_id}/settings")
 async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
-    """Update subtitle formatting, ZapCap preset, positioning, and background music settings for a job."""
+    """Update subtitle formatting and background music settings for a job."""
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2070,51 +2037,18 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
         job.edit_plan = {"shots": []}
 
     settings = job.edit_plan.get("render_settings", {})
-    caption_changed = False
-
     if req.subtitles_enabled is not None:
         settings["subtitles_enabled"] = req.subtitles_enabled
-        caption_changed = True
-    if req.preset is not None:
-        settings["preset"] = req.preset.lower()
-        settings["subtitle_style"] = req.preset.lower()
-        caption_changed = True
-    elif req.subtitle_style is not None:
-        settings["subtitle_style"] = req.subtitle_style.lower()
-        settings["preset"] = req.subtitle_style.lower()
-        caption_changed = True
+    if req.subtitle_style is not None:
+        settings["subtitle_style"] = req.subtitle_style
     if req.subtitle_position is not None:
         settings["subtitle_position"] = req.subtitle_position
-        caption_changed = True
-    if req.subtitle_y_percent is not None:
-        settings["subtitle_y_percent"] = req.subtitle_y_percent
-        caption_changed = True
-    if req.custom_colors is not None:
-        settings["custom_colors"] = req.custom_colors
-        caption_changed = True
-    if req.enable_emojis is not None:
-        settings["enable_emojis"] = req.enable_emojis
-        caption_changed = True
-    if req.words_per_beat is not None:
-        settings["words_per_beat"] = req.words_per_beat
-        caption_changed = True
-    if req.caption_motion is not None:
-        settings["caption_motion"] = req.caption_motion
-        caption_changed = True
-
     if req.subtitles_behind_subject is not None:
         settings["subtitles_behind_subject"] = req.subtitles_behind_subject
-        job.edit_plan["subtitles_behind_subject"] = req.subtitles_behind_subject
         for subtitle in job.edit_plan.get("subtitles", []):
             subtitle["behind_subject"] = req.subtitles_behind_subject
-        caption_changed = True
-
-    if caption_changed:
-        # Clear cached razor captions so fresh events are generated with the new styling upon re-render
-        job.edit_plan.pop("razor_captions", None)
         job.edit_plan["render_stale"] = True
         job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
-
     if req.bgm_track_id is not None:
         settings["bgm_track_id"] = req.bgm_track_id if req.bgm_track_id != "none" else None
     if req.bgm_volume is not None:
@@ -2132,7 +2066,6 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
     job.edit_plan["render_settings"] = settings
     db.save_job(job)
     return {"status": "success", "render_settings": settings}
-
 
 
 async def _execute_rerender_job(job_id: str):
@@ -2181,19 +2114,6 @@ async def _execute_rerender_job(job_id: str):
         behind_subject_ass_path = None
         subject_matte_path = None
         if sub_enabled and job.transcript_segments:
-            hook_txt = job.edit_plan.get("hook_text")
-            if not hook_txt and getattr(campaign, "curated_moments", None):
-                hook_txt = campaign.curated_moments[0].screen_hook
-
-            user_margin_v = None
-            if settings.get("subtitle_y_percent") is not None:
-                y_pct = float(settings["subtitle_y_percent"])
-                user_margin_v = max(80, min(1700, int(1920 * (1.0 - y_pct / 100.0))))
-            elif sub_pos in ["top", "center"]:
-                user_margin_v = None
-            else:
-                user_margin_v = getattr(campaign, "subtitle_margin_v", 280)
-
             ass_path, behind_subject_ass_path, subject_matte_path = await orchestrator._prepare_caption_render_assets(
                 source_video=job.source_file,
                 edit_plan=job.edit_plan,
@@ -2201,11 +2121,11 @@ async def _execute_rerender_job(job_id: str):
                 work_dir=work_dir,
                 style_preset=sub_style,
                 position=sub_pos,
-                custom_margin_v=user_margin_v,
-                hook_text=hook_txt,
-                hook_duration=4.0,
-                suppress_hook=False,
-                text_emphasis_events=job.edit_plan.get("text_emphasis_graphics"),
+                custom_margin_v=getattr(campaign, "subtitle_margin_v", 280),
+                hook_text=None,
+                hook_duration=None,
+                suppress_hook=True,
+                text_emphasis_events=None,
             )
             caption_motion = job.edit_plan.get("render_settings", {}).get("caption_motion", caption_motion)
 
@@ -2505,12 +2425,166 @@ class OpenShortsRequest(BaseModel):
     auto_hook: bool = True
     confirm_rights: bool = False
 
+class ShortEditRequest(BaseModel):
+    start: float = Field(..., ge=0.0)
+    end: float = Field(..., gt=0.0)
+    title: str = Field("Edited Short", max_length=160)
+    caption_style: str = Field("razor_pop")
+    caption_motion: str = Field("word-pop")
+    subtitles_behind_subject: bool = True
+
+
+class OpenShortsBatchEditRequest(BaseModel):
+    candidates: List[Dict[str, Any]]
+    batch_id: Optional[str] = None
+    caption_style: str = Field("razor_pop")
+    caption_motion: str = Field("word-pop")
+    subtitles_behind_subject: bool = True
+
+
 class CaptionMotionRequest(BaseModel):
     profile: str = "word-pop"
 
 
 
 
+
+
+@app.post("/api/jobs/{job_id}/shorts/edit")
+async def create_single_stockpile_short(job_id: str, req: ShortEditRequest):
+    """Queue one known interval for the full Stockpile editing pipeline."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    batch_id = f"single_{job_id}_{int(req.start * 1000)}_{int(req.end * 1000)}"
+    try:
+        duration = get_video_duration(job.source_file)
+        start = float(req.start)
+        end = min(float(req.end), duration)
+        if end <= start:
+            raise ValueError("End time must be greater than start time")
+        child_id = await orchestrator.enqueue_short_edit(
+            parent_job_id=job_id,
+            start=start,
+            end=end,
+            title=req.title,
+            source="manual",
+            batch_id=batch_id,
+            caption_style=req.caption_style,
+            caption_motion=req.caption_motion,
+            subtitles_behind_subject=req.subtitles_behind_subject,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "status": "queued",
+        "job_id": job_id,
+        "child_job_id": child_id,
+        "batch_id": batch_id,
+    }
+
+
+@app.post("/api/jobs/{job_id}/openshorts/edits")
+async def create_openshorts_stockpile_edits(job_id: str, req: OpenShortsBatchEditRequest):
+    """Turn selected OpenShorts candidates into independent Stockpile child edits."""
+    parent = db.get_job(job_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    import uuid
+    batch_id = req.batch_id or f"batch_{uuid.uuid4().hex[:10]}"
+    valid_candidates = []
+    from ai_broll_autopilot.services.shorts_workflow import normalize_clip_candidate
+
+    for index, raw in enumerate(req.candidates):
+        candidate = normalize_clip_candidate(raw, index=index)
+        if candidate:
+            valid_candidates.append(candidate)
+
+    if not valid_candidates:
+        raise HTTPException(status_code=400, detail="No valid clip candidates were supplied")
+
+    if len(valid_candidates) > 15:
+        valid_candidates = valid_candidates[:15]
+
+    edits = []
+    for candidate in valid_candidates:
+        try:
+            child_id = await orchestrator.enqueue_short_edit(
+                parent_job_id=job_id,
+                start=candidate["start"],
+                end=candidate["end"],
+                title=candidate["title"],
+                source="openshorts",
+                batch_id=batch_id,
+                candidate_id=candidate["id"],
+                caption_style=req.caption_style,
+                caption_motion=req.caption_motion,
+                subtitles_behind_subject=req.subtitles_behind_subject,
+            )
+            edits.append({
+                "job_id": child_id,
+                "title": candidate["title"],
+                "status": "QUEUED",
+                "progress": 0.0,
+                "source": "openshorts",
+                "start": candidate["start"],
+                "end": candidate["end"],
+                "batch_id": batch_id,
+            })
+        except ValueError as exc:
+            edits.append({
+                "title": candidate["title"],
+                "status": "FAILED",
+                "progress": 0.0,
+                "source": "openshorts",
+                "start": candidate["start"],
+                "end": candidate["end"],
+                "batch_id": batch_id,
+                "error": str(exc),
+            })
+
+    return {
+        "status": "queued",
+        "job_id": job_id,
+        "batch_id": batch_id,
+        "edits": edits,
+    }
+
+
+@app.get("/api/jobs/{job_id}/shorts")
+async def list_stockpile_child_shorts(job_id: str, batch_id: Optional[str] = None):
+    """List independent short edits generated from a parent long-form job."""
+    parent = db.get_job(job_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    edits = []
+    for child in db.list_jobs(limit=300):
+        workflow = (child.edit_plan or {}).get("workflow", {}) if child.edit_plan else {}
+        if workflow.get("parent_job_id") != job_id:
+            continue
+        if batch_id and workflow.get("batch_id") != batch_id:
+            continue
+        interval = workflow.get("source_interval", {})
+        edits.append({
+            "job_id": child.job_id,
+            "title": workflow.get("title") or child.source_filename,
+            "status": child.status.value,
+            "progress": child.progress,
+            "output_video_path": child.output_video_path,
+            "drive_file_url": child.drive_file_url,
+            "source": workflow.get("source", "manual"),
+            "start": float(interval.get("start", 0.0)),
+            "end": float(interval.get("end", 0.0)),
+            "batch_id": workflow.get("batch_id"),
+            "candidate_id": workflow.get("candidate_id"),
+            "error": child.error_message,
+        })
+    edits.sort(key=lambda item: (item.get("start", 0.0), item["job_id"]))
+    return {"job_id": job_id, "batch_id": batch_id, "edits": edits}
 
 
 @app.post("/api/jobs/{job_id}/openshorts")
@@ -2571,6 +2645,26 @@ async def submit_job_to_openshorts(job_id: str, req: OpenShortsRequest):
         "openshorts_job_id": result.get("job_id"),
         "provider_response": result,
     }
+
+
+@app.get("/api/jobs/{job_id}/openshorts/candidates")
+async def get_cached_openshorts_candidates(job_id: str):
+    """Return the most recent cached OpenShorts candidates without rerunning discovery."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    records = (job.edit_plan or {}).get("openshorts_jobs", []) if job.edit_plan else []
+    for record in reversed(records):
+        clips = record.get("clips") or []
+        if clips:
+            return {
+                "status": record.get("status", "completed"),
+                "openshorts_job_id": record.get("job_id"),
+                "clips": clips,
+                "cached": True,
+            }
+    return {"status": "idle", "openshorts_job_id": None, "clips": [], "cached": False}
 
 
 @app.get("/api/jobs/{job_id}/openshorts/{openshorts_job_id}")
