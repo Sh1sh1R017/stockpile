@@ -333,7 +333,7 @@ class MemeEngine:
             stroke_width=2, stroke_fill=(250, 250, 250, 200)
         )
 
-    def select_meme_sfx(self, template_key: str) -> Optional[Dict[str, Any]]:
+    def select_meme_sfx(self, template_key: str, meme_intensity: str = "subtle") -> Optional[Dict[str, Any]]:
         """Select a hilarious, punchy sound effect from our 189 SFX catalog for the meme."""
         preferred_map = {
             "stepped_in_shit": "81_vine_boom.mp3",
