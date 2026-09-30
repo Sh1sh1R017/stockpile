@@ -285,6 +285,26 @@ Use BOTH:
    realization, surprising fact, vivid story, decisive action, emotional turn.
 4. WHETHER a concrete visual can communicate the idea better than text alone.
 
+REFERENCE-STYLE DIRECTING:
+When STYLE is "Cinematic Editorial Short" or "cinematic_editorial":
+- Think documentary/editorial storytelling: fewer, stronger visuals with a
+  deliberate narrative relationship to the spoken line.
+- Prefer archival, news, film/TV, public-event, location, property, object,
+  document, screen, and authentic human-action footage when supported by the dialogue.
+- Translate abstract language into an observable scene, object, place, action,
+  evidence, or reaction instead of an emotion-only stock pose.
+- Avoid cheesy corporate office stock, influencer reaction montages, and generic
+  "business success" clips unless the dialogue literally calls for them.
+- Favor hard cuts on phrase/reveal boundaries. Do not recommend a new shot merely
+  to keep the screen changing.
+- Typical contextual cutaways are 1.2-3.2 seconds; a meaningful archival/payoff
+  shot may hold 3-5 seconds when the story benefits from it.
+- Favor a deliberate visual arc: A-roll -> contextual visual -> A-roll/alternate
+  angle -> stronger contextual/archival reveal -> payoff.
+- Choose footage that remains legible inside a centered landscape card on a black
+  9:16 canvas.
+- Prioritize story turns and concrete nouns/actions over merely loud words.
+
 TONE-FIRST RULES:
 - A quiet serious line can outrank a loud generic line.
 - Listen for meaningful changes in delivery.
@@ -322,8 +342,10 @@ B-ROLL RULES — CONCRETE VISUALS OVER ABSTRACT "METAPHORS":
 - Never use sports, basketball, streamers, memes, or generic podcast footage unless the dialogue genuinely calls for it.
 
 TIMING:
-- Anchor around the strongest phrase.
-- Typical opportunity is 0.8-3.0 seconds around the anchor dialogue.
+- Anchor around the strongest phrase or narrative turn.
+- Typical opportunity is 0.8-3.2 seconds around the anchor dialogue.
+- In cinematic_editorial mode, do not force a 2-second limit: meaningful archival
+  or payoff inserts may hold 3-5 seconds when the source story supports it.
 - B-roll may begin slightly before the key phrase for a natural cut.
 - Avoid overlapping moments unless they are distinct visual beats.
 
