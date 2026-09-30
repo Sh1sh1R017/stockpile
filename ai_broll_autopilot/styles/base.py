@@ -48,9 +48,10 @@ class StyleProfile:
     caption_preset: str = "hormozi"
     caption_words_per_group: int = 3
     caption_spatial_mode: str = "standard"
-    video_frame_mode: str = "fullscreen"     # "fullscreen" or "rounded_landscape_card"
+    video_frame_mode: str = "fullscreen"     # "fullscreen" or "rounded_source_card"
     video_frame_scale: float = 1.0
     video_frame_border_radius: float = 0.0
+    video_frame_aspect_ratio: float = 0.945
     broll_visual_mode: str = "contextual"
     broll_min_duration: float = 1.2
     broll_max_duration: float = 3.5
@@ -90,6 +91,7 @@ class StyleProfile:
             "video_frame_mode": self.video_frame_mode,
             "video_frame_scale": self.video_frame_scale,
             "video_frame_border_radius": self.video_frame_border_radius,
+            "video_frame_aspect_ratio": self.video_frame_aspect_ratio,
             "broll_visual_mode": self.broll_visual_mode,
             "broll_min_duration": self.broll_min_duration,
             "broll_max_duration": self.broll_max_duration,
