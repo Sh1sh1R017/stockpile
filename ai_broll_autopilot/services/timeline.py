@@ -143,9 +143,12 @@ class TimelineEngine:
 
             if subject_matte_stream_idx is not None:
                 filters.append(f"[{current_layer}]{drawtext_flt}[bg_with_text]")
+                matte_layout = scale_and_pad if viewport else (
+                    f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps}"
+                )
                 filters.append(
-                    f"[{subject_matte_stream_idx}:v]scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
-                    f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps},format=gray[subject_mask]"
+                    f"[{subject_matte_stream_idx}:v]{matte_layout},format=gray[subject_mask]"
                 )
                 filters.append(f"[subject_src][subject_mask]alphamerge[subject_fg]")
                 filters.append(
