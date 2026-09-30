@@ -84,6 +84,14 @@ class Renderer:
         if isinstance(style_meta, dict):
             style_id = str(style_meta.get("id") or style_meta.get("style_id") or "").lower()
         reference_style = style_id == "cinematic_social_editorial"
+        reference_card = (
+            edit_plan.get("render_settings", {}).get("reference_card", {})
+            if reference_style
+            else {}
+        )
+        reference_card_width_ratio = float(reference_card.get("width_ratio", 0.944))
+        reference_card_height_ratio = float(reference_card.get("height_ratio", 0.574))
+        reference_card_radius = int(reference_card.get("radius", 52))
 
         shots: List[Dict[str, Any]] = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
 
@@ -215,12 +223,12 @@ class Renderer:
         # cutaways by TimelineEngine via a split fan-out.
         reference_card_mask_idx = None
         if reference_style and layout_mode != "before_after_cyber_grid":
-            card_w = int(round(Config.TARGET_WIDTH * 0.944))
-            card_h = int(round(Config.TARGET_HEIGHT * 0.574))
+            card_w = int(round(Config.TARGET_WIDTH * reference_card_width_ratio))
+            card_h = int(round(Config.TARGET_HEIGHT * reference_card_height_ratio))
             card_w -= card_w % 2
             card_h -= card_h % 2
             mask_path = out_p.parent / "reference_card_mask.png"
-            mask_path = _ensure_reference_card_mask(mask_path, card_w, card_h)
+            mask_path = _ensure_reference_card_mask(mask_path, card_w, card_h, reference_card_radius)
             reference_card_mask_idx = current_input_idx
             cmd.extend(["-loop", "1", "-i", str(mask_path)])
             current_input_idx += 1
@@ -301,6 +309,9 @@ class Renderer:
             cyber_grid_mask_after_idx=cyber_grid_mask_after_idx,
             reference_style=reference_style,
             reference_card_mask_idx=reference_card_mask_idx,
+            reference_card_width_ratio=reference_card_width_ratio,
+            reference_card_height_ratio=reference_card_height_ratio,
+            reference_card_radius=reference_card_radius,
         )
 
         # Probe base video duration to ensure output matches base video exactly
