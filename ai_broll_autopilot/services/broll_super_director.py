@@ -296,28 +296,13 @@ TONE-FIRST RULES:
 - Confidence/authority should prefer evidence, expertise, action, or status.
 - Sadness/loss should prefer restrained contextual human visuals.
 
-B-ROLL RULES — CONCRETE VISUALS OVER ABSTRACT "METAPHORS":
-- Never choose a sentence only because it contains a keyword or emotion.
-- First identify the HUMAN SITUATION being described, then design the shot.
-- Every shot must answer, in concrete terms: WHO is visible, WHAT are they physically doing, WHERE are they, WHAT object/interface is visible, and WHAT changes during the shot.
-- "Feeling embarrassed", "show frustration", "visualize insecurity", "person concerned", "human consequence", and similar abstract instructions are NOT usable B-roll descriptions.
-- Convert abstract meaning into observable behavior. Example: "I searched my name online and felt pathetic" → "young adult alone at laptop, types their own name into search bar, scans results, expression drops, hand covers face" — NOT "person typing on laptop concerned".
-- Prefer a specific human action + object/interface + context over a generic pose.
-- When dialogue refers to a digital action, show the digital action literally: typing a search, scrolling results, opening a profile, reading a message, checking analytics, deleting a post, etc.
-- When dialogue refers to a social/emotional consequence, show the physical behavior that communicates it: staring at the screen in silence, rubbing forehead, closing laptop, deleting a draft, avoiding eye contact, pacing, etc.
-- Use metaphor ONLY when the literal scene would be impossible, repetitive, or visually weak. If using metaphor, make it concrete and explain the visual mechanism.
-- Search queries must describe the actual footage a stock library should return. They are retrieval queries, not creative-writing prompts.
-- Each moment MUST produce 3-5 distinct retrieval queries covering different framings/angles of the SAME concrete event:
-  1) literal wide/context shot,
-  2) medium human-action shot,
-  3) close-up of the key object/action,
-  4) optional consequence/reaction shot,
-  5) optional alternate setting/composition.
-- Queries should usually be 4-8 words, natural stock-search language, and contain the main subject + action + context.
-- BAD queries: "person feeling insecure", "emotional reaction", "human consequence", "show embarrassment", "sad person".
-- GOOD queries: "young man typing name laptop search", "person reading online search results", "close up search bar typing name", "person staring at laptop embarrassed", "adult closing laptop frustrated".
-- Avoid brand-specific UI unless the transcript explicitly requires that brand. Say "search engine results" rather than inventing Google/Bing.
-- Do not add props, people, locations, or negative events that the dialogue does not support.
+B-ROLL RULES:
+- Never choose a sentence only because it contains a keyword.
+- Prefer high-impact AND highly visualizable dialogue.
+- Choose the MOST IMPACTFUL DIALOGUE for each visual opportunity.
+- Do not repeat the same visual concept when another useful angle exists.
+- Search queries must describe exactly what should be visible, not just the emotion.
+- Use 3-6 concrete words per query and provide 2-4 visual angles.
 - Never invent negative drama.
 - Never use sports, basketball, streamers, memes, or generic podcast footage unless the dialogue genuinely calls for it.
 
@@ -355,27 +340,15 @@ RETURN ONLY VALID JSON:
       "visualizability": 96,
       "broll_priority": 95,
       "best_for_broll": true,
-      "visual_strategy": "Concrete description of what the viewer sees and why it matches the dialogue",
-      "visual_subject": "young adult at laptop",
-      "visual_action": "typing their own name into a search field, then scrolling and reacting",
-      "visual_setting": "private bedroom or home office at night",
-      "key_object": "laptop showing a generic search-results interface",
-      "shot_composition": "medium over-shoulder shot, then close-up on hands/search field",
-      "literal_or_metaphorical": "literal",
+      "visual_strategy": "show the human consequence of the line",
       "search_queries": [
-        "young adult typing name laptop search",
-        "person reading online search results",
-        "close up typing search bar laptop",
-        "person staring laptop embarrassed reaction"
+        "employee packing office belongings",
+        "person leaving office with box",
+        "worker packing desk items"
       ],
-      "avoid_visuals": [
-        "generic person typing laptop",
-        "business meeting",
-        "office exterior",
-        "abstract sad person"
-      ],
+      "avoid_visuals": ["generic office exterior", "random business meeting"],
       "recommended_duration": 2.1,
-      "why_broll": "The dialogue describes a specific online action and its immediate human reaction, so literal footage communicates it better than an abstract emotional metaphor."
+      "why_broll": "high-impact dialogue with strong visual consequence and a vocal shift"
     }}
   ]
 }}
@@ -437,20 +410,6 @@ TRANSCRIPT CONTEXT:
                     0.0,
                     min(float(item.get(key, 0) or 0), 100.0),
                 )
-
-            # Recompute the final B-roll priority from the model's evidence.
-            # This prevents a single arbitrary model score from dominating:
-            # dialogue impact > visualizability > tone intensity.
-            evidence_priority = (
-                item["impact_score"] * 0.48
-                + item["visualizability"] * 0.32
-                + item["tone_intensity"] * 0.12
-            )
-            model_priority = item["broll_priority"]
-            item["broll_priority"] = round(
-                max(evidence_priority, model_priority * 0.85),
-                2,
-            )
 
             item["search_queries"] = [
                 str(q).strip()
