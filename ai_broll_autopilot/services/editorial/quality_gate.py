@@ -218,27 +218,22 @@ class EditorialQualityGate:
                 message=f"Healthy pacing rhythm: maximum visual beat gap is {max_stagnant_gap:.1f}s.",
             ))
         else:
-            # Auto-repair: add a subtle punch-in in the middle of the stagnant stretch
-            mid_t = round((stagnant_interval[0] + stagnant_interval[1]) / 2.0, 2)
-            spec.camera_moves.append(
-                EditorialCameraSpec(
-                    camera_id=f"cam_auto_punch_{int(mid_t * 10)}",
-                    timestamp=mid_t,
-                    scale=1.18,
-                    duration=0.3,
-                    reason="Reset visual stagnation during extended dialogue.",
-                )
+            # QA must not invent a new creative treatment after the Creative
+            # Director has allocated attention. Report the gap instead.
+            recommendations.append(
+                f"Visual stagnation of {max_stagnant_gap:.1f}s from "
+                f"{stagnant_interval[0]:.1f}s to {stagnant_interval[1]:.1f}s."
             )
-            spec.camera_moves.sort(key=lambda c: c.timestamp)
-            repaired_items.append(f"Added subtle punch-in at {mid_t:.1f}s to eliminate {max_stagnant_gap:.1f}s stagnation gap.")
-
             checks.append(QualityCheckItem(
                 name="pacing_stagnation",
                 category="pacing",
-                passed=True,
-                score=0.9,
-                message=f"Repaired {max_stagnant_gap:.1f}s visual stagnation with dynamic punch-in.",
-                severity="info",
+                passed=False,
+                score=0.75,
+                message=(
+                    f"Visual beat gap is {max_stagnant_gap:.1f}s; "
+                    "no automatic creative punch was inserted."
+                ),
+                severity="warning",
             ))
 
         # -------------------------------------------------------------
