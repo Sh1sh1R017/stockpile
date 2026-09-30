@@ -456,12 +456,28 @@ class EditDirectorService:
         max_broll_ratio = niche.editing.max_broll_ratio
         max_broll_seconds = clip_duration * max_broll_ratio
         default_shot_dur = style.default_broll_duration
-        target_shots = max(1, min(6, int(max_broll_seconds / default_shot_dur)))
+        target_shots = max(1, min(10, int(round(max_broll_seconds / max(default_shot_dur, 0.5)))))
 
         formatted_segs = "\n".join([
             f"[{s['start']:.2f}s - {s['end']:.2f}s] {s['text']}"
             for s in clip_segments
         ])
+
+        reference_style_rules = ""
+        if style.id == "cinematic_social_editorial":
+            reference_style_rules = """
+REFERENCE STYLE RULES:
+- Open with 0.8–1.3s of clean A-roll, then cut on sentence meaning, reveals, emotional changes, and concrete visual nouns.
+- Use B-roll as narrative punctuation; each cutaway must have a literal visual reason tied to the spoken line.
+- Prefer 0.8–2.2s B-roll clips, with occasional 2–3 micro-cutaways inside a longer sentence when the visual meaning changes.
+- Keep the speaker present between visual inserts; never cover an entire thought with unrelated footage.
+- Use large white sentence-aware captions, usually 2–4 words visible at once, centered or slightly above center. Use restrained pale-green emphasis for important words.
+- Avoid giant all-caps meme captions, neon styling, constant zooms, and decorative transitions.
+- Keep A-roll punch-ins subtle (1.02–1.045x) and only at high-impact moments.
+- Use hard cuts by default and reserve SFX for major punctuation.
+- Prefer cinematic/archival/documentary imagery and specific real-world visual metaphors over generic stock people smiling at cameras.
+- Maintain a black/near-black breathing canvas around framed vertical imagery when possible.
+"""
 
         prompt = f"""You are the Master AI Video Editor & Director for high-retention vertical short-form video (TikTok, YouTube Shorts, Instagram Reels).
 
@@ -477,19 +493,8 @@ TOTAL CLIP DURATION: {clip_duration:.1f}s
 MAX B-ROLL COVERAGE: {max_broll_ratio*100:.0f}% (~{max_broll_seconds:.1f}s total B-roll)
 TARGET NUMBER OF B-ROLL SHOTS: {target_shots}
 
-{f'''REFERENCE STYLE RULES:
-- Open with 0.8–1.3s of clean A-roll, then cut on sentence meaning, reveals, emotional changes, and concrete visual nouns.
-- Use B-roll as narrative punctuation; each cutaway must have a literal visual reason tied to the spoken line.
-- Prefer 0.8–2.2s B-roll clips, with occasional 2–3 micro-cutaways inside a longer sentence when the visual meaning changes.
-- Keep the speaker present between visual inserts; never cover an entire thought with unrelated footage.
-- Use large white sentence-aware captions, usually 2–4 words visible at once, centered or slightly above center. Use restrained pale-green emphasis for important words.
-- Avoid giant all-caps meme captions, neon styling, constant zooms, and decorative transitions.
-- Keep A-roll punch-ins subtle (1.02–1.045x) and only at high-impact moments.
-- Use hard cuts by default and reserve SFX for major punctuation.
-- Prefer cinematic/archival/documentary imagery and specific real-world visual metaphors over generic stock people smiling at cameras.
-- Maintain a black/near-black breathing canvas around framed vertical imagery when possible.
-''' if style.id == "cinematic_social_editorial" else ""}
- 
+{reference_style_rules}
+
 DIRECTOR RULES:
 1. The speaker's face MUST be visible for the opening hook (first 0.8s to 1.3s).
 2. Cutaways MUST directly illustrate spoken keywords, objects, actions, places, claims, or emotional consequences in the transcript.
