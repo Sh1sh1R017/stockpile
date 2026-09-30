@@ -369,6 +369,23 @@ class Orchestrator:
                 else:
                     job.edit_plan["shots"] = await self.transition_engine.plan_transitions(job.edit_plan["shots"])
 
+                    # The reference treatment is intentionally cut-driven. Keep the
+                    # transition lane clean and remove automatically attached stingers.
+                    style_data = job.edit_plan.get("style") or {}
+                    reference_editing = bool(
+                        job.edit_plan.get("reference_editing")
+                        or style_data.get("reference_style")
+                        or style_data.get("id") in {"cinematic_social_editorial", "cinematic_editorial"}
+                    )
+                    if reference_editing:
+                        for shot in job.edit_plan["shots"]:
+                            shot["transition"] = {
+                                "type_in": "cut",
+                                "duration_in": 0.0,
+                                "type_out": "cut",
+                                "duration_out": 0.0,
+                            }
+
                 # 5b. Video Sound Effect Vision Analysis: skip for Curious Mike to keep dialogue pure
                 if not getattr(campaign, "preserve_dialogue_only", False) and campaign.id != "curious_mike":
                     job.edit_plan["shots"] = await self.sfx_analyzer.analyze_and_assign_sfx(job.edit_plan["shots"], work_dir)
