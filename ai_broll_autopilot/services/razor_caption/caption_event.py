@@ -156,6 +156,7 @@ class CaptionEvent:
     chaos_score: float = 0.0
     chaos_tier: str = "normal"
     chaos_budget_remaining: float = 1.0
+    editorial_treatment: str = "normal"
 
     def __setattr__(self, name, value):
         if name == "layer" and value == LayerMode.BEHIND_SUBJECT:
@@ -219,6 +220,7 @@ class CaptionEvent:
                 "score": round(self.chaos_score, 3),
                 "tier": self.chaos_tier,
                 "budget_remaining": round(self.chaos_budget_remaining, 3),
+                "treatment": self.editorial_treatment,
             },
         }
 
