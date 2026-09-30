@@ -219,7 +219,6 @@ PROFILES = [
         sound_effects_enabled=True,
         bgm_ducking_volume=0.16,
     ),
-,
 
     # 9. CINEMATIC EDITORIAL SHORT (Reference-driven documentary/podcast storytelling)
     StyleProfile(
