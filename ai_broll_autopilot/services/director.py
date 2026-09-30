@@ -96,9 +96,17 @@ class Director:
 
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        # Scaled shot count based on duration and pacing (~2.0s average cutaway)
-        max_possible_shots = max(3, int(video_duration / 2.8))
-        target_shots = max(3, min(max_possible_shots, int(round(target_broll_seconds / 2.0))))
+        # Reference edit is faster and more deliberate than the older 2.0s average.
+        average_cut_duration = 1.6 if style.id == "cinematic_social_editorial" else 2.0
+        max_spacing_window = 2.4 if style.id == "cinematic_social_editorial" else 2.8
+        max_possible_shots = max(3, int(video_duration / max_spacing_window))
+        target_shots = max(
+            3,
+            min(
+                max_possible_shots,
+                int(round(target_broll_seconds / average_cut_duration)),
+            ),
+        )
 
         # Partition video duration into 3 narrative acts for uniform timeline distribution
         t_act1 = round(video_duration * 0.33, 1)
