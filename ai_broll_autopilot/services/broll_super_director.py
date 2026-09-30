@@ -289,9 +289,31 @@ class BrollSuperDirector:
         style: str,
         requested_shots: int,
     ) -> str:
+        reference_mode = str(style).strip().lower() in {
+            "cinematic social editorial",
+            "cinematic_social_editorial",
+            "cinematic editorial",
+        }
+        reference_rules = ""
+        if reference_mode:
+            reference_rules = """
+REFERENCE EDITING MODE:
+- Treat B-roll as the primary visual language, aiming for roughly 85-95% visual
+  coverage when the asset library can support it.
+- Do not leave long stretches of talking-head footage merely because the line is
+  not an obvious "impact" moment.
+- Identify sequential visual beats across the full dialogue so the edit can feel
+  like a cinematic montage.
+- Use mixed timing: many 0.8-2.2s cutaways plus rare 3-8s hero holds.
+- A hero hold is appropriate when one strong visual can carry a complete thought,
+  reveal, consequence, or payoff.
+- Start with a strong visual whenever possible; no mandatory talking-head intro.
+"""
+
         return f"""You are the B-ROLL SUPER DIRECTOR for an AI short-form editor.
 
 LISTEN TO THE ATTACHED AUDIO. Do not treat the transcript as sufficient evidence.
+{reference_rules}
 
 Find the dialogue moments where B-roll adds the most emotional and narrative
 value. Do not force B-roll onto every sentence.
