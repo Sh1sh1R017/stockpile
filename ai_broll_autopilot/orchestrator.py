@@ -409,9 +409,9 @@ class Orchestrator:
                     edit_plan=edit_plan,
                     transcript_segments=job.transcript_segments,
                     work_dir=work_dir,
-                    style_preset=campaign.subtitle_style,
-                    position=campaign.subtitle_position,
-                    custom_margin_v=campaign.subtitle_margin_v,
+                    style_preset=((edit_plan.get("style") or {}).get("caption_preset") or campaign.subtitle_style),
+                    position=((edit_plan.get("style") or {}).get("caption_position") or campaign.subtitle_position),
+                    custom_margin_v=(0 if str(edit_plan.get("editing_style") or (edit_plan.get("style") or {}).get("id") or campaign.subtitle_style) == "cinematic_editorial" else campaign.subtitle_margin_v),
                     hook_text=hook_txt,
                     hook_duration=duration if campaign.id == "curious_mike" else 4.0,
                     suppress_hook=bool(frame_overlay_path),
@@ -457,8 +457,8 @@ class Orchestrator:
                 preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
                 frame_overlay_path=frame_overlay_path,
                 viewport=getattr(campaign, "frame_viewport", None),
-                source_start_time=source_start,
-                render_duration=short_duration,
+                source_start_time=0.0,
+                render_duration=duration,
             )
 
             # 7. REVIEWING & AUTO-REPAIR LOOP
