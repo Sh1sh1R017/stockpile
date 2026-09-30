@@ -29,7 +29,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     # Visual & B-roll rules
     allow_ai_broll=False,
     max_broll_ratio=0.55,
-    max_cutaway_seconds=3.2,
+    max_cutaway_seconds=5.0,
     speed_multiplier=1.0,
     niche_id="generic",
     editing_style="cinematic_editorial",
