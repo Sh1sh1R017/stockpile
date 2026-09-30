@@ -81,14 +81,40 @@ class Director:
             else:
                 niche = niche_registry.get_profile("generic")
 
-        # Target calculations based on campaign or niche rules
-        target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
+        # Target calculations based on the active editing style first, then
+        # campaign/niche defaults. This prevents a generic niche from overriding
+        # a concrete visual reference style.
+        from ai_broll_autopilot.styles import style_registry
+        active_style = style_registry.get_style(
+            getattr(campaign, "editing_style", None) or "clean_podcast"
+        )
+        style_broll_ratio = getattr(active_style, "broll_target_coverage", None)
+        if style_broll_ratio is not None and getattr(campaign, "editing_style", "") == "cinematic_editorial":
+            target_broll_ratio = float(style_broll_ratio)
+        else:
+            target_broll_ratio = niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio
 
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-        # Scaled shot count based on duration and pacing (~2.0s average cutaway)
-        max_possible_shots = max(3, int(video_duration / 2.8))
-        target_shots = max(3, min(max_possible_shots, int(round(target_broll_seconds / 2.0))))
+
+        # Cinematic editorial uses fewer, longer, stronger inserts. Other styles
+        # retain the existing high-velocity shot-count heuristic.
+        if getattr(campaign, "editing_style", "") == "cinematic_editorial":
+            avg_shot_duration = max(
+                1.6, float(getattr(active_style, "default_broll_duration", 2.2) or 2.2)
+            )
+            max_possible_shots = max(3, int(video_duration / 2.6))
+            target_shots = max(
+                3,
+                min(max_possible_shots, int(round(target_broll_seconds / avg_shot_duration))),
+            )
+        else:
+            avg_shot_duration = 2.0
+            max_possible_shots = max(3, int(video_duration / 2.8))
+            target_shots = max(
+                3,
+                min(max_possible_shots, int(round(target_broll_seconds / avg_shot_duration))),
+            )
 
         # Partition video duration into 3 narrative acts for uniform timeline distribution
         t_act1 = round(video_duration * 0.33, 1)
@@ -426,9 +452,6 @@ Return ONLY a valid JSON object matching this schema:
 
             # Preserve or detect Level 3 typographic emphasis graphics
             emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
-
-            from ai_broll_autopilot.styles import style_registry
-            active_style = style_registry.get_style(editing_style_id)
 
             plan_result = {
                 "total_duration": video_duration,
