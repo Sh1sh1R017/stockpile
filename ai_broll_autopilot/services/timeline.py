@@ -405,6 +405,7 @@ class TimelineEngine:
                     cyber_grid_backdrop_idx,
                     cyber_grid_mask_before_idx,
                     cyber_grid_mask_after_idx,
+                    reference_card_mask_idx,
                 ] if i is not None
             ]
             audio_inputs_start = (
