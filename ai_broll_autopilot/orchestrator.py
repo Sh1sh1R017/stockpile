@@ -262,14 +262,44 @@ class Orchestrator:
             behind_subject_ass_path = None
             subject_matte_path = None
             if job.transcript_segments and campaign.subtitles_required:
+                active_style_id = str(
+                    edit_plan.get("editing_style")
+                    or (edit_plan.get("style") or {}).get("style_id")
+                    or campaign.subtitle_style
+                    or "hormozi"
+                )
+                # The campaign still owns hard delivery constraints, while the
+                # generated EditPlan selects the registered visual editing profile.
+                style_profile = None
+                try:
+                    from ai_broll_autopilot.styles import style_registry
+                    style_profile = style_registry.get_style(active_style_id)
+                except Exception:
+                    style_profile = None
+
+                caption_preset = (
+                    getattr(style_profile, "caption_preset", None)
+                    or campaign.subtitle_style
+                    or "hormozi"
+                )
+                caption_position = (
+                    getattr(style_profile, "caption_position", None)
+                    or campaign.subtitle_position
+                )
+                caption_margin = (
+                    0
+                    if active_style_id == "cinematic_editorial"
+                    else campaign.subtitle_margin_v
+                )
+
                 ass_path, behind_subject_ass_path, subject_matte_path = await self._prepare_caption_render_assets(
                     source_video=job.source_file,
                     edit_plan=edit_plan,
                     transcript_segments=job.transcript_segments,
                     work_dir=work_dir,
-                    style_preset=campaign.subtitle_style,
-                    position=campaign.subtitle_position,
-                    custom_margin_v=campaign.subtitle_margin_v,
+                    style_preset=caption_preset,
+                    position=caption_position,
+                    custom_margin_v=caption_margin,
                     hook_text=hook_txt,
                     hook_duration=duration if campaign.id == "curious_mike" else 4.0,
                     suppress_hook=bool(frame_overlay_path),
@@ -315,6 +345,7 @@ class Orchestrator:
                 preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
                 frame_overlay_path=frame_overlay_path,
                 viewport=getattr(campaign, "frame_viewport", None),
+                layout_mode=edit_plan.get("layout_mode"),
             )
 
             # 7. REVIEWING & AUTO-REPAIR LOOP
