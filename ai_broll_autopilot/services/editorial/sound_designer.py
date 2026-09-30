@@ -108,6 +108,29 @@ class SoundDesigner:
     ) -> List[SfxCueDecision]:
         """Generate a sparse, semantically motivated, and visually synchronized soundscape."""
         dur = kwargs.get("total_duration", video_duration)
+        editorial_intents = kwargs.get("edit_intents") or []
+
+        def intent_for(moment: EditorialMoment):
+            for intent in editorial_intents:
+                start = float(getattr(intent, "start_time", 0.0))
+                end = float(getattr(intent, "end_time", start))
+                if start <= moment.start_time < max(end, start + 0.01):
+                    return intent
+            return min(
+                editorial_intents,
+                key=lambda i: abs(float(getattr(i, "start_time", 0.0)) - moment.start_time),
+                default=None,
+            )
+
+        def allows_sfx(moment: EditorialMoment) -> bool:
+            intent = intent_for(moment)
+            if intent is None:
+                return True
+            return (
+                float(getattr(intent, "sfx_opportunity", 0.0) or 0.0) >= 0.52
+                and str(getattr(intent, "treatment", "normal")) != "quiet"
+            )
+
         candidate_cues: List[SfxCueDecision] = []
         max_allowed_sfx = max(2, int(round((dur / 60.0) * self.max_sfx_per_minute)))
 
@@ -132,6 +155,8 @@ class SoundDesigner:
         # 2. CANDIDATE: Significant Spoken Moments (Reveals, Stats, Failures)
         # -------------------------------------------------------------
         for m in moments:
+            if not allows_sfx(m):
+                continue
             if m.narrative_role == NarrativeRole.STATISTIC and m.entities:
                 candidate_cues.append(
                     self._create_cue(
