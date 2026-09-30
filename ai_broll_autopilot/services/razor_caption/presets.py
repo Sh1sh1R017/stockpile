@@ -455,8 +455,29 @@ ZAPCAP_PRESETS: Dict[str, ZapCapPreset] = {
         default_animation="fade",
         description="Regal cinematic title preset with deep velvet fuchsia brilliance.",
     ),
-}
+,
+    "editorial_story": ZapCapPreset(
+        key="editorial_story",
+        name="Editorial Story",
+        category="Editorial",
+        font_family="Inter",
+        font_weight="Bold",
+        font_size=68,
+        uppercase=False,
+        fill_color="#FFFFFF",
+        highlight_color="#EBD45A",
+        secondary_color="#7C6CFF",
+        stroke_color="#111111",
+        stroke_width=3,
+        shadow_color="rgba(0, 0, 0, 0.82)",
+        shadow_blur=8,
+        letter_spacing=0.00,
+        line_spacing=1.05,
+        default_animation="scale",
+        description="Cinematic phrase-level captions for documentary/podcast edits: restrained white type with warm keyword highlights.",
+    ),
 
+}
 
 # ---------------------------------------------------------------------------
 # Semantic Emoji Dictionary
