@@ -343,9 +343,30 @@ class OpenReelAdapter(EditorAdapter):
             "solo": False,
         }
 
-        # 3. Main Speaker Clip (Trimmed to In/Out points with 9:16 vertical cover fit)
+        # 3. Main Speaker Clip
         in_pt = float(edit_plan.clip_interval.get("in_point", 0.0))
         out_pt = float(edit_plan.clip_interval.get("out_point", in_pt + duration))
+
+        style_cfg = edit_plan.style if isinstance(edit_plan.style, dict) else {}
+        frame_mode = str(style_cfg.get("video_frame_mode", "fullscreen"))
+        frame_scale = float(style_cfg.get("video_frame_scale", 1.0) or 1.0)
+        frame_radius = float(style_cfg.get("video_frame_border_radius", 0.0) or 0.0)
+        use_rounded_card = frame_mode == "rounded_landscape_card"
+
+        # Reference-derived framing: preserve the source aspect ratio inside the
+        # black 9:16 canvas instead of forcing a full-height crop.
+        video_fit_mode = "contain" if use_rounded_card else "cover"
+        video_xy_scale = frame_scale if use_rounded_card else 1.0
+        base_video_transform = {
+            "position": {"x": 0.5, "y": 0.5},
+            "scale": {"x": video_xy_scale, "y": video_xy_scale},
+            "rotation": 0,
+            "anchor": {"x": 0.5, "y": 0.5},
+            "opacity": 1.0,
+            "fitMode": video_fit_mode,
+        }
+        if use_rounded_card and frame_radius > 0:
+            base_video_transform["borderRadius"] = frame_radius
 
         # Build keyframes for punch-in zooms
         keyframes = []
@@ -382,14 +403,7 @@ class OpenReelAdapter(EditorAdapter):
                     "outPoint": r_out,
                     "effects": [],
                     "audioEffects": [],
-                    "transform": {
-                        "position": {"x": 0.5, "y": 0.5},
-                        "scale": {"x": 1.0, "y": 1.0},
-                        "rotation": 0,
-                        "anchor": {"x": 0.5, "y": 0.5},
-                        "opacity": 1.0,
-                        "fitMode": "cover",
-                    },
+                    "transform": dict(base_video_transform),
                     "volume": 1.0,
                     "keyframes": seg_keyframes,
                 })
@@ -404,14 +418,7 @@ class OpenReelAdapter(EditorAdapter):
                 "outPoint": out_pt,
                 "effects": [],
                 "audioEffects": [],
-                "transform": {
-                    "position": {"x": 0.5, "y": 0.5},
-                    "scale": {"x": 1.0, "y": 1.0},
-                    "rotation": 0,
-                    "anchor": {"x": 0.5, "y": 0.5},
-                    "opacity": 1.0,
-                    "fitMode": "cover",
-                },
+                "transform": dict(base_video_transform),
                 "volume": 1.0,
                 "keyframes": keyframes,
             }
@@ -437,14 +444,7 @@ class OpenReelAdapter(EditorAdapter):
                 "outPoint": dur,
                 "effects": [],
                 "audioEffects": [],
-                "transform": {
-                    "position": {"x": 0.5, "y": 0.5},
-                    "scale": {"x": 1.0, "y": 1.0},
-                    "rotation": 0,
-                    "anchor": {"x": 0.5, "y": 0.5},
-                    "opacity": 1.0,
-                    "fitMode": "cover",
-                },
+                "transform": dict(base_video_transform),
                 "volume": 0.0,
                 "keyframes": [],
                 "metadata": {
@@ -799,7 +799,19 @@ class OpenReelAdapter(EditorAdapter):
                 "text": s.get("text", ""),
                 "style": sub_style,
                 "transform": {
-                    "position": {"x": 0.5, "y": 0.35 if behind_subject else 0.82},
+                    "position": {
+                        "x": (
+                            0.22 if str(s.get("position", s.get("spatial_region", ""))).endswith("left")
+                            else 0.78 if str(s.get("position", s.get("spatial_region", ""))).endswith("right")
+                            else 0.5
+                        ),
+                        "y": (
+                            0.16 if str(s.get("position", s.get("spatial_region", ""))).startswith("top")
+                            else 0.82 if str(s.get("position", s.get("spatial_region", ""))).startswith("lower")
+                            else 0.35 if behind_subject or "center" in str(s.get("position", s.get("spatial_region", "")))
+                            else 0.82
+                        ),
+                    },
                     "scale": {"x": 1.0, "y": 1.0},
                     "rotation": 0,
                     "anchor": {"x": 0.5, "y": 0.5},
