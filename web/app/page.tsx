@@ -53,8 +53,7 @@ import {
 } from "../lib/types";
 import { MasterVideoPlayer } from "../components/MasterVideoPlayer";
 import { ShotCard } from "../components/ShotCard";
-import { OpenShortsPanel } from "../components/OpenShortsPanel";
-import { ZapCapEditor } from "../components/ZapCapEditor";
+import { CreatorWorkflowPanel } from "../components/CreatorWorkflowPanel";
 
 // Code-split heavy modals to minimize initial bundle size and hydration cost
 const MemeStudioModal = dynamic(
@@ -1734,35 +1733,250 @@ export default function StudioDashboard() {
               </div>
             </div>
 
-            {/* ZapCap Creator Studio Suite (Font Presets, Kinetic Grouping, 3-Colors, B-Rolls, Effects, Publish) */}
-            <ZapCapEditor
-              selectedJob={selectedJob}
-              shots={shots}
-              bgmTracks={bgmTracks}
-              currentTime={masterVideoRef.current?.currentTime || 0}
-              onJumpToTime={(time) => {
-                if (masterVideoRef.current) {
-                  masterVideoRef.current.currentTime = time;
-                  masterVideoRef.current.play().catch(() => {});
-                }
-              }}
-              onOpenInsertCutaway={(time) => openInsertCutawayAtTime(time)}
-              onOpenSwapBroll={(shot) => {
-                setSwapTargetShot(shot);
-                setShowSwapModal(true);
-              }}
-              onLaunchOpenReel={(id) => setEmbeddedOpenReelJob(id)}
-              onRerenderMaster={async () => {
-                await handleRerenderMaster();
-              }}
-              isRerendering={isRerenderingMaster}
-              onSettingsUpdated={(updatedSettings) => {
-                if (selectedJob && selectedJob.edit_plan) {
-                  selectedJob.edit_plan.render_settings = updatedSettings;
-                  setSelectedJob({ ...selectedJob });
-                }
-              }}
-            />
+            {/* Settings Grid: Subtitles (Left) + BGM Engine (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* 1. Viral Kinetic Subtitles Panel */}
+              <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Type className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                      Viral Kinetic Subtitles
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs">
+                    <span className="text-[11px] text-zinc-400">{subtitlesEnabled ? "Enabled" : "Off"}</span>
+                    <input
+                      type="checkbox"
+                      checked={subtitlesEnabled}
+                      onChange={(e) => {
+                        setSubtitlesEnabled(e.target.checked);
+                        handleUpdateSettings({ subtitles_enabled: e.target.checked });
+                      }}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {subtitlesEnabled && (
+                  <div className="space-y-3 pt-1">
+                    {/* Style Presets */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Highlight Style</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { key: "hormozi", name: "🟡 Hormozi", desc: "Yellow Punch" },
+                          { key: "mrbeast", name: "🟢 MrBeast", desc: "Neon Green" },
+                          { key: "clean", name: "⚪ Clean", desc: "White Minimal" },
+                        ].map((preset) => (
+                          <button
+                            key={preset.key}
+                            onClick={() => {
+                              setSubtitleStyle(preset.key);
+                              handleUpdateSettings({ subtitle_style: preset.key });
+                            }}
+                            className={`p-2 rounded-xl text-left border transition-all ${
+                              subtitleStyle === preset.key
+                                ? "bg-amber-500/15 border-amber-500/50 text-white shadow-sm"
+                                : "bg-zinc-900/80 hover:bg-zinc-800/80 text-zinc-400 border-zinc-800"
+                            }`}
+                          >
+                            <div className="text-xs font-bold">{preset.name}</div>
+                            <div className="text-[10px] text-zinc-500">{preset.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Caption Motion */}
+                    <div className="space-y-1 pt-1">
+                      <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                        Caption Motion
+                      </label>
+                      <select
+                        value={subtitleMotion}
+                        onChange={async (e) => {
+                          const profile = e.target.value;
+                          setSubtitleMotion(profile);
+                          try {
+                            const res = await fetch(
+                              `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/caption-motion`,
+                              {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ profile }),
+                              }
+                            );
+                            if (!res.ok) throw new Error("Motion update failed");
+                            showToast(`Caption motion: ${profile}`);
+                          } catch (err) {
+                            console.error("Failed to update caption motion:", err);
+                          }
+                        }}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-200 px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="word-pop">Word Pop</option>
+                        <option value="bounce">Bounce</option>
+                        <option value="typewriter">Typewriter</option>
+                        <option value="focus">True Focus</option>
+                        <option value="scramble">Text Scramble</option>
+                        <option value="slide-up">Slide Up</option>
+                      </select>
+                    </div>
+
+                    {/* Position Picker */}
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[11px] text-zinc-400">Subtitle Position:</span>
+                      <div className="flex items-center gap-1.5 bg-zinc-900 p-1 rounded-xl border border-zinc-800">
+                        <button
+                          onClick={() => {
+                            setSubtitlePosition("bottom");
+                            handleUpdateSettings({ subtitle_position: "bottom" });
+                          }}
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all ${
+                            subtitlePosition === "bottom"
+                              ? "bg-amber-500 text-black shadow-sm"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Bottom
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSubtitlePosition("center");
+                            handleUpdateSettings({ subtitle_position: "center" });
+                          }}
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all ${
+                            subtitlePosition === "center"
+                              ? "bg-amber-500 text-black shadow-sm"
+                              : "text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          Center
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Behind Subject */}
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <span className="text-[11px] text-zinc-400">Behind Subject:</span>
+                        <p className="text-[9px] text-zinc-600">Put captions behind the detected speaker when possible.</p>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs">
+                        <span className="text-[10px] text-zinc-500">{subtitlesBehindSubject ? "On" : "Off"}</span>
+                        <input
+                          type="checkbox"
+                          checked={subtitlesBehindSubject}
+                          onChange={(e) => {
+                            const enabled = e.target.checked;
+                            setSubtitlesBehindSubject(enabled);
+                            handleUpdateSettings({ subtitles_behind_subject: enabled });
+                          }}
+                          className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Background Music & Auto-Ducking Panel */}
+              <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Music className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">
+                      Background Music & Auto-Ducking
+                    </span>
+                  </div>
+                  {/* Auto-Ducking Badge Toggle */}
+                  <button
+                    onClick={() => {
+                      const next = !bgmDucking;
+                      setBgmDucking(next);
+                      handleUpdateSettings({ bgm_ducking: next });
+                    }}
+                    className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 ${
+                      bgmDucking
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm"
+                        : "bg-zinc-800 text-zinc-500 border-zinc-700"
+                    }`}
+                    title="Sidechain compress BGM volume during speech"
+                  >
+                    <Zap className={`w-3 h-3 ${bgmDucking ? "text-emerald-400" : "text-zinc-500"}`} />
+                    <span>{bgmDucking ? "⚡ Auto-Duck: Active" : "Auto-Duck: Off"}</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  {/* Track Selector & Live Preview Button */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Curated Track</label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedBgmId}
+                        onChange={(e) => {
+                          setSelectedBgmId(e.target.value);
+                          handleUpdateSettings({ bgm_track_id: e.target.value });
+                        }}
+                        className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="none">None (No Background Music)</option>
+                        {bgmTracks.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            🎵 {t.name} ({t.genre})
+                          </option>
+                        ))}
+                      </select>
+
+                      {selectedBgmId !== "none" && (
+                        <button
+                          onClick={() => toggleBgmPreview(selectedBgmId)}
+                          className="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shrink-0"
+                          title="Preview track audio"
+                        >
+                          {playingBgmPreview === selectedBgmId ? (
+                            <>
+                              <Pause className="w-3.5 h-3.5 text-indigo-300" />
+                              <span>Stop</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3.5 h-3.5 text-indigo-300" />
+                              <span>Preview</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Volume Slider */}
+                  {selectedBgmId !== "none" && (
+                    <div className="flex items-center justify-between gap-4 pt-1">
+                      <span className="text-[11px] text-zinc-400 shrink-0">BGM Level:</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0.02"
+                          max="0.40"
+                          step="0.01"
+                          value={bgmVolume}
+                          onChange={(e) => setBgmVolume(parseFloat(e.target.value))}
+                          onMouseUp={() => handleUpdateSettings({ bgm_volume: bgmVolume })}
+                          onTouchEnd={() => handleUpdateSettings({ bgm_volume: bgmVolume })}
+                          className="w-full accent-indigo-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                        />
+                        <span className="text-xs font-mono font-bold text-zinc-200 w-10 text-right">
+                          {Math.round(bgmVolume * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -1783,7 +1997,11 @@ export default function StudioDashboard() {
               onLaunchOpenReel={(id) => setEmbeddedOpenReelJob(id)}
               videoRef={masterVideoRef}
             />
-            <OpenShortsPanel jobId={selectedJob.job_id} />
+            <CreatorWorkflowPanel
+              jobId={selectedJob.job_id}
+              totalDuration={totalDuration}
+              onOpenOpenReel={(id) => setEmbeddedOpenReelJob(id)}
+            />
           </div>
 
           {/* RIGHT COLUMN: B-Roll Cutaway Cards, Isolated Players, AI Review & Feedback (7 cols) */}
