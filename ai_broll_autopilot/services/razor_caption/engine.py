@@ -65,6 +65,7 @@ class RazorCaptionEngine:
         broll_active_times: Optional[List[Tuple[float, float]]] = None,
         beat_times: Optional[List[float]] = None,
         mode: Optional[CaptionMode] = None,
+        editorial_intents: Optional[List[Any]] = None,
     ) -> List[CaptionEvent]:
         effective_mode = mode or self.mode
         words = self.segmenter.flatten_from_segments(segments)
@@ -79,7 +80,7 @@ class RazorCaptionEngine:
             subject_info=subject_info,
             broll_active_times=broll_active_times or [],
         )
-        events = self.state_machine.wire(events)
+        events = self.state_machine.wire(events, editorial_intents=editorial_intents)
         events = self.sfx_mapper.map(events)
         if beat_times:
             events = self._align_beats(events, beat_times)
