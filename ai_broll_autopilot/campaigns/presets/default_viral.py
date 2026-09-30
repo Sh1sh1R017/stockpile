@@ -33,7 +33,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     speed_multiplier=1.0,
     niche_id="generic",
     editing_style="cinematic_editorial",
-    frame_viewport=(20, 667, 1040, 585),
+    frame_viewport=(20, 410, 1040, 1100),
 
     # Watermark rules
     watermark_required=False,
