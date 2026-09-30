@@ -43,7 +43,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Subtitle rules
     subtitles_required=True,
-    subtitle_style="cinematic_editorial",
+    subtitle_style="cinematic_social",
     subtitle_position="center",
     subtitle_margin_v=0,
     hook_required=False,
