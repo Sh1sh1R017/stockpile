@@ -428,6 +428,11 @@ class EditDirectorService:
                         "main": style.primary_color,
                         "second": style.highlight_color,
                     },
+                    "reference_card": {
+                        "width_ratio": style.visual_container_width_ratio,
+                        "height_ratio": style.visual_container_height_ratio,
+                        "radius": style.visual_container_radius,
+                    },
                 }
                 if style.id == "cinematic_social_editorial"
                 else {}
