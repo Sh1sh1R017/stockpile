@@ -54,6 +54,7 @@ class CampaignConfig:
     layout_mode: str = "single"  # "single", "before_after_cyber_grid"
     frame_overlay_required: bool = False
     frame_viewport: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
+    editing_style: str = "clean_podcast"  # registered StyleProfile id
 
     # Watermark rules
     watermark_required: bool = False
@@ -106,6 +107,7 @@ class CampaignConfig:
             "layout_mode": self.layout_mode,
             "frame_overlay_required": self.frame_overlay_required,
             "frame_viewport": self.frame_viewport,
+            "editing_style": self.editing_style,
             "watermark_required": self.watermark_required,
             "watermark_position": self.watermark_position,
             "subtitle_style": self.subtitle_style,
