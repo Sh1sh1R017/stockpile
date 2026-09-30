@@ -115,6 +115,26 @@ class Director:
         act3_txt = "\n".join(f"[{s.get('start', 0.0):.2f}s - {s.get('end', 0.0):.2f}s]: {s.get('text', '')}" for s in act3_segs) or "No dialogue in this section."
         allow_memes = bool(campaign.allow_ai_broll and getattr(niche.editing, "meme_cutaways", False))
 
+        editing_style_id = getattr(campaign, "editing_style", "clean_podcast")
+        reference_style_guidance = ""
+        if editing_style_id == "cinematic_editorial":
+            reference_style_guidance = """
+REFERENCE STYLE — CINEMATIC EDITORIAL SHORT:
+- Canvas: vertical 9:16 with a centered landscape/source card inside black negative space. Preserve the natural source aspect ratio; do not stretch or force a face-filling crop.
+- Card treatment: clean contained frame with rounded corners. The video itself is the hero canvas; avoid decorative borders unless explicitly requested.
+- Caption language: large but restrained editorial typography, mostly white, with selective warm-yellow and occasional cool accent emphasis. Keep captions inside the card, generally center/center-lower.
+- Caption timing: phrase-level chunks of roughly 2-4 words. Change text on meaningful word/phrase beats, not every spoken word. Emphasize only the highest-value word in a phrase.
+- Visual rhythm: hard cuts dominate. Use a visual change for a new idea, reveal, concrete noun, consequence, or emotional beat. Avoid random constant cuts.
+- B-roll: prefer specific documentary/archival/news/film/TV/location/object/reaction footage that literally or metaphorically clarifies the dialogue. One dominant visual idea per cut. Avoid generic office stock.
+- Human-story principle: translate abstract language into an observable scene, object, location, public event, document, screen, action, or reaction.
+- Pacing: roughly 1.2-3.2s contextual cutaways, with occasional longer holds for payoff/archival moments. Leave breathing room between strong inserts.
+- Motion: use restrained punch-ins around 1.04x-1.08x on genuine emphasis only. Never stack zoom + flashy transition + giant text on every beat.
+- Sound: use subtle SFX on major transitions, reveals, caption impacts, or archival reveals; do not whoosh every cut.
+- Never add streamer/viral reaction memes unless the spoken story actually calls for them.
+"""
+        elif editing_style_id:
+            reference_style_guidance = f"ACTIVE EDITING STYLE PROFILE: {editing_style_id}. Keep the chosen style internally consistent."
+
         # Match curated moment if specified (works for any campaign with curated_moments)
         matched_moment = None
         if curated_moment_id and hasattr(campaign, "curated_moments"):
@@ -143,6 +163,7 @@ class Director:
 CAMPAIGN: {campaign.name}
 CONTENT DOMAIN: {niche_desc}
 RELEVANT VISUAL THEMES: {niche_keywords_hint}
+{reference_style_guidance}
 
 MANDATORY DIRECTING OBJECTIVES:
 1. FULL-DURATION UNIFORM PACING & TIMELINE SPREAD (CRITICAL):
@@ -398,8 +419,13 @@ Return ONLY a valid JSON object matching this schema:
                 "summary": plan_data.get("summary", f"{campaign.name} Contextual Edit Plan"),
                 "hook_text": chosen_hook or plan_data.get("hook_text"),
                 "campaign_id": campaign.id,
+                "editing_style": editing_style_id,
                 "shots": clean_shots,
                 "text_emphasis_graphics": emphasis_graphics,
+                "style": {
+                    "id": editing_style_id,
+                    "style_id": editing_style_id,
+                },
             }
 
             logger.info(f"AI Director planned {len(clean_shots)} B-roll cutaways covering {total_broll_time:.1f}s ({coverage_pct}% of {video_duration:.1f}s)")
