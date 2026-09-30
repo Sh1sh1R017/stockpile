@@ -34,6 +34,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     max_cutaway_seconds=2.2,
     speed_multiplier=1.0,
     niche_id="generic",
+    editing_style="cinematic_social_editorial",
 
     # Watermark rules
     watermark_required=False,
