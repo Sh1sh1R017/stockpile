@@ -35,6 +35,26 @@ class ZapCapPreset:
 
 
 ZAPCAP_PRESETS: Dict[str, ZapCapPreset] = {
+    "cinematic_social": ZapCapPreset(
+        key="cinematic_social",
+        name="Cinematic Social",
+        category="Editorial",
+        font_family="Arial",
+        font_weight="Bold",
+        font_size=64,
+        uppercase=False,
+        fill_color="#FFFFFF",
+        highlight_color="#F1D98B",
+        secondary_color="#B9B0A0",
+        stroke_color="#000000",
+        stroke_width=2,
+        shadow_color="rgba(0, 0, 0, 0.8)",
+        shadow_blur=6,
+        letter_spacing=0.01,
+        line_spacing=1.05,
+        default_animation="scale",
+        description="Center-stacked editorial captions with restrained warm-word emphasis and minimal outline.",
+    ),
     "hormozi": ZapCapPreset(
         key="hormozi",
         name="Hormozi",
