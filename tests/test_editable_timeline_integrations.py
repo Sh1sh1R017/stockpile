@@ -182,10 +182,14 @@ def test_openreel_round_trips_subject_caption_metadata():
     )
 
     project = openreel_adapter.create_openreel_project(plan)
-    sub = project["project"]["timeline"]["subtitles"][0]
+    sub = next(
+        c for c in project["project"]["textClips"]
+        if c["trackId"] == "track_captions"
+    )
     assert sub["behindSubject"] is True
-    assert sub["motionProfile"] == "typewriter"
-    assert sub["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert sub["metadata"]["motionProfile"] == "typewriter"
+    assert sub["metadata"]["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert project["project"]["timeline"]["subtitles"] == []
     assert "subtitle-behind-subject" in project["project"]["capabilities"]
 
     updated = openreel_adapter.update_edit_plan_from_openreel(plan, project)
@@ -194,3 +198,129 @@ def test_openreel_round_trips_subject_caption_metadata():
     assert updated.subtitles[0]["motionRecipe"] == "motion-anything:typewriter-multi"
     assert updated.subtitles[0]["startTime"] == 0.0
     assert updated.subtitles[0]["endTime"] == 2.0
+
+
+def test_openreel_exports_real_caption_and_overlay_timeline_lanes():
+    plan = EditPlan(
+        plan_id="timeline_lanes",
+        title="Timeline Lanes",
+        target_duration=8.0,
+        source_media={"path": "C:/media/raw.mp4", "duration": 30.0},
+        clip_interval={"in_point": 10.0, "out_point": 18.0},
+        niche={"id": "generic", "name": "Podcast"},
+        style={"id": "clean_podcast", "name": "Clean Podcast"},
+        a_roll_ranges=[
+            {"start": 0.0, "end": 3.0, "duration": 3.0, "source_in": 10.0, "source_out": 13.0},
+            {"start": 3.0, "end": 8.0, "duration": 5.0, "source_in": 13.0, "source_out": 18.0},
+        ],
+        shots=[
+            {"shot_id": "broll_1", "start_time": 2.0, "duration": 2.0, "end_time": 4.0, "asset_path": "C:/media/broll.mp4"},
+        ],
+        text_overlays=[
+            {"id": "hook_1", "text": "BIG HOOK", "start_time": 0.5, "duration": 2.0, "position": "top", "behind_subject": True},
+        ],
+        subtitles=[
+            {
+                "id": "sub_1",
+                "text": "HELLO WORLD",
+                "startTime": 0.0,
+                "endTime": 1.5,
+                "animationStyle": "word-highlight",
+                "motionProfile": "word-pop",
+                "words": [
+                    {"text": "HELLO", "startTime": 0.0, "endTime": 0.7},
+                    {"text": "WORLD", "startTime": 0.7, "endTime": 1.5},
+                ],
+            },
+        ],
+        zooms=[],
+        audio_cues={
+            "sfx": [
+                {"id": "cue_1", "file": "whoosh.mp3", "time": 2.0, "duration": 0.5, "volume": 0.6},
+            ],
+        },
+    )
+
+    project = openreel_adapter.create_openreel_project(plan)
+    project_data = project["project"]
+    tracks = {track["id"]: track for track in project_data["timeline"]["tracks"]}
+
+    assert "track_captions" in tracks
+    assert "track_overlay_text" in tracks
+    assert "track_audio_sfx" in tracks
+    assert len([c for c in project_data["textClips"] if c["trackId"] == "track_captions"]) == 1
+    assert len([c for c in project_data["textClips"] if c["trackId"] == "track_overlay_text"]) == 1
+    assert len(tracks["track_audio_sfx"]["clips"]) == 1
+    assert len(tracks["track_video_main"]["clips"]) == 2
+
+
+def test_openreel_round_trip_preserves_all_a_roll_and_delete_all_broll():
+    plan = EditPlan(
+        plan_id="round_trip_delete",
+        title="Round Trip",
+        target_duration=8.0,
+        source_media={"path": "C:/media/raw.mp4", "duration": 30.0},
+        clip_interval={"in_point": 10.0, "out_point": 18.0},
+        niche={"id": "generic", "name": "Podcast"},
+        style={"id": "clean_podcast", "name": "Clean Podcast"},
+        a_roll_ranges=[
+            {"start": 0.0, "end": 3.0, "duration": 3.0, "source_in": 10.0, "source_out": 13.0},
+            {"start": 3.0, "end": 8.0, "duration": 5.0, "source_in": 13.0, "source_out": 18.0},
+        ],
+        shots=[
+            {"shot_id": "shot_1", "start_time": 1.0, "duration": 2.0, "end_time": 3.0},
+            {"shot_id": "shot_2", "start_time": 5.0, "duration": 2.0, "end_time": 7.0},
+        ],
+        text_overlays=[],
+        subtitles=[
+            {"id": "sub_1", "text": "OLD", "startTime": 0.0, "endTime": 1.0, "words": []},
+        ],
+        zooms=[],
+        audio_cues={
+            "sfx": [
+                {"id": "cue_1", "file": "whoosh.mp3", "time": 1.0, "duration": 0.5, "volume": 0.5},
+            ],
+        },
+    )
+
+    project = openreel_adapter.create_openreel_project(plan)
+    pdata = project["project"]
+    tracks = pdata["timeline"]["tracks"]
+    main = next(t for t in tracks if t["id"] == "track_video_main")
+    broll = next(t for t in tracks if t["id"] == "track_video_broll")
+    sfx = next(t for t in tracks if t["id"] == "track_audio_sfx")
+
+    main["clips"][1]["startTime"] = 4.0
+    main["clips"][1]["duration"] = 2.0
+    main["clips"][1]["inPoint"] = 14.0
+    main["clips"][1]["outPoint"] = 16.0
+
+    # User deletes every B-roll clip.
+    broll["clips"] = []
+
+    caption = next(c for c in pdata["textClips"] if c["trackId"] == "track_captions")
+    caption["text"] = "NEW"
+    caption["startTime"] = 0.5
+    caption["duration"] = 1.5
+
+    sfx["clips"][0]["startTime"] = 3.25
+    sfx["clips"][0]["duration"] = 0.75
+    sfx["clips"][0]["volume"] = 0.8
+
+    updated = openreel_adapter.update_edit_plan_from_openreel(plan, project)
+
+    assert len(updated.a_roll_ranges) == 2
+    assert updated.a_roll_ranges[1]["start"] == 4.0
+    assert updated.a_roll_ranges[1]["duration"] == 2.0
+    assert updated.a_roll_ranges[1]["source_in"] == 14.0
+    assert updated.a_roll_ranges[1]["source_out"] == 16.0
+    assert updated.clip_interval["in_point"] == 10.0
+    assert updated.clip_interval["out_point"] == 16.0
+
+    assert updated.shots == []
+    assert updated.subtitles[0]["text"] == "NEW"
+    assert updated.subtitles[0]["startTime"] == 0.5
+    assert updated.subtitles[0]["endTime"] == 2.0
+    assert updated.audio_cues["sfx"][0]["time"] == 3.25
+    assert updated.audio_cues["sfx"][0]["duration"] == 0.75
+    assert updated.audio_cues["sfx"][0]["volume"] == 0.8

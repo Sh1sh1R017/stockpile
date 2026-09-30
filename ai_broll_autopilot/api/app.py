@@ -585,30 +585,19 @@ async def get_job_openreel_project(job_id: str, mode: Optional[str] = None):
     except Exception:
         pass
 
-    plan_obj = EditPlan(
-        plan_id=plan_dict.get("plan_id", f"plan_{job.job_id}"),
-        title=plan_dict.get("title", f"AI Edit: {Path(job.source_filename).stem}"),
-        target_duration=total_dur,
-        source_media={
-            "path": job.source_file,
-            "duration": source_duration,
-            "title": job.source_filename,
-            "width": plan_dict.get("source_media", {}).get("width", 1920),
-            "height": plan_dict.get("source_media", {}).get("height", 1080),
-            "fps": plan_dict.get("source_media", {}).get("fps", 30),
-        },
-        clip_interval=plan_dict.get(
-            "clip_interval",
-            {"in_point": 0.0, "out_point": total_dur},
-        ),
-        niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
-        style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
-        shots=plan_dict.get("shots", []),
-        text_overlays=plan_dict.get("text_overlays", []),
-        subtitles=plan_dict.get("subtitles", []),
-        zooms=plan_dict.get("zooms", []),
-        audio_cues=plan_dict.get("audio_cues", {}),
-    )
+    # Use the canonical EditPlan reconstruction so OpenReel receives the
+    # complete v2.1 structure (A-roll ranges, graphics, captions, SFX, etc.).
+    plan_obj = get_job_edit_plan(job)
+    plan_obj.target_duration = total_dur
+    plan_obj.source_media = {
+        **(plan_obj.source_media or {}),
+        "path": job.source_file,
+        "duration": source_duration,
+        "title": job.source_filename,
+        "width": (plan_obj.source_media or {}).get("width", 1920),
+        "height": (plan_obj.source_media or {}).get("height", 1080),
+        "fps": (plan_obj.source_media or {}).get("fps", 30),
+    }
 
     oreel_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "openreel"
     oreel_dir.mkdir(parents=True, exist_ok=True)
@@ -677,21 +666,8 @@ async def save_job_openreel_project(job_id: str, payload: Dict[str, Any]):
     # 3. Synchronize edit_plan in SQLite if job has one
     if job.edit_plan and isinstance(job.edit_plan, dict):
         plan_dict = job.edit_plan
-        plan_obj = EditPlan(
-            plan_id=f"plan_{job.job_id}",
-            title=plan_dict.get("title", f"Edit: {Path(job.source_filename).stem}"),
-            target_duration=float(plan_dict.get("total_duration") or plan_dict.get("target_duration") or 30.0),
-            source_media={"path": job.source_file, "duration": float(plan_dict.get("total_duration") or 30.0), "title": job.source_filename},
-            clip_interval=plan_dict.get("clip_interval", {"in_point": 0.0, "out_point": 30.0}),
-            niche=plan_dict.get("niche", {"name": "Podcast", "id": "generic"}),
-            style=plan_dict.get("style", {"name": "Clean Podcast", "id": "clean_podcast"}),
-            shots=plan_dict.get("shots", []),
-            text_overlays=plan_dict.get("text_overlays", []),
-            subtitles=plan_dict.get("subtitles", []),
-            zooms=plan_dict.get("zooms", []),
-            audio_cues=plan_dict.get("audio_cues", {}),
-        )
-
+        # Rehydrate the canonical plan without dropping v2.1 timeline fields.
+        plan_obj = get_job_edit_plan(job)
         updated_plan = openreel_adapter.update_edit_plan_from_openreel(plan_obj, save_data)
         updated_dict = updated_plan.to_dict()
         # Mark with OpenReel edit tag

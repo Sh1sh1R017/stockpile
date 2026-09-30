@@ -217,6 +217,36 @@ class OpenReelAdapter(EditorAdapter):
             "solo": False,
         }
 
+        # OpenReel renders TextClips through their trackId, so the containing
+        # timeline tracks must exist for captions/hooks to appear as editable lanes.
+        track_captions = {
+            "id": "track_captions",
+            "name": "Captions",
+            "type": "video",
+            "role": "captions",
+            "mode": "standard",
+            "clips": [],
+            "transitions": [],
+            "hidden": False,
+            "muted": True,
+            "locked": False,
+            "solo": False,
+        }
+
+        track_overlay_text = {
+            "id": "track_overlay_text",
+            "name": "Hooks & Text",
+            "type": "text",
+            "role": "general",
+            "mode": "standard",
+            "clips": [],
+            "transitions": [],
+            "hidden": False,
+            "muted": True,
+            "locked": False,
+            "solo": False,
+        }
+
         # 3. Main Speaker Clip (Trimmed to In/Out points with 9:16 vertical cover fit)
         in_pt = float(edit_plan.clip_interval.get("in_point", 0.0))
         out_pt = float(edit_plan.clip_interval.get("out_point", in_pt + duration))
@@ -369,6 +399,96 @@ class OpenReelAdapter(EditorAdapter):
                     "keyframes": [],
                 })
 
+        # Canonical SFX cues live in EditPlan.audio_cues["sfx"]. Prefer that
+        # structure for the editable timeline, with the old shot-level fields as
+        # a backwards-compatible fallback when no curated cues exist.
+        audio_cues = edit_plan.audio_cues if isinstance(edit_plan.audio_cues, dict) else {}
+        curated_sfx = audio_cues.get("sfx") or []
+        if curated_sfx:
+            track_sfx["clips"] = []
+            legacy_sfx_media_ids = {
+                item["id"] for item in media_items if item["id"].startswith("media_sfx_")
+            }
+            if legacy_sfx_media_ids:
+                media_items = [
+                    item for item in media_items if item["id"] not in legacy_sfx_media_ids
+                ]
+
+            sfx_media_cache: Dict[str, str] = {}
+            for idx, cue in enumerate(curated_sfx):
+                sfx_file = cue.get("file") or cue.get("path") or ""
+                if not sfx_file:
+                    continue
+                sfx_name = Path(sfx_file).name
+                cache_key = str(sfx_file)
+                sfx_media_id = sfx_media_cache.get(cache_key)
+                if not sfx_media_id:
+                    sfx_media_id = f"media_sfx_cue_{uuid.uuid4().hex[:8]}"
+                    sfx_media_cache[cache_key] = sfx_media_id
+                    sfx_http_url = (
+                        f"{base_asset_url}/{urllib.parse.quote(sfx_name)}"
+                        if base_asset_url
+                        else f"file:///{Path(sfx_file).as_posix()}"
+                    )
+                    media_items.append({
+                        "id": sfx_media_id,
+                        "name": sfx_name,
+                        "type": "audio",
+                        "metadata": {
+                            "duration": float(cue.get("duration", 0.8)),
+                            "sampleRate": 48000,
+                            "channels": 2,
+                            "codec": "wav" if sfx_name.lower().endswith(".wav") else "mp3",
+                            "fileSize": 0,
+                            "hasAudio": True,
+                            "hasVideo": False,
+                        },
+                        "fileHandle": None,
+                        "blob": None,
+                        "thumbnailUrl": None,
+                        "waveformData": None,
+                        "isPlaceholder": False,
+                        "url": sfx_http_url,
+                        "originalUrl": sfx_http_url,
+                        "sourceFile": {
+                            "name": sfx_name,
+                            "size": 0,
+                            "lastModified": now_ms,
+                        },
+                    })
+
+                cue_id = str(cue.get("id") or cue.get("cue_id") or f"sfx_{idx+1}")
+                sfx_start = max(0.0, float(cue.get("time", cue.get("timestamp", 0.0))))
+                sfx_duration = max(0.05, float(cue.get("duration", 0.8)))
+                track_sfx["clips"].append({
+                    "id": f"clip_sfx_{cue_id}",
+                    "mediaId": sfx_media_id,
+                    "trackId": "track_audio_sfx",
+                    "startTime": sfx_start,
+                    "duration": sfx_duration,
+                    "inPoint": 0.0,
+                    "outPoint": sfx_duration,
+                    "effects": [],
+                    "audioEffects": [],
+                    "transform": {
+                        "position": {"x": 0.5, "y": 0.5},
+                        "scale": {"x": 1.0, "y": 1.0},
+                        "rotation": 0,
+                        "anchor": {"x": 0.5, "y": 0.5},
+                        "opacity": 1.0,
+                    },
+                    "volume": float(cue.get("volume", 0.7)),
+                    "keyframes": [],
+                    "metadata": {
+                        "cueId": cue_id,
+                        "eventType": cue.get("event_type") or cue.get("cue_type", "sfx"),
+                        "justification": cue.get("justification", ""),
+                        "syncTarget": cue.get("sync_target", ""),
+                        "category": cue.get("category", "accent"),
+                        "sourceFile": sfx_file,
+                    },
+                })
+
         # 5. Subtitles Structure with Word-Level Timestamps
         openreel_subtitles = []
         for s in edit_plan.subtitles:
@@ -501,8 +621,77 @@ class OpenReelAdapter(EditorAdapter):
                 "keyframes": [],
             })
 
+        # Mirror captions/text into real OpenReel TextClips. OpenReel's
+        # preview can consume timeline.subtitles, but the timeline editor renders
+        # editable text from project.textClips and their trackId.
+        caption_text_clips = []
+        for s in edit_plan.subtitles:
+            sub_id = s.get("id", f"sub_{uuid.uuid4().hex[:6]}")
+            sub_st = float(s.get("startTime", s.get("start", 0.0)))
+            sub_et = float(s.get("endTime", s.get("end", sub_st + 1.0)))
+            sub_dur = max(0.05, sub_et - sub_st)
+            src_style = s.get("style") or {}
+            sub_style = {
+                "fontFamily": src_style.get("fontFamily", edit_plan.style.get("font_family", "Montserrat")),
+                "fontSize": int(src_style.get("fontSize", 54)),
+                "fontWeight": src_style.get("fontWeight", "bold"),
+                "fontStyle": src_style.get("fontStyle", "normal"),
+                "color": src_style.get("color", "#FFFFFF"),
+                "backgroundColor": src_style.get("backgroundColor", "transparent"),
+                "strokeColor": src_style.get("strokeColor", "#000000"),
+                "strokeWidth": float(src_style.get("strokeWidth", 4)),
+                "shadowColor": src_style.get("shadowColor", "rgba(0,0,0,0.8)"),
+                "shadowBlur": float(src_style.get("shadowBlur", 8)),
+                "textAlign": src_style.get("textAlign", "center"),
+                "verticalAlign": src_style.get("verticalAlign", "middle"),
+                "lineHeight": float(src_style.get("lineHeight", 1.1)),
+                "letterSpacing": float(src_style.get("letterSpacing", 0)),
+            }
+            behind_subject = bool(s.get("behind_subject", s.get("behindSubject", False)))
+            caption_text_clips.append({
+                "id": sub_id,
+                "trackId": "track_captions",
+                "startTime": sub_st,
+                "duration": sub_dur,
+                "text": s.get("text", ""),
+                "style": sub_style,
+                "transform": {
+                    "position": {"x": 0.5, "y": 0.35 if behind_subject else 0.82},
+                    "scale": {"x": 1.0, "y": 1.0},
+                    "rotation": 0,
+                    "anchor": {"x": 0.5, "y": 0.5},
+                    "opacity": 1.0,
+                },
+                "animation": {
+                    "preset": s.get("motionProfile", "word-pop"),
+                    "params": {"wordDelay": 0.0},
+                    "inDuration": 0.08,
+                    "outDuration": 0.08,
+                    "unit": "word",
+                },
+                "keyframes": [],
+                "behindSubject": behind_subject,
+                "metadata": {
+                    "captionSource": "stockpile",
+                    "subtitleId": sub_id,
+                    "animationStyle": s.get("animationStyle", "word-highlight"),
+                    "motionProfile": s.get("motionProfile", "word-pop"),
+                    "motionRecipe": s.get("motionRecipe", "motion-anything:word-pop"),
+                    "words": s.get("words", []),
+                },
+            })
+
+        track_captions["clips"] = []
+        track_overlay_text["clips"] = []
+
         # Assemble full Project model conforming to OpenReel Schema 1.2.0
-        tracks_list = [track_main_video, track_broll_video, track_bgm]
+        tracks_list = [
+            track_main_video,
+            track_broll_video,
+            track_overlay_text,
+            track_captions,
+            track_bgm,
+        ]
         if track_sfx["clips"]:
             tracks_list.append(track_sfx)
 
@@ -521,7 +710,10 @@ class OpenReelAdapter(EditorAdapter):
             },
             "timeline": {
                 "tracks": tracks_list,
-                "subtitles": openreel_subtitles,
+                # Captions are materialized as editable project.textClips on
+                # track_captions. Keeping duplicate timeline.subtitles here
+                # would make OpenReel render them twice.
+                "subtitles": [],
                 "duration": duration,
                 "markers": [
                     {
@@ -536,11 +728,14 @@ class OpenReelAdapter(EditorAdapter):
             "mediaLibrary": {
                 "items": media_items,
             },
-            "textClips": text_clips,
+            "textClips": text_clips + caption_text_clips,
             "shapeClips": [],
             "svgClips": [],
             "stickerClips": [],
             "capabilities": ["tracks-universal", "behind-subject", "subtitle-behind-subject"],
+            "metadata": {
+                "stockpileSubtitleData": openreel_subtitles,
+            },
         }
 
         return {
@@ -629,80 +824,213 @@ class OpenReelAdapter(EditorAdapter):
         edit_plan: EditPlan,
         openreel_data: Dict[str, Any],
     ) -> EditPlan:
-        """Synchronize user timeline edits from OpenReel Schema 1.2.0 back into Stockpile EditPlan.
+        """Synchronize the complete editable OpenReel timeline back into EditPlan.
 
-        Extracts updated shot start times, durations, and asset mappings from B-Roll track,
-        updated in/out points from A-roll track, subtitles, and text overlays.
+        OpenReel is treated as a non-destructive editor: the raw source remains the
+        canonical A-roll media, while all A-roll segments, B-roll, captions, text,
+        and SFX are independent timeline objects. Empty-but-present tracks are
+        intentional edits and therefore must round-trip as empty lists.
         """
         proj = openreel_data.get("project", openreel_data)
-        timeline = proj.get("timeline", {})
-        tracks = timeline.get("tracks", [])
+        timeline = proj.get("timeline", {}) if isinstance(proj, dict) else {}
+        tracks = timeline.get("tracks", []) if isinstance(timeline, dict) else []
 
-        # 1. Update A-Roll (main video) interval & target duration
-        for trk in tracks:
-            if trk.get("id") == "track_video_main" or trk.get("role") == "dialogue":
-                clips = trk.get("clips", [])
-                if clips:
-                    main_clip = clips[0]
-                    in_pt = float(main_clip.get("inPoint", edit_plan.clip_interval.get("in_point", 0.0)))
-                    dur = float(main_clip.get("duration", edit_plan.target_duration))
-                    edit_plan.clip_interval["in_point"] = in_pt
-                    edit_plan.clip_interval["out_point"] = in_pt + dur
-                    edit_plan.target_duration = dur
+        def track_by_id(track_id: str) -> Optional[Dict[str, Any]]:
+            return next((t for t in tracks if t.get("id") == track_id), None)
 
-        # 2. Update B-Roll cutaway shots
-        broll_clips = []
-        for trk in tracks:
-            if trk.get("id") == "track_video_broll" or (trk.get("type") == "video" and trk.get("role") != "dialogue"):
-                broll_clips = trk.get("clips", [])
-                break
+        def first_track(*predicates):
+            for track in tracks:
+                if any(predicate(track) for predicate in predicates):
+                    return track
+            return None
 
-        if broll_clips:
+        def text_clips_for_track(track_id: str) -> List[Dict[str, Any]]:
+            return [
+                clip for clip in (proj.get("textClips") or [])
+                if str(clip.get("trackId", "")) == track_id
+            ]
+
+        # 1. A-Roll: synchronize every source segment, not only the first clip.
+        main_track = track_by_id("track_video_main") or first_track(
+            lambda t: t.get("role") == "dialogue" and t.get("type") == "video"
+        )
+        if main_track is not None:
+            main_clips = [
+                c for c in (main_track.get("clips") or [])
+                if isinstance(c, dict)
+            ]
+            main_clips.sort(key=lambda c: float(c.get("startTime", 0.0)))
+
+            if main_clips:
+                updated_ranges = []
+                for idx, clip in enumerate(main_clips):
+                    start_time = max(0.0, float(clip.get("startTime", 0.0)))
+                    duration = max(0.001, float(clip.get("duration", 0.0)))
+                    source_in = max(
+                        0.0,
+                        float(
+                            clip.get(
+                                "inPoint",
+                                clip.get("sourceIn", edit_plan.clip_interval.get("in_point", 0.0)),
+                            )
+                        ),
+                    )
+                    source_out = max(
+                        source_in,
+                        float(
+                            clip.get(
+                                "outPoint",
+                                clip.get("sourceOut", source_in + duration),
+                            )
+                        ),
+                    )
+                    updated_ranges.append({
+                        "start": round(start_time, 3),
+                        "end": round(start_time + duration, 3),
+                        "duration": round(duration, 3),
+                        "source_in": round(source_in, 3),
+                        "source_out": round(source_out, 3),
+                    })
+
+                edit_plan.a_roll_ranges = updated_ranges
+                edit_plan.keep_intervals = [
+                    (r["start"], r["end"]) for r in updated_ranges
+                ]
+
+                source_starts = [r["source_in"] for r in updated_ranges]
+                source_ends = [r["source_out"] for r in updated_ranges]
+                if source_starts and source_ends:
+                    edit_plan.clip_interval["in_point"] = min(source_starts)
+                    edit_plan.clip_interval["out_point"] = max(source_ends)
+
+                # Derive output duration from the edited A-roll sequence rather
+                # than trusting a stale serialized timeline.duration.
+                edit_plan.target_duration = round(
+                    max(r["end"] for r in updated_ranges),
+                    3,
+                )
+
+        # 2. B-Roll: an empty existing track means the user deleted all B-roll.
+        broll_track = track_by_id("track_video_broll")
+        if broll_track is not None:
+            broll_clips = [
+                c for c in (broll_track.get("clips") or [])
+                if isinstance(c, dict)
+            ]
+            existing_shots_by_id = {
+                str(s.get("shot_id")): s for s in edit_plan.shots
+                if s.get("shot_id") is not None
+            }
             updated_shots = []
-            existing_shots_by_id = {s.get("shot_id"): s for s in edit_plan.shots}
 
             for clip in broll_clips:
-                clip_id = clip.get("id", "")
-                st = float(clip.get("startTime", 0.0))
-                dur = float(clip.get("duration", 2.5))
-                end = st + dur
-                media_id = clip.get("mediaId", "")
-
+                clip_id = str(clip.get("id", ""))
+                media_id = str(clip.get("mediaId", ""))
+                start_time = max(0.0, float(clip.get("startTime", 0.0)))
+                duration = max(0.001, float(clip.get("duration", 0.0)))
                 matched_shot = None
-                for sid, s in existing_shots_by_id.items():
-                    if sid == clip_id or f"clip_{sid}" == clip_id or f"media_{sid}" == media_id:
-                        matched_shot = s.copy()
+
+                for sid, shot in existing_shots_by_id.items():
+                    if (
+                        sid == clip_id
+                        or f"clip_{sid}" == clip_id
+                        or f"media_{sid}" == media_id
+                    ):
+                        matched_shot = dict(shot)
                         break
 
-                if not matched_shot:
+                if matched_shot is None:
                     matched_shot = {
-                        "shot_id": clip_id or f"broll_custom_{int(st*10)}",
+                        "shot_id": clip_id or f"broll_custom_{int(start_time * 1000)}",
                         "visual_prompt": clip.get("name", "Custom B-Roll Cutaway"),
                         "rationale": "User-added cutaway in OpenReel timeline",
                     }
 
-                matched_shot["start_time"] = round(st, 3)
-                matched_shot["duration"] = round(dur, 3)
-                matched_shot["end_time"] = round(end, 3)
+                matched_shot["start_time"] = round(start_time, 3)
+                matched_shot["duration"] = round(duration, 3)
+                matched_shot["end_time"] = round(start_time + duration, 3)
 
-                # Preserve transition info if modified in OpenReel
-                trans_list = trk.get("transitions", [])
-                for t in trans_list:
-                    if t.get("toClipId") == clip_id or t.get("fromClipId") == clip_id:
-                        matched_shot.setdefault("transition", {})["type"] = t.get("type", "crossfade")
-                        matched_shot["transition"]["duration"] = float(t.get("duration", 0.3))
+                in_point = clip.get("inPoint")
+                out_point = clip.get("outPoint")
+                if in_point is not None:
+                    matched_shot["asset_in_point"] = float(in_point)
+                if out_point is not None:
+                    matched_shot["asset_out_point"] = float(out_point)
+
+                metadata = clip.get("metadata") or {}
+                if metadata.get("searchQuery"):
+                    matched_shot["search_query"] = metadata["searchQuery"]
+                if metadata.get("rationale"):
+                    matched_shot["rationale"] = metadata["rationale"]
+                if metadata.get("category"):
+                    matched_shot["category"] = metadata["category"]
 
                 updated_shots.append(matched_shot)
 
-            updated_shots.sort(key=lambda s: s.get("start_time", 0.0))
+            updated_shots.sort(key=lambda s: float(s.get("start_time", 0.0)))
             edit_plan.shots = updated_shots
 
-        # 3. Update Subtitles if present
-        openreel_subs = timeline.get("subtitles", [])
-        if openreel_subs:
-            subs = []
-            for sub in openreel_subs:
-                subs.append({
+        # 3. Captions: editable OpenReel TextClips are authoritative.
+        captions_track = track_by_id("track_captions") or first_track(
+            lambda t: t.get("role") == "captions"
+            or str(t.get("name", "")).strip().lower() == "captions"
+        )
+        caption_texts = text_clips_for_track(captions_track.get("id")) if captions_track else []
+
+        if caption_texts:
+            caption_texts.sort(key=lambda c: float(c.get("startTime", 0.0)))
+            existing_subs = {
+                str(s.get("id")): s for s in edit_plan.subtitles
+                if s.get("id") is not None
+            }
+            synced_subtitles = []
+
+            for clip in caption_texts:
+                metadata = clip.get("metadata") or {}
+                sub_id = str(
+                    metadata.get("subtitleId")
+                    or clip.get("id")
+                    or f"sub_{uuid.uuid4().hex[:6]}"
+                )
+                original = existing_subs.get(sub_id, {})
+
+                start_time = float(clip.get("startTime", original.get("startTime", 0.0)))
+                duration = max(0.001, float(clip.get("duration", 0.0)))
+                words = metadata.get("words", original.get("words", []))
+
+                synced_subtitles.append({
+                    **original,
+                    "id": sub_id,
+                    "text": clip.get("text", original.get("text", "")),
+                    "startTime": round(start_time, 3),
+                    "endTime": round(start_time + duration, 3),
+                    "animationStyle": metadata.get(
+                        "animationStyle",
+                        original.get("animationStyle", "word-highlight"),
+                    ),
+                    "motionProfile": metadata.get(
+                        "motionProfile",
+                        original.get("motionProfile", "word-pop"),
+                    ),
+                    "motionRecipe": metadata.get(
+                        "motionRecipe",
+                        original.get("motionRecipe", "motion-anything:word-pop"),
+                    ),
+                    "behind_subject": bool(
+                        clip.get(
+                            "behindSubject",
+                            original.get("behind_subject", False),
+                        )
+                    ),
+                    "style": clip.get("style", original.get("style", {})),
+                    "words": words or [],
+                })
+
+            edit_plan.subtitles = synced_subtitles
+        elif isinstance(timeline.get("subtitles"), list):
+            # Backwards compatibility for older projects with no Captions TextClips.
+            edit_plan.subtitles = [
+                {
                     "id": sub.get("id"),
                     "startTime": float(sub.get("startTime", sub.get("start", 0.0))),
                     "endTime": float(sub.get("endTime", sub.get("end", 0.0))),
@@ -710,33 +1038,116 @@ class OpenReelAdapter(EditorAdapter):
                     "animationStyle": sub.get("animationStyle", "word-highlight"),
                     "motionProfile": sub.get("motionProfile", "word-pop"),
                     "motionRecipe": sub.get("motionRecipe", "motion-anything:word-pop"),
-                    "behind_subject": bool(sub.get("behindSubject", sub.get("behind_subject", False))),
+                    "behind_subject": bool(
+                        sub.get("behindSubject", sub.get("behind_subject", False))
+                    ),
                     "style": sub.get("style", {}),
                     "words": sub.get("words", []),
-                })
-            edit_plan.subtitles = subs
+                }
+                for sub in timeline.get("subtitles", [])
+            ]
 
-        # 4. Update Text Overlays from textClips
-        text_clips = proj.get("textClips", [])
-        if text_clips:
+        edit_plan.subtitles_behind_subject = any(
+            bool(s.get("behind_subject", s.get("behindSubject", False)))
+            for s in edit_plan.subtitles
+        )
+
+        # 4. Hook/text overlays: synchronize the dedicated OpenReel text track.
+        overlay_track = track_by_id("track_overlay_text")
+        if overlay_track is not None:
             overlays = []
-            for tc in text_clips:
+            existing_overlays = {
+                str(o.get("id")): o for o in edit_plan.text_overlays
+                if o.get("id") is not None
+            }
+
+            for clip in text_clips_for_track(overlay_track.get("id")):
+                clip_id = str(clip.get("id") or f"text_ov_{uuid.uuid4().hex[:6]}")
+                original = existing_overlays.get(clip_id, {})
+                start_time = float(clip.get("startTime", original.get("start_time", 0.0)))
+                duration = max(0.001, float(clip.get("duration", original.get("duration", 2.5))))
+
                 overlays.append({
-                    "id": tc.get("id"),
-                    "text": tc.get("text", ""),
-                    "start_time": float(tc.get("startTime", 0.0)),
-                    "duration": float(tc.get("duration", 2.5)),
-                    "end_time": float(tc.get("startTime", 0.0)) + float(tc.get("duration", 2.5)),
-                    "behind_subject": bool(tc.get("behindSubject", False)),
-                    "style": tc.get("style", {}),
-                    "transform": tc.get("transform", {}),
-                    "animation": tc.get("animation", {}),
+                    **original,
+                    "id": clip_id,
+                    "text": clip.get("text", original.get("text", "")),
+                    "start_time": round(start_time, 3),
+                    "duration": round(duration, 3),
+                    "end_time": round(start_time + duration, 3),
+                    "behind_subject": bool(
+                        clip.get("behindSubject", original.get("behind_subject", False))
+                    ),
+                    "style": clip.get("style", original.get("style", {})),
+                    "transform": clip.get("transform", original.get("transform", {})),
+                    "animation": clip.get("animation", original.get("animation", {})),
                 })
-            edit_plan.text_overlays = overlays
+
+            edit_plan.text_overlays = sorted(
+                overlays,
+                key=lambda item: float(item.get("start_time", 0.0)),
+            )
+
+        # 5. SFX: canonical audio_cues["sfx"] is synchronized from the SFX track.
+        sfx_track = track_by_id("track_audio_sfx") or first_track(
+            lambda t: t.get("role") == "effects"
+        )
+        if sfx_track is not None:
+            project_media = {
+                str(item.get("id")): item
+                for item in (proj.get("mediaLibrary", {}).get("items", []) or [])
+                if item.get("id")
+            }
+            prior_sfx = edit_plan.audio_cues.get("sfx", []) if isinstance(edit_plan.audio_cues, dict) else []
+            prior_by_id = {
+                str(c.get("id") or c.get("cue_id")): c
+                for c in prior_sfx
+                if c.get("id") is not None or c.get("cue_id") is not None
+            }
+
+            synced_sfx = []
+            for clip in (sfx_track.get("clips") or []):
+                metadata = clip.get("metadata") or {}
+                cue_id = str(
+                    metadata.get("cueId")
+                    or clip.get("id", "").replace("clip_sfx_", "")
+                    or f"sfx_{uuid.uuid4().hex[:6]}"
+                )
+                prior = dict(prior_by_id.get(cue_id, {}))
+                media = project_media.get(str(clip.get("mediaId")), {})
+                source_file = metadata.get("sourceFile") or prior.get("file") or ""
+                if not source_file:
+                    source_file = (
+                        (media.get("sourceFile") or {}).get("folder", "")
+                        + ("/" if (media.get("sourceFile") or {}).get("folder") else "")
+                        + (media.get("sourceFile") or {}).get("name", "")
+                    ) or media.get("originalUrl") or media.get("url") or media.get("name", "")
+
+                synced_sfx.append({
+                    **prior,
+                    "id": cue_id,
+                    "file": source_file,
+                    "time": round(float(clip.get("startTime", 0.0)), 3),
+                    "duration": round(max(0.05, float(clip.get("duration", 0.8))), 3),
+                    "volume": float(clip.get("volume", prior.get("volume", 0.7))),
+                    "event_type": metadata.get("eventType", prior.get("event_type", "sfx")),
+                    "justification": metadata.get("justification", prior.get("justification", "")),
+                    "sync_target": metadata.get("syncTarget", prior.get("sync_target", "")),
+                    "category": metadata.get("category", prior.get("category", "accent")),
+                })
+
+            edit_plan.audio_cues = {
+                **(edit_plan.audio_cues if isinstance(edit_plan.audio_cues, dict) else {}),
+                "sfx": synced_sfx,
+            }
 
         logger.info(
-            f"Updated EditPlan from OpenReel: {len(edit_plan.shots)} shots, "
-            f"{len(edit_plan.subtitles)} subtitles, duration={edit_plan.target_duration}s"
+            "Updated EditPlan from OpenReel: "
+            f"{len(edit_plan.a_roll_ranges)} A-roll segments, "
+            f"{len(edit_plan.shots)} B-roll shots, "
+            f"{len(edit_plan.subtitles)} captions, "
+            f"{len(edit_plan.text_overlays)} text overlays, "
+            f"{len(edit_plan.audio_cues.get('sfx', []) if isinstance(edit_plan.audio_cues, dict) else [])} SFX, "
+            f"duration={edit_plan.target_duration}s"
         )
         return edit_plan
 
