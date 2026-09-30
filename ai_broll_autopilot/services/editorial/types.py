@@ -147,6 +147,41 @@ class HookCandidate:
 # ---------------------------------------------------------------------------
 
 @dataclass
+@dataclass
+class EditIntent:
+    """Shared editorial attention allocation for one moment."""
+    semantic_importance: float = 0.0
+    emotional_importance: float = 0.0
+    hook_relevance: float = 0.0
+    speaker_emphasis: float = 0.0
+    visual_opportunity: float = 0.0
+    meme_opportunity: float = 0.0
+    caption_energy: float = 0.0
+    broll_pressure: float = 0.0
+    sfx_opportunity: float = 0.0
+    chaos_score: float = 0.0
+    quietness_score: float = 1.0
+    treatment: str = "normal"
+    reason: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "semantic_importance": round(self.semantic_importance, 3),
+            "emotional_importance": round(self.emotional_importance, 3),
+            "hook_relevance": round(self.hook_relevance, 3),
+            "speaker_emphasis": round(self.speaker_emphasis, 3),
+            "visual_opportunity": round(self.visual_opportunity, 3),
+            "meme_opportunity": round(self.meme_opportunity, 3),
+            "caption_energy": round(self.caption_energy, 3),
+            "broll_pressure": round(self.broll_pressure, 3),
+            "sfx_opportunity": round(self.sfx_opportunity, 3),
+            "chaos_score": round(self.chaos_score, 3),
+            "quietness_score": round(self.quietness_score, 3),
+            "treatment": self.treatment,
+            "reason": self.reason,
+        }
+
+
 class EditorialMoment:
     """Granular narrative unit representing an editorial beat in the speech."""
     moment_id: str
@@ -168,6 +203,7 @@ class EditorialMoment:
     recommended_duration: float = 3.5
     visual_processing_load: float = 0.5
     energy_level: float = 0.5        # 0.0 to 1.0
+    edit_intent: Optional[EditIntent] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -189,6 +225,7 @@ class EditorialMoment:
             "recommended_duration": round(self.recommended_duration, 2),
             "visual_processing_load": round(self.visual_processing_load, 2),
             "energy_level": round(self.energy_level, 2),
+            "edit_intent": self.edit_intent.to_dict() if self.edit_intent else None,
         }
 
 
@@ -341,6 +378,7 @@ class EditorialEditSpecification:
     sfx_cues: List[SfxCueDecision]
     camera_moves: List[EditorialCameraSpec]
     energy_curve: List[Dict[str, float]]
+    edit_intents: List[EditIntent] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -375,6 +413,7 @@ class EditorialEditSpecification:
                 for cm in self.camera_moves
             ],
             "energy_curve": self.energy_curve,
+            "edit_intents": [i.to_dict() for i in self.edit_intents],
             "metadata": self.metadata,
         }
 
