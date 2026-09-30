@@ -18,6 +18,9 @@ from ai_broll_autopilot.services.editorial.types import (
 class CreativeDirector:
     """Master attention allocator for the editorial pipeline."""
 
+    CHAOS_REGEN_PER_SEC = 0.22
+    CHAOS_COSTS = {"kinetic": 0.20, "impact": 0.48, "absurd": 0.82}
+
     _HIGH_SIGNAL_WORDS = {
         "never", "always", "literally", "insane", "crazy", "chaos", "worst",
         "best", "secret", "truth", "actually", "shocking", "ridiculous",
@@ -141,10 +144,37 @@ class CreativeDirector:
         )
 
     def analyze(self, moments: List[EditorialMoment], hook_moment_id: str = "") -> List[EditIntent]:
-        return [
-            self.analyze_moment(moment, is_hook=(moment.moment_id == hook_moment_id))
-            for moment in moments
-        ]
+        """Score moments and ration expensive treatments across the timeline."""
+        intents: List[EditIntent] = []
+        budget = 1.0
+        previous_time = moments[0].start_time if moments else 0.0
+
+        for moment in moments:
+            intent = self.analyze_moment(
+                moment,
+                is_hook=(moment.moment_id == hook_moment_id),
+            )
+            elapsed = max(0.0, float(moment.start_time) - float(previous_time))
+            budget = min(1.0, budget + elapsed * self.CHAOS_REGEN_PER_SEC)
+
+            desired = intent.treatment if intent.treatment in {"normal", "kinetic", "impact", "absurd"} else "normal"
+            if desired == "absurd" and budget < self.CHAOS_COSTS["absurd"]:
+                desired = "impact" if budget >= self.CHAOS_COSTS["impact"] else "kinetic" if budget >= self.CHAOS_COSTS["kinetic"] else "normal"
+            elif desired == "impact" and budget < self.CHAOS_COSTS["impact"]:
+                desired = "kinetic" if budget >= self.CHAOS_COSTS["kinetic"] else "normal"
+            elif desired == "kinetic" and budget < self.CHAOS_COSTS["kinetic"]:
+                desired = "normal"
+
+            budget = max(0.0, budget - self.CHAOS_COSTS.get(desired, 0.0))
+            intent.start_time = float(moment.start_time)
+            intent.end_time = float(moment.end_time)
+            intent.treatment = desired
+            intent.chaos_tier = desired
+            intent.chaos_budget_remaining = budget
+            intents.append(intent)
+            previous_time = moment.start_time
+
+        return intents
 
     @staticmethod
     def choose_camera(moments: List[EditorialMoment], intents: List[EditIntent]) -> List[Tuple[EditorialMoment, EditIntent]]:
