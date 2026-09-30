@@ -26,7 +26,7 @@ class NicheDetectionResult:
     niche_name: str
     confidence: float
     detected_keywords: List[str] = field(default_factory=list)
-    suggested_style_id: str = "clean_podcast"
+    suggested_style_id: str = "cinematic_social_editorial"
     secondary_niches: List[Dict[str, Any]] = field(default_factory=list)
     explanation: str = ""
 
@@ -90,7 +90,8 @@ NICHE_TO_STYLE_MAP = {
     "fitness": "sports_editorial",
     "law": "business_editorial",
     "news": "news_editorial",
-    "generic": "clean_podcast",
+    # Generic/podcast content uses the reference cinematic social treatment by default.
+    "generic": "cinematic_social_editorial",
 }
 
 
