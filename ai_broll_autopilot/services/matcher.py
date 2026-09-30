@@ -70,6 +70,17 @@ class Matcher:
         """Resolve a single B-roll shot concurrently."""
         shot_id = shot.get("shot_id", "shot")
         prompt = shot.get("search_prompt") or shot.get("visceral_human_metaphor") or shot.get("emotional_core")
+        semantic_queries = shot.get("broll_search_queries") or shot.get("micro_prompts") or []
+        emotion = shot.get("emotion") or shot.get("emotional_core") or "neutral"
+        tone = shot.get("tone_of_voice") or "neutral"
+        dialogue = shot.get("dialogue_quote") or ""
+        evaluation_context = (
+            f"Emotion: {emotion}. Vocal tone: {tone}. "
+            f"Tone intensity: {shot.get('tone_intensity', 0)}/100. "
+            f"Impact: {shot.get('impact_score', 0)}/100. "
+            f"Visual strategy: {shot.get('visual_strategy', '')}. "
+            f"Dialogue: {dialogue}"
+        )
         style = shot.get("style", "stockpile")
         target_duration = shot.get("duration", 2.5)
 
@@ -161,7 +172,12 @@ class Matcher:
                 )
             else:
                 asset_path = await self._acquire_stockpile_clip(
-                    prompt, job_cache_dir, shot_id, max_clip_duration=target_duration
+                    prompt,
+                    job_cache_dir,
+                    shot_id,
+                    max_clip_duration=target_duration,
+                    search_queries=semantic_queries,
+                    evaluation_context=evaluation_context,
                 )
 
         # 5. If stockpile acquisition failed, try clean real-world Pexels stock footage
@@ -279,10 +295,11 @@ class Matcher:
         return acquired_micro_clips[0]
 
     @staticmethod
-    def get_dramatic_queries(prompt: str) -> List[str]:
-        """Expand prompt with proven dramatic YouTube clips matching core human emotions."""
+    def get_dramatic_queries(prompt: str, extra_queries: Optional[List[str]] = None) -> List[str]:
+        """Expand semantic B-roll intent into concrete search queries without losing context."""
         p_low = prompt.lower()
-        queries = [prompt]
+        queries = [q.strip() for q in (extra_queries or []) if isinstance(q, str) and q.strip()]
+        queries.insert(0, prompt)
         if any(k in p_low for k in ["cardboard", "box", "pack", "fired", "leaving office", "terminate", "layoff", "severance"]):
             queries.extend([
                 "Andy Gets Fired - The Office US",
@@ -307,14 +324,20 @@ class Matcher:
         return list(dict.fromkeys(queries))
 
     async def _acquire_stockpile_clip(
-        self, prompt: str, target_dir: Path, shot_id: str, max_clip_duration: Optional[float] = None
+        self,
+        prompt: str,
+        target_dir: Path,
+        shot_id: str,
+        max_clip_duration: Optional[float] = None,
+        search_queries: Optional[List[str]] = None,
+        evaluation_context: str = "",
     ) -> Optional[str]:
         """Query YouTube, score with Gemini for emotional resonance, download, and aggressively scan candidates."""
         try:
             loop = asyncio.get_event_loop()
 
             # Search YouTube across prompt and dramatic query variations
-            queries_to_search = self.get_dramatic_queries(prompt)
+            queries_to_search = self.get_dramatic_queries(prompt, search_queries)
             results = []
             seen_ids = set()
 
@@ -336,7 +359,11 @@ class Matcher:
             # Evaluate with Gemini (strict clean, no watermarks, emotional resonance)
             try:
                 scored = await loop.run_in_executor(
-                    None, self.ai_service.evaluate_videos, prompt, results
+                    None,
+                    self.ai_service.evaluate_videos,
+                    f"{prompt}
+{evaluation_context}".strip(),
+                    results
                 )
             except Exception as eval_err:
                 logger.warning(f"AI evaluation raised error ({eval_err}), using clean fallback")
