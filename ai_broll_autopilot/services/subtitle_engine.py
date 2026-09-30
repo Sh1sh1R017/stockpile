@@ -119,6 +119,18 @@ class SubtitleEngine:
             "margin_l": 440,
             "margin_r": 40,
             "margin_v": 780,
+        },
+        "editorial_story": {
+            "name": "Editorial Story",
+            "active_color": "&H005AD4EB&",
+            "inactive_color": "&H00FFFFFF&",
+            "outline_color": "&H00111111&",
+            "font_name": "Inter",
+            "font_size": 70,
+            "outline_width": 3.0,
+            "shadow_offset": 2.5,
+            "uppercase": False,
+            "words_per_group": 3,
         }
     }
 
