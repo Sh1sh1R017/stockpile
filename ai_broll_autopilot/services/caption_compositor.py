@@ -248,8 +248,8 @@ class CaptionCompositor:
             engine = RazorCaptionEngine(
                 max_group_size=words_per_beat,
                 enable_behind_subject=behind_subject_enabled,
+                preset_name=preset_name,
             )
-            engine.scorer.preset_name = preset_name
             engine.scorer.palette = custom_colors or {}
             engine.scorer.enable_emojis = enable_emojis
 
@@ -280,7 +280,11 @@ class CaptionCompositor:
                         ev.layer = LayerMode.BEHIND_SUBJECT
 
         if edit_plan is not None and events:
-            engine_sync = RazorCaptionEngine(max_group_size=words_per_beat, enable_behind_subject=behind_subject_enabled)
+            engine_sync = RazorCaptionEngine(
+                max_group_size=words_per_beat,
+                enable_behind_subject=behind_subject_enabled,
+                preset_name=preset_name,
+            )
             edit_plan["subtitles"] = engine_sync.to_subtitles(events, preset_name=preset_name)
 
         return events
