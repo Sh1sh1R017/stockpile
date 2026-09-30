@@ -460,14 +460,19 @@ DEFAULT B-ROLL PACING: {style.broll_cut_pacing} (~{default_shot_dur}s per shot)
 TOTAL CLIP DURATION: {clip_duration:.1f}s
 MAX B-ROLL COVERAGE: {max_broll_ratio*100:.0f}% (~{max_broll_seconds:.1f}s total B-roll)
 TARGET NUMBER OF B-ROLL SHOTS: {target_shots}
+STYLE GUIDELINES:
+{chr(10).join(f"- {g}" for g in style.editorial_guidelines)}
 
 DIRECTOR RULES:
-1. The speaker's face MUST be visible for the opening hook (first 0.8s to 1.5s).
-2. Cutaways MUST directly illustrate spoken keywords or concepts in the transcript.
-3. Every B-roll shot MUST specify a clean, 2-4 keyword "search_query" tailored to the niche vocabulary.
-4. Add 1-3 high-impact kinetic text overlays (e.g. hook title card at 0.5s–2.0s, key terms, or punchlines).
-5. Add 2-4 subtle zoom punch-in keyframes (scale {style.zoom_intensity:.2f}) on emphatic sentences or punchlines.
-6. Audio: duck BGM to {style.bgm_ducking_volume} during spoken dialogue; trigger whoosh SFX on B-roll cuts.
+1. The speaker's face MUST be visible for the opening hook (first 0.6s to 1.0s) unless the dialogue requires an immediate literal visual.
+2. Cutaways MUST directly illustrate spoken keywords, actions, claims, reveals, reactions, or visual metaphors. Never add generic filler just to cover time.
+3. Every B-roll shot MUST specify 2-4 clean retrieval queries for the SAME visual event; vary wording, not meaning.
+4. Favor varied cadence: mostly 0.8-1.8s inserts, with occasional 2.5-4.0s holds when a visual deserves to breathe.
+5. Captions should follow the spoken rhythm and emphasis. For center-stack styles, use short phrase chunks (usually 1-3 words per line) rather than long full-sentence blocks.
+6. Use 1-3 editorial text callouts only when they add meaning; do not duplicate the spoken caption verbatim.
+7. Use restrained punch-ins (scale {style.zoom_intensity:.3f}) only on emphatic beats. Never use large digital zooms to fake energy.
+8. Use transition effects sparingly. A glitch/analog beat belongs only on a major change in idea or visual world.
+9. SFX should accent meaningful cuts/reveals rather than firing on every edit. Duck BGM to {style.bgm_ducking_volume} during spoken dialogue.
 
 CLIP TRANSCRIPT:
 {formatted_segs}
@@ -553,7 +558,10 @@ Respond ONLY with valid JSON matching:
         """Deterministic rule-based edit director respecting niche and style parameters."""
         max_broll_seconds = clip_duration * niche.editing.max_broll_ratio
         shot_duration = style.default_broll_duration
-        target_shots = max(1, min(5, int(max_broll_seconds / max(1.0, shot_duration))))
+        if style.caption_layout == "center_stack":
+            # Reference-style pacing: short visual inserts with occasional longer holds.
+            shot_duration = min(1.8, max(0.8, shot_duration))
+        target_shots = max(1, min(7, int(max_broll_seconds / max(0.8, shot_duration))))
 
         # 1. Identify visual keywords spoken in segments
         niche_kws = {kw.lower(): kw for kw in niche.visual_keywords}
@@ -575,8 +583,8 @@ Respond ONLY with valid JSON matching:
 
         # 2. Schedule B-Roll shots spaced across the timeline
         shots = []
-        allocated_time = 1.5  # Start after initial face hook
-        step = max(3.0, (clip_duration - 2.0) / (target_shots + 1))
+        allocated_time = 0.9  # Preserve a visible speaker hook, then cut on the next meaningful beat.
+        step = max(1.4, (clip_duration - 1.5) / max(1, target_shots))
 
         for i in range(target_shots):
             shot_start = round(allocated_time, 2)
@@ -618,9 +626,10 @@ Respond ONLY with valid JSON matching:
         text_overlays = [{
             "id": "overlay_hook",
             "text": hook_text,
-            "start_time": 0.4,
-            "duration": 2.2,
+            "start_time": 0.35,
+            "duration": 1.8,
             "position": "center",
+            "behind_subject": False,
             "emphasis_color": style.highlight_color,
         }]
 
