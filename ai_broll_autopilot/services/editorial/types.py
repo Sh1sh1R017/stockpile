@@ -147,7 +147,6 @@ class HookCandidate:
 # ---------------------------------------------------------------------------
 
 @dataclass
-@dataclass
 class EditIntent:
     """Shared editorial attention allocation for one moment."""
     semantic_importance: float = 0.0
