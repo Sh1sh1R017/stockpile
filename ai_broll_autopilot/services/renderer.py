@@ -13,6 +13,33 @@ from ai_broll_autopilot.services.timeline import TimelineEngine
 logger = logging.getLogger(__name__)
 
 
+def _ensure_reference_card_mask(path: Path, width: int, height: int, radius: int = 52) -> Path:
+    """Create the rounded-rectangle alpha mask used by the reference editorial card."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return path
+
+    try:
+        from PIL import Image, ImageDraw
+
+        mask = Image.new("L", (width, height), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.rounded_rectangle(
+            (0, 0, width - 1, height - 1),
+            radius=max(1, min(radius, width // 2, height // 2)),
+            fill=255,
+        )
+        mask.save(path)
+    except Exception as exc:
+        logger.warning("Could not create reference card mask: %s", exc)
+        # Fail closed: an opaque mask still preserves the centered card treatment.
+        from PIL import Image
+
+        Image.new("L", (width, height), 255).save(path)
+    return path
+
+
 class Renderer:
     """Renders composite video using FFmpeg multi-input complex filtergraphs."""
 
@@ -51,6 +78,12 @@ class Renderer:
         base_p = Path(base_video)
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
+
+        style_meta = edit_plan.get("style") or {}
+        style_id = ""
+        if isinstance(style_meta, dict):
+            style_id = str(style_meta.get("id") or style_meta.get("style_id") or "").lower()
+        reference_style = style_id == "cinematic_social_editorial"
 
         shots: List[Dict[str, Any]] = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
 
@@ -178,6 +211,20 @@ class Renderer:
 
         current_input_idx = 1 + len(shots)
 
+        # Reference card mask input. It is shared across the A-roll card and B-roll
+        # cutaways by TimelineEngine via a split fan-out.
+        reference_card_mask_idx = None
+        if reference_style and layout_mode != "before_after_cyber_grid":
+            card_w = int(round(Config.TARGET_WIDTH * 0.944))
+            card_h = int(round(Config.TARGET_HEIGHT * 0.574))
+            card_w -= card_w % 2
+            card_h -= card_h % 2
+            mask_path = out_p.parent / "reference_card_mask.png"
+            mask_path = _ensure_reference_card_mask(mask_path, card_w, card_h)
+            reference_card_mask_idx = current_input_idx
+            cmd.extend(["-loop", "1", "-i", str(mask_path)])
+            current_input_idx += 1
+
         # Optional Frame Overlay stream (torn paper mask & branding)
         frame_overlay_stream_idx = None
         if frame_overlay_path and os.path.exists(frame_overlay_path):
@@ -252,6 +299,8 @@ class Renderer:
             cyber_grid_backdrop_idx=cyber_grid_backdrop_idx,
             cyber_grid_mask_before_idx=cyber_grid_mask_before_idx,
             cyber_grid_mask_after_idx=cyber_grid_mask_after_idx,
+            reference_style=reference_style,
+            reference_card_mask_idx=reference_card_mask_idx,
         )
 
         # Probe base video duration to ensure output matches base video exactly
