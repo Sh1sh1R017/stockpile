@@ -10,62 +10,21 @@ from typing import Dict, Any
 
 
 CAPTION_MOTION_PROFILES: Dict[str, Dict[str, Any]] = {
-    "word-pop": {
-        "label": "Word Pop", "openreel": "word-highlight",
-        "recipe": "kinetic:word-pop", "description": "Active word scales up and settles."
-    },
-    "boom": {
-        "label": "Boom", "openreel": "impact-punch",
-        "recipe": "kinetic:boom", "description": "Fast overshoot, settle and impact punch."
-    },
-    "slam": {
-        "label": "Slam", "openreel": "impact-slam",
-        "recipe": "kinetic:slam", "description": "Hard snap-in with a short impact shake."
-    },
-    "slide-left": {
-        "label": "Slide Left", "openreel": "slide-left",
-        "recipe": "kinetic:slide-left", "description": "Caption enters from the right and slides left into place."
-    },
-    "slide-right": {
-        "label": "Slide Right", "openreel": "slide-right",
-        "recipe": "kinetic:slide-right", "description": "Caption enters from the left and slides right into place."
-    },
-    "slide-up": {
-        "label": "Slide Up", "openreel": "slide-up",
-        "recipe": "kinetic:slide-up", "description": "Clean upward entrance for short caption groups."
-    },
-    "bounce": {
-        "label": "Bounce", "openreel": "bounce",
-        "recipe": "kinetic:bounce", "description": "Spring-like overshoot and settle."
-    },
-    "zoom": {
-        "label": "Zoom Punch", "openreel": "zoom-punch",
-        "recipe": "kinetic:zoom-punch", "description": "Rapid camera/text punch toward the impact word."
-    },
-    "shake": {
-        "label": "Shake", "openreel": "impact-shake",
-        "recipe": "kinetic:shake", "description": "Short decaying impact shake."
-    },
-    "typewriter": {
-        "label": "Typewriter", "openreel": "typewriter",
-        "recipe": "kinetic:typewriter", "description": "Sequential reveal."
-    },
-    "focus": {
-        "label": "True Focus", "openreel": "word-highlight",
-        "recipe": "kinetic:true-focus", "description": "Keeps the line stable while focusing the active word."
-    },
-    "scramble": {
-        "label": "Text Scramble", "openreel": "word-by-word",
-        "recipe": "kinetic:scramble", "description": "Fast decode-style word transition."
-    },
-    "impact-auto": {
-        "label": "AI Impact Auto", "openreel": "impact-auto",
-        "recipe": "kinetic:impact-auto", "description": "Automatically chooses an effect from the impact word's semantic type."
-    },
+    "word-pop": {"label": "Word Pop", "openreel": "word-highlight", "recipe": "kinetic:word-pop", "description": "Active word scales up and settles."},
+    "boom": {"label": "Boom", "openreel": "impact-punch", "recipe": "kinetic:boom", "description": "Fast overshoot, settle and impact punch."},
+    "slam": {"label": "Slam", "openreel": "impact-slam", "recipe": "kinetic:slam", "description": "Hard snap-in with a short impact shake."},
+    "slide-left": {"label": "Slide Left", "openreel": "slide-left", "recipe": "kinetic:slide-left", "description": "Caption enters from the right and slides left into place."},
+    "slide-right": {"label": "Slide Right", "openreel": "slide-right", "recipe": "kinetic:slide-right", "description": "Caption enters from the left and slides right into place."},
+    "slide-up": {"label": "Slide Up", "openreel": "slide-up", "recipe": "kinetic:slide-up", "description": "Clean upward entrance for short caption groups."},
+    "bounce": {"label": "Bounce", "openreel": "bounce", "recipe": "kinetic:bounce", "description": "Spring-like overshoot and settle."},
+    "zoom": {"label": "Zoom Punch", "openreel": "zoom-punch", "recipe": "kinetic:zoom-punch", "description": "Rapid punch toward the impact word."},
+    "shake": {"label": "Shake", "openreel": "impact-shake", "recipe": "kinetic:shake", "description": "Short decaying impact shake."},
+    "typewriter": {"label": "Typewriter", "openreel": "typewriter", "recipe": "kinetic:typewriter", "description": "Sequential reveal."},
+    "focus": {"label": "True Focus", "openreel": "word-highlight", "recipe": "kinetic:true-focus", "description": "Stable line with active-word emphasis."},
+    "scramble": {"label": "Text Scramble", "openreel": "word-by-word", "recipe": "kinetic:scramble", "description": "Fast decode-style word transition."},
+    "impact-auto": {"label": "AI Impact Auto", "openreel": "impact-auto", "recipe": "kinetic:impact-auto", "description": "Automatically chooses an effect from the impact word's semantic type."},
 }
 
-# Semantic caption categories -> visual treatment. This is intentionally conservative:
-# only semantically meaningful words get a strong effect, while normal words remain calm.
 IMPACT_EFFECTS: Dict[str, str] = {
     "hook": "boom",
     "money": "zoom",
@@ -80,8 +39,11 @@ IMPACT_EFFECTS: Dict[str, str] = {
 
 def normalize_motion_profile(name: str) -> str:
     key = (name or "word-pop").strip().lower()
+    # The existing editor calls its default mode "pop". Keep that UI unchanged,
+    # but make the default pop mode intelligent: impact words now select their own
+    # treatment while ordinary words retain the familiar word-pop behavior.
     aliases = {
-        "pop": "word-pop",
+        "pop": "impact-auto",
         "impact": "impact-auto",
         "auto": "impact-auto",
         "boom/pop": "boom",
@@ -96,12 +58,7 @@ def impact_effect_for_semantic_type(semantic_type: str) -> str:
 
 
 def apply_caption_motion(subtitles: list, profile: str) -> list:
-    """Annotate subtitle events with the requested or automatically selected motion.
-
-    In ``impact-auto`` mode the semantic_type assigned by the Razor importance scorer
-    determines the effect. The resulting animationStyle/motionRecipe fields are kept
-    in the canonical subtitle payload so the render adapters can consume them.
-    """
+    """Annotate subtitle events with requested or automatically selected motion."""
     profile = normalize_motion_profile(profile)
     result = []
     for subtitle in subtitles or []:
