@@ -340,6 +340,8 @@ def test_openreel_two_way_sync():
 
 
 def test_cinematic_editorial_reference_style():
+    from ai_broll_autopilot.services.edit_director import EditPlan
+
     style = style_registry.get_style("cinematic_editorial")
     assert style.caption_preset == "editorial_story"
     assert style.caption_words_per_group == 3
