@@ -582,6 +582,7 @@ Return ONLY a valid JSON object matching this schema:
             else:
                 resolved_hook = "KEY TAKEAWAY"
 
+        style_payload = style_profile.to_dict() if style_profile else {}
         return {
             "total_duration": video_duration,
             "broll_shot_count": len(shots),
@@ -590,6 +591,11 @@ Return ONLY a valid JSON object matching this schema:
             "summary": f"{campaign.name if campaign else 'Heuristic'} Contextual Edit Plan",
             "hook_text": resolved_hook,
             "campaign_id": campaign.id if campaign else "default",
+            "niche": {"id": "generic", "name": "General Video & Podcast"},
+            "style": style_payload,
+            "editing_style": style_profile.id if style_profile else (campaign.editing_style if campaign else "clean_podcast"),
+            "reference_editing": bool(getattr(style_profile, "reference_style", False)) if style_profile else False,
+            "style_guidelines": list(getattr(style_profile, "editorial_guidelines", [])) if style_profile else [],
             "shots": shots,
             "text_emphasis_graphics": emphasis_graphics,
         }
