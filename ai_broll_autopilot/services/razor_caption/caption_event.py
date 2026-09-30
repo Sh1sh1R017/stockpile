@@ -153,6 +153,9 @@ class CaptionEvent:
     state: CaptionState = CaptionState.IDLE
     energy: EnergyLevel = EnergyLevel.MEDIUM
     mode: CaptionMode = CaptionMode.RAPID_RAZOR
+    chaos_score: float = 0.0
+    chaos_tier: str = "normal"
+    chaos_budget_remaining: float = 1.0
 
     def __setattr__(self, name, value):
         if name == "layer" and value == LayerMode.BEHIND_SUBJECT:
@@ -212,6 +215,11 @@ class CaptionEvent:
             "energy": self.energy.value,
             "emotion": self.emotion,
             "beat_aligned": self.beat_aligned,
+            "chaos": {
+                "score": round(self.chaos_score, 3),
+                "tier": self.chaos_tier,
+                "budget_remaining": round(self.chaos_budget_remaining, 3),
+            },
         }
 
     @property
