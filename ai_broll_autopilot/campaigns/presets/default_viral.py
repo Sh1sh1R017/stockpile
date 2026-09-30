@@ -1,7 +1,7 @@
 """Default Viral Shorts Campaign Preset.
 
-Standard high-velocity viral short-form editing with ~60% B-roll coverage,
-Alex Hormozi kinetic subtitles, streamer reaction cutaways, and auto-ducked upbeat phonk BGM.
+Reference-style cinematic short-form editing with centered rounded visual cards,
+center-stack kinetic captions, contextual B-roll, restrained zooms, and selective SFX.
 """
 
 from ai_broll_autopilot.campaigns.base import CampaignConfig
@@ -13,7 +13,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     rate="N/A (Standard Studio Workflow)",
     total_budget="N/A",
     platforms=["TikTok", "Instagram Reels", "YouTube Shorts"],
-    description="High-retention viral editing formula featuring ~60% B-roll coverage, creator reaction cutaways (Speed, CaseOh, Jynxzi), Hormozi punch subtitles, and auto-ducked upbeat phonk music.",
+    description="Cinematic social editorial workflow: black 9:16 canvas, centered rounded visual cards, contextual B-roll, center-stacked captions, restrained motion, and auto-ducked music.",
 
     # Video specs
     target_width=1080,
@@ -41,8 +41,8 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Subtitle rules
     subtitles_required=True,
-    subtitle_style="hormozi",
-    subtitle_position="bottom",
+    subtitle_style="cinematic_social",
+    subtitle_position="center",
     subtitle_margin_v=280,
     hook_required=False,
 
