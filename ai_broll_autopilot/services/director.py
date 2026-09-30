@@ -729,10 +729,15 @@ Return ONLY a valid JSON object matching this schema:
         if not clean_shots and not segments:
             return clean_shots, 0.0
 
-        min_speaker_gap = 1.0  # seconds of speaker face breathing space between cuts
-        max_gap_allowed = 4.0  # seconds: max continuous speaker time before a cutaway is needed
-        max_clip = min(float(getattr(campaign, "max_cutaway_seconds", 2.5)), float(Config.MAX_CLIP_DURATION_SECONDS))
-        min_clip = 1.4
+        reference_style = getattr(campaign, "subtitle_style", "") == "cinematic_editorial"
+        min_speaker_gap = 0.7 if reference_style else 1.0
+        max_gap_allowed = 3.5 if reference_style else 4.0
+        max_clip = min(
+            float(getattr(campaign, "max_cutaway_seconds", 2.5)),
+            float(Config.MAX_CLIP_DURATION_SECONDS),
+            2.2 if reference_style else 2.5,
+        )
+        min_clip = 0.8 if reference_style else 1.4
 
         # 1. Clean and space existing shots
         sorted_shots = sorted(clean_shots, key=lambda s: float(s.get("start_time", 0.0)))
@@ -746,7 +751,7 @@ Return ONLY a valid JSON object matching this schema:
             dur = min(max_clip, max(min_clip, float(s.get("duration", 2.0))))
             if st + dur > video_duration - 0.5:
                 dur = max(min_clip, video_duration - 0.5 - st)
-            if dur < 1.0 or st >= video_duration - 1.0:
+            if dur < max(0.5, min_clip * 0.75) or st >= video_duration - 1.0:
                 continue
             et = round(st + dur, 2)
             s["start_time"] = round(st, 2)
@@ -819,7 +824,7 @@ Return ONLY a valid JSON object matching this schema:
         if total_broll > target_broll_sec and cleaned:
             scale = target_broll_sec / total_broll
             for s in cleaned:
-                scaled_dur = round(max(1.3, s["duration"] * scale), 2)
+                scaled_dur = round(max(min_clip, s["duration"] * scale), 2)
                 s["duration"] = scaled_dur
                 s["end_time"] = round(s["start_time"] + scaled_dur, 2)
             total_broll = sum(s["duration"] for s in cleaned)
