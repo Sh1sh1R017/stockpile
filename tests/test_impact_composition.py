@@ -1,5 +1,6 @@
 from ai_broll_autopilot.services.razor_caption.caption_event import CaptionEvent, EmphasisLevel
 from ai_broll_autopilot.services.razor_caption.state_machine import CaptionStateMachine
+from ai_broll_autopilot.services.editorial.types import EditIntent
 
 
 def test_sentence_gets_hero_and_support_roles():
@@ -71,3 +72,31 @@ def test_keyword_alone_does_not_spend_chaos_budget():
     assert events[0].chaos_tier == "normal"
     assert events[0].composition_role == "normal"
     assert events[0].motion_recipe != "kinetic:word-impact-camera"
+
+
+def test_shared_editorial_intent_overrides_local_keyword_chaos():
+    events = [
+        CaptionEvent(
+            word="CHAOS",
+            phrase_id=9,
+            start_time=0.0,
+            end_time=0.5,
+            word_importance_score=0.96,
+            emphasis=EmphasisLevel.HOOK,
+            semantic_type="chaos",
+        )
+    ]
+    intent = EditIntent(
+        start_time=0.0,
+        end_time=1.0,
+        chaos_score=0.25,
+        chaos_tier="normal",
+        treatment="normal",
+        chaos_budget_remaining=0.75,
+    )
+
+    CaptionStateMachine().wire(events, editorial_intents=[intent])
+
+    assert events[0].chaos_tier == "normal"
+    assert events[0].motion_recipe != "kinetic:word-impact-camera"
+    assert events[0].composition_role == "normal"
