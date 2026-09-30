@@ -167,6 +167,12 @@ class CaptionEvent:
     beat_aligned: bool = False
     nearest_beat_time: Optional[float] = None
 
+    # ── ZapCap Semantic & Style Metadata ──────────────────────────────────
+    semantic_type: str = "normal"     # "normal", "hook", "money", "number", "negation", "action", "cta"
+    emoji: Optional[str] = None       # e.g. "💵", "🎰", "⏳", "❌", "🎯", "🔄", "🧠", "🔥"
+    style_preset: str = "hormozi"
+    color_palette: Optional[Dict[str, str]] = None
+
     # ── State machine ─────────────────────────────────────────────────────
     state: CaptionState = CaptionState.IDLE
 
@@ -182,9 +188,18 @@ class CaptionEvent:
             "type": "caption",
             "mode": self.mode.value,
             "text": self.word,
+            "word": self.word,
             "start": round(self.start_time, 4),
             "end": round(self.end_time, 4),
             "importance": round(self.word_importance_score, 3),
+            "semantic_type": self.semantic_type,
+            "emoji": self.emoji,
+            "style_preset": self.style_preset,
+            "color_palette": self.color_palette or {
+                "main": self.fill_color,
+                "second": self.accent_color,
+                "third": "#00FF66",
+            },
             "position": {
                 "region": self.region.value,
                 "x": round(self.position_x, 4),

@@ -20,12 +20,249 @@ class SubjectIsolationService:
     """Detects speaker spatial positioning and generates layered compositing parameters."""
 
     def __init__(self):
-        # Load OpenCV face detector for spatial positioning
+        # Load OpenCV face detector for spatial positioning fallback
         cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
         if cascade_path.exists():
             self.face_cascade = cv2.CascadeClassifier(str(cascade_path))
         else:
             self.face_cascade = None
+        self._yolo_model = None
+        self._yolo_available = None
+
+    def _get_yolo_model(self):
+        """Lazy load and cache the person segmentation YOLO model."""
+        if self._yolo_available is False:
+            return None
+        if self._yolo_model is None:
+            try:
+                from ultralytics import YOLO
+                model_name = os.getenv("PERSON_SEGMENTATION_MODEL", "yolo11n-seg.pt")
+                self._yolo_model = YOLO(model_name)
+                self._yolo_available = True
+                logger.info(f"Loaded YOLO person segmentation model: {model_name}")
+            except Exception as e:
+                logger.warning(f"Could not load YOLO segmentation model ({e}). Using GrabCut fallback.")
+                self._yolo_available = False
+                self._yolo_model = None
+        return self._yolo_model
+
+    def generate_person_matte(
+        self,
+        frame: np.ndarray,
+        face_rect: Optional[Tuple[int, int, int, int]] = None,
+    ) -> np.ndarray:
+        """Generate high-contrast grayscale alpha matte of speaker foreground.
+
+        Prefers YOLO person segmentation (multi-person supported) with Gaussian edge feathering.
+        Gracefully falls back to OpenCV GrabCut if YOLO is unavailable.
+
+        Args:
+            frame: BGR numpy image frame.
+            face_rect: Optional (x, y, w, h) of face for GrabCut fallback.
+
+        Returns:
+            Single-channel uint8 mask (0 = background, 255 = foreground speaker).
+        """
+        h, w = frame.shape[:2]
+
+        # 1. Primary backend: YOLO person instance segmentation
+        model = self._get_yolo_model()
+        if model is not None:
+            try:
+                res = model(frame, classes=[0], verbose=False)[0]
+                if res.masks is not None and len(res.masks):
+                    masks_data = res.masks.data.cpu().numpy()
+                    # Multi-person support: union of all detected person instances
+                    combined = np.any(masks_data > 0.5, axis=0).astype(np.uint8) * 255
+                    resized = cv2.resize(combined, (w, h), interpolation=cv2.INTER_LINEAR)
+                    # Edge refinement: gentle feathering to avoid jagged edges and halos
+                    feathered = cv2.GaussianBlur(resized, (5, 5), 1.5)
+                    return feathered
+            except Exception as ye:
+                logger.warning(f"YOLO person segmentation failed: {ye}. Falling back to GrabCut.")
+
+        # 2. Secondary fallback backend: GrabCut
+        # Downscale for fast GrabCut graph-cut optimization if frame is high-resolution
+        scale_gc = 1.0
+        if max(h, w) > 360:
+            scale_gc = 360.0 / max(h, w)
+            small_w = max(16, int(round(w * scale_gc)))
+            small_h = max(16, int(round(h * scale_gc)))
+            small_frame = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_AREA)
+        else:
+            small_w, small_h = w, h
+            small_frame = frame
+
+        mask = np.zeros((small_h, small_w), np.uint8)
+        bgd_model = np.zeros((1, 65), np.float64)
+        fgd_model = np.zeros((1, 65), np.float64)
+
+        if face_rect:
+            fx, fy, fw, fh = [int(v * scale_gc) for v in face_rect]
+            rx = max(0, fx - int(fw * 0.8))
+            ry = max(0, fy - int(fh * 0.3))
+            rw = min(small_w - rx, fw + int(fw * 1.6))
+            rh = min(small_h - ry, fh * 5)
+            rect = (rx, ry, rw, rh)
+        else:
+            rect = (int(small_w * 0.15), int(small_h * 0.10), int(small_w * 0.70), int(small_h * 0.85))
+
+        try:
+            cv2.grabCut(small_frame, mask, rect, bgd_model, fgd_model, 2, cv2.GC_INIT_WITH_RECT)
+            output_mask = np.where((mask == 1) | (mask == 3), 255, 0).astype("uint8")
+            if scale_gc < 1.0:
+                output_mask = cv2.resize(output_mask, (w, h), interpolation=cv2.INTER_LINEAR)
+            output_mask = cv2.GaussianBlur(output_mask, (7, 7), 2.0)
+            return output_mask
+        except Exception as e:
+            logger.warning(f"GrabCut matte failed: {e}. Returning threshold fallback.")
+            return np.full((h, w), 255, dtype=np.uint8)
+
+    def generate_person_matte_video(
+        self,
+        video_path: str,
+        output_path: str,
+        sample_fps: Optional[float] = None,
+        processing_width: int = 1080,
+        processing_height: int = 1920,
+        max_duration: Optional[float] = None,
+        temporal_smooth: bool = True,
+    ) -> Path:
+        """Generate a portrait-space subject matte video matching the renderer's canvas.
+
+        Supports frame-accurate YOLO segmentation or temporal linear interpolation
+        between sampled keyframes to guarantee smooth output without frame jumping or flicker.
+
+        Args:
+            video_path: Path to source video.
+            output_path: Target MP4 path for alpha mask video.
+            sample_fps: Optional sampling rate (e.g. 15.0). If None, segments every frame.
+            processing_width: Canvas width matching renderer (default 1080).
+            processing_height: Canvas height matching renderer (default 1920).
+            max_duration: Optional maximum seconds to process.
+            temporal_smooth: Whether to linearly interpolate intermediate frames.
+
+        Returns:
+            Path to generated matte video.
+        """
+        source = Path(video_path)
+        dest = Path(output_path)
+        if not source.exists():
+            raise FileNotFoundError(f"Source video not found: {source}")
+
+        # Cache check: reuse existing matte if newer than source
+        if dest.exists() and dest.stat().st_size > 1024:
+            try:
+                if dest.stat().st_mtime >= source.stat().st_mtime:
+                    logger.info(f"Reusing cached subject matte video: {dest}")
+                    return dest
+            except Exception:
+                pass
+
+        cap = cv2.VideoCapture(str(source))
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open source video: {source}")
+
+        source_fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+        if source_fps <= 0 or np.isnan(source_fps):
+            source_fps = 30.0
+
+        stride = 1
+        if sample_fps is not None and sample_fps > 0 and sample_fps < source_fps:
+            stride = max(1, int(round(source_fps / sample_fps)))
+
+        width = max(2, int(processing_width))
+        height = max(2, int(processing_height))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(dest), fourcc, source_fps, (width, height), isColor=True)
+        if not writer.isOpened():
+            cap.release()
+            raise RuntimeError(f"Could not create subject matte video: {dest}")
+
+        frames_to_read = []
+        max_frames = int(max_duration * source_fps) if max_duration else None
+
+        # Preload frames to allow smooth interpolation if strided
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames_to_read.append(frame)
+                if max_frames and len(frames_to_read) >= max_frames:
+                    break
+        finally:
+            cap.release()
+
+        total_frames = len(frames_to_read)
+        if total_frames == 0:
+            writer.release()
+            raise RuntimeError(f"No frames read from source video: {source}")
+
+        try:
+            if stride == 1:
+                # Frame-accurate segmentation: process every frame directly
+                for frame in frames_to_read:
+                    fitted = self._fit_frame_to_canvas(frame, width, height)
+                    mask = self.generate_person_matte(fitted)
+                    writer.write(cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR))
+            else:
+                # Strided sampling with continuous temporal linear interpolation
+                key_indices = list(range(0, total_frames, stride))
+                if key_indices[-1] != total_frames - 1:
+                    key_indices.append(total_frames - 1)
+
+                key_masks = {}
+                for idx in key_indices:
+                    fitted = self._fit_frame_to_canvas(frames_to_read[idx], width, height)
+                    key_masks[idx] = self.generate_person_matte(fitted)
+
+                # Write all frames with smooth interpolation between keyframes
+                for i in range(total_frames):
+                    # Find surrounding keyframes
+                    prev_k = max([k for k in key_indices if k <= i])
+                    next_k = min([k for k in key_indices if k >= i])
+
+                    if prev_k == next_k:
+                        interp_mask = key_masks[prev_k]
+                    else:
+                        alpha = float(i - prev_k) / float(next_k - prev_k)
+                        interp_mask = cv2.addWeighted(
+                            key_masks[prev_k], 1.0 - alpha,
+                            key_masks[next_k], alpha,
+                            0.0
+                        )
+                    writer.write(cv2.cvtColor(interp_mask, cv2.COLOR_GRAY2BGR))
+        finally:
+            writer.release()
+
+        if not dest.exists() or dest.stat().st_size == 0:
+            raise RuntimeError(f"Subject matte generation produced empty file: {dest}")
+
+        logger.info(
+            "Generated subject matte video: %s (%d frames @ %.2f fps, canvas %dx%d)",
+            dest,
+            total_frames,
+            source_fps,
+            width,
+            height,
+        )
+        return dest
+
+    @staticmethod
+    def _fit_frame_to_canvas(frame: np.ndarray, width: int, height: int) -> np.ndarray:
+        """Match the renderer's scale-down-and-pad behavior in portrait space."""
+        src_h, src_w = frame.shape[:2]
+        scale = min(width / max(1, src_w), height / max(1, src_h))
+        new_w = max(1, int(round(src_w * scale)))
+        new_h = max(1, int(round(src_h * scale)))
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+        x = (width - new_w) // 2
+        y = (height - new_h) // 2
+        canvas[y:y + new_h, x:x + new_w] = resized
+        return canvas
 
     def analyze_subject_layout(
         self,
@@ -207,159 +444,6 @@ class SubjectIsolationService:
             },
             "keyframes": [],
         }
-
-    def generate_person_matte(
-        self,
-        frame: np.ndarray,
-        face_rect: Optional[Tuple[int, int, int, int]] = None,
-    ) -> np.ndarray:
-        """Generate high-contrast grayscale alpha matte of speaker foreground using GrabCut.
-
-        Args:
-            frame: BGR numpy image frame.
-            face_rect: Optional (x, y, w, h) of face.
-
-        Returns:
-            Single-channel uint8 mask (0 = background, 255 = foreground speaker).
-        """
-        h, w = frame.shape[:2]
-        mask = np.zeros((h, w), np.uint8)
-
-        bgd_model = np.zeros((1, 65), np.float64)
-        fgd_model = np.zeros((1, 65), np.float64)
-
-        if face_rect:
-            fx, fy, fw, fh = face_rect
-            # Expand face box downwards to capture shoulders and torso
-            rx = max(0, fx - int(fw * 0.8))
-            ry = max(0, fy - int(fh * 0.3))
-            rw = min(w - rx, fw + int(fw * 1.6))
-            rh = min(h - ry, fh * 5)
-            rect = (rx, ry, rw, rh)
-        else:
-            # Default center lower bounding box for talking head
-            rect = (int(w * 0.15), int(h * 0.10), int(w * 0.70), int(h * 0.85))
-
-        try:
-            cv2.grabCut(frame, mask, rect, bgd_model, fgd_model, 2, cv2.GC_INIT_WITH_RECT)
-            # 0, 2 are background; 1, 3 are foreground
-            output_mask = np.where((mask == 1) | (mask == 3), 255, 0).astype("uint8")
-            # Apply slight Gaussian blur to soften mask edges
-            output_mask = cv2.GaussianBlur(output_mask, (7, 7), 2.0)
-            return output_mask
-        except Exception as e:
-            logger.warning(f"GrabCut matte failed: {e}. Returning threshold fallback.")
-            return np.full((h, w), 255, dtype=np.uint8)
-
-    def generate_person_matte_video(
-        self,
-        video_path: str,
-        output_path: str,
-        sample_fps: float = 8.0,
-        processing_width: int = 540,
-        processing_height: int = 960,
-    ) -> Path:
-        """Generate a low-rate portrait-space subject matte video for caption compositing.
-
-        The matte is evaluated on sampled frames and held between samples. Processing is
-        intentionally reduced to a small portrait canvas so the feature stays practical
-        for server-side rendering. The returned MP4 contains a grayscale alpha mask.
-        """
-        source = Path(video_path)
-        dest = Path(output_path)
-        if not source.exists():
-            raise FileNotFoundError(f"Source video not found: {source}")
-
-        cap = cv2.VideoCapture(str(source))
-        if not cap.isOpened():
-            raise RuntimeError(f"Could not open source video: {source}")
-
-        source_fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
-        if source_fps <= 0:
-            source_fps = 30.0
-        sample_fps = max(1.0, min(sample_fps, source_fps))
-        stride = max(1, int(round(source_fps / sample_fps)))
-
-        fps = source_fps
-        width = max(2, int(processing_width))
-        height = max(2, int(processing_height))
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        writer = cv2.VideoWriter(str(dest), fourcc, fps / stride, (width, height), isColor=True)
-        if not writer.isOpened():
-            cap.release()
-            raise RuntimeError(f"Could not create subject matte video: {dest}")
-
-        frame_index = 0
-        processed = 0
-        last_mask = np.zeros((height, width), dtype=np.uint8)
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                if frame_index % stride != 0:
-                    frame_index += 1
-                    continue
-
-                fitted = self._fit_frame_to_canvas(frame, width, height)
-                gray = cv2.cvtColor(fitted, cv2.COLOR_BGR2GRAY)
-                faces = []
-                if self.face_cascade:
-                    faces = self.face_cascade.detectMultiScale(
-                        gray,
-                        scaleFactor=1.1,
-                        minNeighbors=4,
-                        minSize=(max(24, int(width * 0.08)), max(24, int(height * 0.05))),
-                    )
-
-                face_rect = None
-                if len(faces):
-                    face_rect = tuple(max(faces, key=lambda f: f[2] * f[3]).tolist())
-
-                if face_rect:
-                    mask = self.generate_person_matte(fitted, face_rect)
-                    coverage = float(np.mean(mask)) / 255.0
-                    if coverage < 0.01 or coverage > 0.92:
-                        mask = last_mask
-                else:
-                    # Reuse the last valid foreground mask when face detection misses
-                    # a sampled frame; this avoids a visible caption/subject flicker.
-                    mask = last_mask
-
-                last_mask = mask
-                writer.write(cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR))
-                processed += 1
-                frame_index += 1
-        finally:
-            cap.release()
-            writer.release()
-
-        if processed == 0 or not dest.exists() or dest.stat().st_size == 0:
-            raise RuntimeError(f"Subject matte generation produced no frames: {dest}")
-
-        logger.info(
-            "Generated subject matte video: %s (%d sampled frames @ %.2f fps)",
-            dest,
-            processed,
-            fps / stride,
-        )
-        return dest
-
-    @staticmethod
-    def _fit_frame_to_canvas(frame: np.ndarray, width: int, height: int) -> np.ndarray:
-        """Match the renderer's scale-down-and-pad behavior in portrait space."""
-        src_h, src_w = frame.shape[:2]
-        scale = min(width / max(1, src_w), height / max(1, src_h))
-        new_w = max(1, int(round(src_w * scale)))
-        new_h = max(1, int(round(src_h * scale)))
-        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        canvas = np.zeros((height, width, 3), dtype=np.uint8)
-        x = (width - new_w) // 2
-        y = (height - new_h) // 2
-        canvas[y:y + new_h, x:x + new_w] = resized
-        return canvas
 
 
 # Global singleton instance

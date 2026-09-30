@@ -87,6 +87,7 @@ export interface ShotDetail {
   duration?: number;
   speed?: number;
   dialogue_quote?: string;
+  search_prompt?: string;
   emotional_core?: string;
   visceral_human_metaphor?: string;
   asset_title?: string;
@@ -137,12 +138,42 @@ export interface JobDetail extends JobSummary {
     render_settings?: {
       subtitles_enabled?: boolean;
       subtitle_style?: string;
+      preset?: string;
       subtitle_position?: string;
       subtitles_behind_subject?: boolean;
+      caption_motion?: string;
+      words_per_beat?: number;
+      subtitle_y_percent?: number;
+      enable_emojis?: boolean;
+      custom_colors?: {
+        main?: string;
+        second?: string;
+        third?: string;
+      };
       bgm_track_id?: string;
       bgm_volume?: number;
       bgm_ducking?: boolean;
+      [key: string]: any;
     };
+    subtitles?: Array<{
+      id: string;
+      text: string;
+      startTime: number;
+      endTime: number;
+      words?: Array<{
+        word: string;
+        start: number;
+        end: number;
+        semantic_type?: string;
+        emoji?: string;
+        emphasis?: string;
+        layer?: string;
+      }>;
+      behindSubject?: boolean;
+      behind_subject?: boolean;
+      style?: any;
+    }>;
+    razor_captions?: any[];
     shots: ShotDetail[];
   };
 }

@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   FileCode,
   Archive,
+  Type,
 } from "lucide-react";
 import { JobDetail, ShotDetail } from "../lib/types";
 
@@ -48,6 +49,22 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
 }) => {
   // Localized playhead time - updates here NEVER re-render parent dashboard!
   const [currentTime, setCurrentTime] = useState<number>(0);
+  const [showLiveCaptions, setShowLiveCaptions] = useState<boolean>(true);
+
+  const renderSettings = selectedJob.edit_plan?.render_settings || {};
+  const subtitlesEnabled = renderSettings.subtitles_enabled !== false;
+  const customColors = renderSettings.custom_colors || {};
+  const mainColor = customColors.main || "#FFFFFF";
+  const secondColor = customColors.second || "#FFE600";
+  const thirdColor = customColors.third || "#00FF66";
+  const yPercent = renderSettings.subtitle_y_percent ?? 82;
+
+  // Find active subtitle group
+  const activeSub = React.useMemo(() => {
+    if (!subtitlesEnabled || !showLiveCaptions) return null;
+    const subs = selectedJob.edit_plan?.subtitles || [];
+    return subs.find((s: any) => currentTime >= s.startTime && currentTime <= s.endTime);
+  }, [selectedJob.edit_plan?.subtitles, currentTime, subtitlesEnabled, showLiveCaptions]);
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -81,34 +98,51 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
 
       {/* Master 9:16 Video Player */}
       <div className="bg-black rounded-2xl overflow-hidden border border-zinc-800 flex flex-col items-center py-2 shadow-2xl relative">
-        {/* SDR vs HDR10 Stream Switcher */}
-        {hdrAvailable && (
-          <div className="flex items-center gap-1.5 mb-2 z-10">
-            <button
-              type="button"
-              onClick={() => setViewingHdrVideo(false)}
-              className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all ${
-                !viewingHdrVideo
-                  ? "bg-zinc-700 text-white border-zinc-500 shadow-sm"
-                  : "bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-zinc-200"
-              }`}
-            >
-              SDR Standard
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewingHdrVideo(true)}
-              className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all flex items-center gap-1.5 ${
-                viewingHdrVideo
-                  ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white border-pink-400 shadow-md shadow-pink-600/30"
-                  : "bg-zinc-900/90 text-pink-400 border-zinc-800 hover:text-pink-300"
-              }`}
-            >
-              <Sparkles className="w-3 h-3 text-amber-300" />
-              <span>✨ HDR10 Upscaled (10-bit PQ)</span>
-            </button>
-          </div>
-        )}
+        {/* Stream Switcher & Live Caption Overlay Toggle */}
+        <div className="flex items-center justify-between w-11/12 mb-2 z-10">
+          {hdrAvailable ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setViewingHdrVideo(false)}
+                className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all ${
+                  !viewingHdrVideo
+                    ? "bg-zinc-700 text-white border-zinc-500 shadow-sm"
+                    : "bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:text-zinc-200"
+                }`}
+              >
+                SDR Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewingHdrVideo(true)}
+                className={`text-[10px] font-bold px-3 py-1 rounded-lg border transition-all flex items-center gap-1.5 ${
+                  viewingHdrVideo
+                    ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white border-pink-400 shadow-md shadow-pink-600/30"
+                    : "bg-zinc-900/90 text-pink-400 border-zinc-800 hover:text-pink-300"
+                }`}
+              >
+                <Sparkles className="w-3 h-3 text-amber-300" />
+                <span>✨ HDR10 Upscaled (10-bit PQ)</span>
+              </button>
+            </div>
+          ) : (
+            <div className="text-[10px] font-mono text-zinc-400">9:16 Vertical Master</div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowLiveCaptions(!showLiveCaptions)}
+            className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1 ${
+              showLiveCaptions
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-300"
+            }`}
+          >
+            <Type className="w-3 h-3" />
+            <span>Overlay: {showLiveCaptions ? "ON" : "OFF"}</span>
+          </button>
+        </div>
 
         {/* In-progress HDR conversion indicator */}
         {isUpscalingHdr && (
@@ -134,22 +168,83 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
           </div>
         )}
 
-        <video
-          ref={videoRef}
-          key={`${selectedJob.job_id}_${viewingHdrVideo ? "hdr" : "sdr"}`}
-          controls
-          playsInline
-          preload="metadata"
-          onTimeUpdate={handleTimeUpdate}
-          className="max-h-[500px] w-auto rounded-xl shadow-lg aspect-[9/16]"
-          src={
-            viewingHdrVideo
-              ? `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/hdr-video?v=${selectedJob.edit_plan?.last_render_revision || 1}`
-              : `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video?v=${selectedJob.edit_plan?.last_render_revision || 1}`
-          }
-        >
-          Your browser does not support the video tag.
-        </video>
+        {/* Video Player Container with Live Caption Overlay */}
+        <div className="relative inline-block max-h-[500px] w-auto aspect-[9/16] overflow-hidden rounded-xl shadow-lg">
+          <video
+            ref={videoRef}
+            key={`${selectedJob.job_id}_${viewingHdrVideo ? "hdr" : "sdr"}`}
+            controls
+            playsInline
+            preload="metadata"
+            onTimeUpdate={handleTimeUpdate}
+            className="w-full h-full object-contain rounded-xl"
+            src={
+              viewingHdrVideo
+                ? `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/hdr-video?v=${selectedJob.edit_plan?.last_render_revision || 1}`
+                : `/api/jobs/${encodeURIComponent(selectedJob.job_id)}/video?v=${selectedJob.edit_plan?.last_render_revision || 1}`
+            }
+          >
+            Your browser does not support the video tag.
+          </video>
+
+          {/* Live ZapCap Kinetic Caption Overlay */}
+          {activeSub && (
+            <div
+              className="absolute left-0 right-0 px-3 text-center pointer-events-none transition-all duration-75 flex flex-col items-center z-20"
+              style={{
+                top: `${yPercent}%`,
+                transform: "translateY(-50%)",
+              }}
+            >
+              {activeSub.behindSubject && (
+                <span className="mb-1 text-[8px] tracking-widest uppercase font-black px-1.5 py-0.5 rounded bg-purple-900/90 text-purple-200 border border-purple-400/50 shadow-sm animate-pulse">
+                  BEHIND SPEAKER
+                </span>
+              )}
+              <div className="inline-flex items-center justify-center flex-wrap gap-1 px-2.5 py-1 rounded-xl bg-black/35 backdrop-blur-[1px]">
+                {activeSub.words && activeSub.words.length > 0 ? (
+                  activeSub.words.map((w: any, wIdx: number) => {
+                    const isActive = currentTime >= w.start && currentTime <= w.end;
+                    const isMoneyOrNum = w.semantic_type === "money" || w.semantic_type === "number";
+                    const wordColor = isActive ? secondColor : isMoneyOrNum ? thirdColor : mainColor;
+
+                    return (
+                      <span
+                        key={wIdx}
+                        className={`transition-all duration-100 inline-flex items-center gap-0.5 font-black uppercase tracking-wide ${
+                          isActive
+                            ? "scale-115 text-lg -translate-y-0.5 drop-shadow-[0_0_12px_rgba(255,230,0,0.9)] z-10"
+                            : "scale-100 text-base opacity-95"
+                        }`}
+                        style={{
+                          color: wordColor,
+                          textShadow: "0 2px 6px rgba(0,0,0,0.95), 0 0 2px #000",
+                          WebkitTextStroke: "1px #000000",
+                        }}
+                      >
+                        {w.word}
+                        {w.emoji && renderSettings.enable_emojis !== false && (
+                          <span className="text-sm ml-0.5">{w.emoji}</span>
+                        )}
+                      </span>
+                    );
+                  })
+                ) : (
+                  <span
+                    className="font-black text-base uppercase"
+                    style={{
+                      color: secondColor,
+                      textShadow: "0 2px 6px rgba(0,0,0,0.95), 0 0 2px #000",
+                      WebkitTextStroke: "1px #000000",
+                    }}
+                  >
+                    {activeSub.text}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Interactive B-Roll Cutaway Timeline Bar */}

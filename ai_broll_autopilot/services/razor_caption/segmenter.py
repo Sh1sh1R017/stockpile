@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _PAUSE_HARD = 0.40      # inter-word gap → definite break
 _PAUSE_SOFT = 0.18      # inter-word gap → soft break (respect semantic context)
 _WORD_LONG = 0.55       # single word duration → potential edge
-_MAX_GROUP = 5          # never stack more than 5 words in a razor segment
+_MAX_GROUP = 5          # default 5 words per segment (overridden by max_group_size)
 _MIN_GROUP = 1          # minimum 1 word per segment (single-word punchlines allowed)
 
 # Punctuation that signals a clause/sentence end
