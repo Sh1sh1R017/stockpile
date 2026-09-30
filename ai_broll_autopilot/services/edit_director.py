@@ -317,7 +317,9 @@ class EditDirectorService:
                 (float(s["start_time"]), float(s["end_time"]))
                 for s in shots_data if s.get("asset_path")
             ]
-            razor_engine = RazorCaptionEngine()
+            razor_engine = RazorCaptionEngine(
+                max_group_size=3 if getattr(style, "reference_style", False) else 5
+            )
             events = razor_engine.process(
                 segments=clip_segments,
                 broll_active_times=broll_active_times,
@@ -661,6 +663,56 @@ Respond ONLY with valid JSON matching:
         style: StyleProfile,
     ) -> List[Dict[str, Any]]:
         """Construct word-level timed subtitle structures compatible with OpenReel."""
+        # Reference-style captions use short phrase beats rather than full transcript
+        # sentences: usually 2-4 words, centered, with restrained editorial motion.
+        if getattr(style, "reference_style", False):
+            all_words: List[Dict[str, Any]] = []
+            for seg in clip_segments:
+                st = float(seg.get("start", 0.0))
+                et = float(seg.get("end", st))
+                seg_words = seg.get("words", []) or []
+                if seg_words:
+                    for w in seg_words:
+                        word = str(w.get("word", w.get("text", ""))).strip()
+                        if not word:
+                            continue
+                        all_words.append({
+                            "text": word,
+                            "startTime": round(max(0.0, float(w.get("start", st))), 3),
+                            "endTime": round(max(0.0, float(w.get("end", et))), 3),
+                        })
+                else:
+                    tokens = str(seg.get("text", "")).split()
+                    if tokens:
+                        dur = max(0.01, et - st) / len(tokens)
+                        for j, token in enumerate(tokens):
+                            all_words.append({
+                                "text": token,
+                                "startTime": round(st + j * dur, 3),
+                                "endTime": round(st + (j + 1) * dur, 3),
+                            })
+
+            subtitles: List[Dict[str, Any]] = []
+            group_size = max(2, min(4, int(getattr(style, "caption_words_per_group", 3))))
+            group: List[Dict[str, Any]] = []
+            next_id = 1
+            for word in all_words:
+                group.append(word)
+                token = word["text"]
+                span = float(word["endTime"]) - float(group[0]["startTime"])
+                break_after = (
+                    len(group) >= group_size
+                    or token.rstrip().endswith((".", "!", "?", ",", ";", ":"))
+                    or span >= 1.65
+                )
+                if break_after:
+                    subtitles.append(self._subtitle_group_entry(style, group, next_id))
+                    next_id += 1
+                    group = []
+            if group:
+                subtitles.append(self._subtitle_group_entry(style, group, next_id))
+            return subtitles
+
         subtitles = []
         for i, seg in enumerate(clip_segments):
             st = seg["start"]
@@ -671,7 +723,6 @@ Respond ONLY with valid JSON matching:
 
             words = seg.get("words", [])
             timed_words = []
-
             if words:
                 for w in words:
                     timed_words.append({
@@ -680,7 +731,6 @@ Respond ONLY with valid JSON matching:
                         "endTime": max(0.0, round(w.get("end", et), 2)),
                     })
             else:
-                # Interpolate word timings if not present in transcript segment
                 raw_words = text.split()
                 if raw_words:
                     word_dur = (et - st) / len(raw_words)
@@ -705,6 +755,39 @@ Respond ONLY with valid JSON matching:
             })
 
         return subtitles
+
+    @staticmethod
+    def _subtitle_group_entry(
+        style: StyleProfile,
+        group: List[Dict[str, Any]],
+        index: int,
+    ) -> Dict[str, Any]:
+        """Build a centered 2-4 word caption beat for the reference style."""
+        start = float(group[0]["startTime"])
+        end = max(start + 0.05, float(group[-1]["endTime"]))
+        return {
+            "id": f"sub_{index:03d}",
+            "text": " ".join(str(w["text"]).strip() for w in group),
+            "startTime": round(start, 3),
+            "endTime": round(end, 3),
+            "animationStyle": style.caption_animation_style,
+            "motionProfile": style.caption_animation_style or "word-pop",
+            "motionRecipe": f"motion-anything:{style.caption_animation_style or 'word-pop'}",
+            "behind_subject": False,
+            "style": {
+                **style.to_openreel_subtitle_style(),
+                "highlightColor": style.highlight_color,
+                "fontSize": max(48, int(style.font_size)),
+            },
+            "words": [
+                {
+                    "text": str(w["text"]),
+                    "startTime": float(w["startTime"]),
+                    "endTime": float(w["endTime"]),
+                }
+                for w in group
+            ],
+        }
 
 
 # Global instance
