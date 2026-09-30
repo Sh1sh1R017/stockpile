@@ -13,6 +13,29 @@ from ai_broll_autopilot.services.timeline import TimelineEngine
 logger = logging.getLogger(__name__)
 
 
+def _write_rounded_card_overlay(
+    output_path: Path,
+    canvas_width: int,
+    canvas_height: int,
+    viewport: tuple,
+    radius: int,
+) -> Path:
+    """Create a black/transparent mask that rounds the supplied landscape card."""
+    from PIL import Image, ImageDraw
+
+    x, y, w, h = [int(v) for v in viewport]
+    img = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle(
+        (x, y, x + w - 1, y + h - 1),
+        radius=max(1, int(radius)),
+        fill=(0, 0, 0, 0),
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path, "PNG")
+    return output_path
+
+
 class Renderer:
     """Renders composite video using FFmpeg multi-input complex filtergraphs."""
 
@@ -199,6 +222,40 @@ class Renderer:
             cmd.extend(["-stream_loop", "-1", "-i", str(subject_matte_path)])
             current_input_idx += 1
 
+        # Optional rounded-card mask for the cinematic editorial reference style.
+        rounded_card_stream_idx = None
+        style_cfg = edit_plan.get("style", {}) if isinstance(edit_plan, dict) else {}
+        use_rounded_card = (
+            str(style_cfg.get("video_frame_mode", "")) == "rounded_landscape_card"
+        )
+        rounded_viewport = viewport
+        if use_rounded_card and not rounded_viewport:
+            # Reference default for a 1080x1920 export: a centered ~16:9 card.
+            card_w = int(self.timeline.width * float(style_cfg.get("video_frame_scale", 0.97) or 0.97))
+            card_h = int(round(card_w * 9 / 16))
+            rounded_viewport = (
+                (self.timeline.width - card_w) // 2,
+                (self.timeline.height - card_h) // 2,
+                card_w,
+                card_h,
+            )
+        if use_rounded_card and rounded_viewport:
+            mask_path = out_p.parent / "rounded_editorial_card_mask.png"
+            rounded_radius = int(float(style_cfg.get("video_frame_border_radius", 28) or 28))
+            try:
+                _write_rounded_card_overlay(
+                    mask_path,
+                    self.timeline.width,
+                    self.timeline.height,
+                    rounded_viewport,
+                    rounded_radius,
+                )
+                rounded_card_stream_idx = current_input_idx
+                cmd.extend(["-loop", "1", "-i", str(mask_path)])
+                current_input_idx += 1
+            except Exception as exc:
+                logger.warning("Could not create rounded editorial card mask: %s", exc)
+
         # Optional Cyber Grid Before & After streams
         cyber_grid_backdrop_idx = None
         cyber_grid_mask_before_idx = None
@@ -244,7 +301,7 @@ class Renderer:
             watermark_position=watermark_position,
             watermark_scale=watermark_scale,
             frame_overlay_stream_idx=frame_overlay_stream_idx,
-            viewport=viewport,
+            viewport=rounded_viewport,
             behind_subject_text=behind_subject_overlay,
             subject_matte_stream_idx=subject_matte_stream_idx,
             behind_subject_ass_path=behind_subject_ass_path,
@@ -253,6 +310,15 @@ class Renderer:
             cyber_grid_mask_before_idx=cyber_grid_mask_before_idx,
             cyber_grid_mask_after_idx=cyber_grid_mask_after_idx,
         )
+
+        # Apply the rounded-card mask after all video layers so both A-roll and
+        # B-roll share the same clipped card silhouette.
+        if rounded_card_stream_idx is not None:
+            filtergraph += (
+                f";[{final_video}][{rounded_card_stream_idx}:v]"
+                f"overlay=0:0:format=auto[rounded_editorial_video]"
+            )
+            final_video = "rounded_editorial_video"
 
         # Probe base video duration to ensure output matches base video exactly
         import subprocess
