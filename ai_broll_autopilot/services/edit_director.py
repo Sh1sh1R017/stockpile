@@ -415,6 +415,23 @@ class EditDirectorService:
                 {"type": "shot", "count": len(shots_data)},
                 {"type": "graphic", "count": len(graphics_data)},
             ],
+            render_settings=(
+                {
+                    "subtitles_enabled": True,
+                    "subtitle_style": "cinematic_editorial",
+                    "preset": "cinematic_editorial",
+                    "subtitle_position": "center",
+                    "caption_motion": "word-pop",
+                    "words_per_beat": style.caption_words_per_group,
+                    "subtitles_behind_subject": False,
+                    "custom_colors": {
+                        "main": style.primary_color,
+                        "second": style.highlight_color,
+                    },
+                }
+                if style.id == "cinematic_social_editorial"
+                else {}
+            ),
         )
 
         # -------------------------------------------------------------
@@ -460,13 +477,26 @@ TOTAL CLIP DURATION: {clip_duration:.1f}s
 MAX B-ROLL COVERAGE: {max_broll_ratio*100:.0f}% (~{max_broll_seconds:.1f}s total B-roll)
 TARGET NUMBER OF B-ROLL SHOTS: {target_shots}
 
+{f'''REFERENCE STYLE RULES:
+- Open with 0.8–1.3s of clean A-roll, then cut on sentence meaning, reveals, emotional changes, and concrete visual nouns.
+- Use B-roll as narrative punctuation; each cutaway must have a literal visual reason tied to the spoken line.
+- Prefer 0.8–2.2s B-roll clips, with occasional 2–3 micro-cutaways inside a longer sentence when the visual meaning changes.
+- Keep the speaker present between visual inserts; never cover an entire thought with unrelated footage.
+- Use large white sentence-aware captions, usually 2–4 words visible at once, centered or slightly above center. Use restrained pale-green emphasis for important words.
+- Avoid giant all-caps meme captions, neon styling, constant zooms, and decorative transitions.
+- Keep A-roll punch-ins subtle (1.02–1.045x) and only at high-impact moments.
+- Use hard cuts by default and reserve SFX for major punctuation.
+- Prefer cinematic/archival/documentary imagery and specific real-world visual metaphors over generic stock people smiling at cameras.
+- Maintain a black/near-black breathing canvas around framed vertical imagery when possible.
+''' if style.id == "cinematic_social_editorial" else ""}
+ 
 DIRECTOR RULES:
-1. The speaker's face MUST be visible for the opening hook (first 0.8s to 1.5s).
-2. Cutaways MUST directly illustrate spoken keywords or concepts in the transcript.
-3. Every B-roll shot MUST specify a clean, 2-4 keyword "search_query" tailored to the niche vocabulary.
-4. Add 1-3 high-impact kinetic text overlays (e.g. hook title card at 0.5s–2.0s, key terms, or punchlines).
-5. Add 2-4 subtle zoom punch-in keyframes (scale {style.zoom_intensity:.2f}) on emphatic sentences or punchlines.
-6. Audio: duck BGM to {style.bgm_ducking_volume} during spoken dialogue; trigger whoosh SFX on B-roll cuts.
+1. The speaker's face MUST be visible for the opening hook (first 0.8s to 1.3s).
+2. Cutaways MUST directly illustrate spoken keywords, objects, actions, places, claims, or emotional consequences in the transcript.
+3. Every B-roll shot MUST specify a clean, 4-8 word literal retrieval query tailored to the exact visual event.
+4. Prefer 1-3 meaningful text overlays only when they reinforce a hook, named entity, number, or punchline; do not decorate every sentence.
+5. Add subtle punch-in keyframes only for genuinely emphatic A-roll moments, never as automatic filler.
+6. Audio: duck BGM to {style.bgm_ducking_volume} during spoken dialogue; use whoosh/impact SFX selectively on major visual punctuation.
 
 CLIP TRANSCRIPT:
 {formatted_segs}
