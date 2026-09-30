@@ -35,6 +35,11 @@ CHAOS_IMPACT_WORDS = {
 }
 
 
+CHAOS_WORD_BONUS = 0.22
+CHAOS_REGEN_PER_SEC = 0.22
+CHAOS_COSTS = {"kinetic": 0.20, "impact": 0.48, "absurd": 0.82}
+
+
 def _clamp_ms(v: int) -> int:
     return max(_MIN_ANIM_MS, min(v, _MAX_ANIM_MS))
 
@@ -47,6 +52,8 @@ class CaptionStateMachine:
         # Compose each phrase as a visual unit first. This is what turns
         # "JOEY DIAZ WAS PURE CHAOS" into supporting text + a dominant CHAOS
         # treatment instead of four identical subtitle words.
+        self._apply_chaos_budget(events)
+
         by_phrase = {}
         for ev in events:
             by_phrase.setdefault(ev.phrase_id, []).append(ev)
@@ -67,15 +74,57 @@ class CaptionStateMachine:
         return events
 
     @staticmethod
+    def _apply_chaos_budget(events: List[CaptionEvent]) -> None:
+        """Score and ration impact intensity across the timeline."""
+        budget = 1.0
+        previous_time = events[0].start_time if events else 0.0
+        for ev in events:
+            elapsed = max(0.0, ev.start_time - previous_time)
+            budget = min(1.0, budget + elapsed * CHAOS_REGEN_PER_SEC)
+            semantic = (ev.semantic_type or "normal").strip().lower()
+            clean_word = re.sub(r"[^a-z0-9$%]+", "", str(ev.word).lower())
+            lexical = CHAOS_WORD_BONUS if clean_word in CHAOS_IMPACT_WORDS else 0.0
+            energy_bonus = {EnergyLevel.LOW: 0.0, EnergyLevel.MEDIUM: 0.06, EnergyLevel.HIGH: 0.14}[ev.energy]
+            raw = (
+                0.42 * max(0.0, min(1.0, ev.word_importance_score))
+                + 0.18 * max(0.0, min(1.0, ev.emotional_importance))
+                + 0.14 * max(0.0, min(1.0, ev.hook_relevance))
+                + 0.12 * max(0.0, min(1.0, ev.speaker_emphasis))
+                + energy_bonus
+                + lexical
+            )
+            if semantic in {"chaos", "extreme"}:
+                raw += 0.16
+            if ev.emphasis == EmphasisLevel.HOOK:
+                raw += 0.18
+            score = max(0.0, min(1.0, raw))
+            ev.chaos_score = score
+
+            if score >= 0.78:
+                desired = "absurd"
+            elif score >= 0.60:
+                desired = "impact"
+            elif score >= 0.40:
+                desired = "kinetic"
+            else:
+                desired = "normal"
+
+            if desired == "absurd" and budget < CHAOS_COSTS["absurd"]:
+                desired = "impact" if budget >= CHAOS_COSTS["impact"] else "kinetic" if budget >= CHAOS_COSTS["kinetic"] else "normal"
+            elif desired == "impact" and budget < CHAOS_COSTS["impact"]:
+                desired = "kinetic" if budget >= CHAOS_COSTS["kinetic"] else "normal"
+            elif desired == "kinetic" and budget < CHAOS_COSTS["kinetic"]:
+                desired = "normal"
+
+            budget = max(0.0, budget - CHAOS_COSTS.get(desired, 0.0))
+            ev.chaos_tier = desired
+            ev.chaos_budget_remaining = budget
+            previous_time = ev.start_time
+
+    @staticmethod
     def _apply_impact_recipe(ev: CaptionEvent) -> None:
-        semantic = (ev.semantic_type or "normal").strip().lower()
-        clean_word = re.sub(r"[^a-z0-9$%]+", "", str(ev.word).lower())
-        is_extreme = (
-            semantic in {"hook", "chaos", "extreme"}
-            or ev.emphasis == EmphasisLevel.HOOK
-            or clean_word in CHAOS_IMPACT_WORDS
-        )
-        is_strong = semantic in {"strong", "action"} or ev.emphasis == EmphasisLevel.STRONG
+        is_extreme = ev.chaos_tier in {"impact", "absurd"}
+        is_strong = ev.chaos_tier == "kinetic" or (ev.semantic_type or "").strip().lower() in {"strong", "action"} or ev.emphasis == EmphasisLevel.STRONG
 
         if is_extreme:
             ev.motion_recipe = "kinetic:word-impact-camera"
