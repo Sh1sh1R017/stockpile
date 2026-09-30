@@ -132,8 +132,9 @@ class Matcher:
         # 1. Local-First: Search local cataloged B-Roll library
         try:
             from ai_broll_autopilot.services.broll_library import broll_library
+            local_query = semantic_queries[0] if semantic_queries else prompt
             local_matches = broll_library.search_local(
-                query=prompt,
+                query=local_query,
                 niche_id=niche_id,
                 min_duration=1.0,
                 limit=3
@@ -156,10 +157,11 @@ class Matcher:
 
         # 3. Try Pexels royalty-free vertical footage if API key is provided
         if not asset_path and pexels_service.is_available():
-            logger.info(f"Attempting Pexels stock video search for [{shot_id}]: '{prompt}'")
+            pexels_prompt = semantic_queries[0] if semantic_queries else prompt
+            logger.info(f"Attempting Pexels stock video search for [{shot_id}]: '{pexels_prompt}'")
             p_out = job_cache_dir / f"{shot_id}_pexels.mp4"
             asset_path = await pexels_service.search_and_download(
-                prompt, p_out, duration=target_duration, orientation="portrait"
+                pexels_prompt, p_out, duration=target_duration, orientation="portrait"
             )
 
         # 4. If not cached or resolved from Pexels, acquire asset based on style
@@ -184,8 +186,9 @@ class Matcher:
         if not asset_path or not Path(asset_path).exists():
             logger.info(f"Stockpile footage unavailable for [{shot_id}] ('{prompt}'). Trying Pexels stock video fallback...")
             p_fallback = job_cache_dir / f"{shot_id}_pexels_fallback.mp4"
+            fallback_prompt = semantic_queries[0] if semantic_queries else prompt
             asset_path = await pexels_service.search_and_download(
-                prompt, p_fallback, duration=target_duration, orientation="portrait"
+                fallback_prompt, p_fallback, duration=target_duration, orientation="portrait"
             )
             if asset_path and Path(asset_path).exists():
                 logger.info(f"Resolved clean Pexels stock footage for [{shot_id}]: {Path(asset_path).name}")
