@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -82,6 +83,78 @@ class Orchestrator:
         await self.queue.enqueue(job)
         return job.job_id
 
+
+    async def enqueue_short_edit(
+        self,
+        parent_job_id: str,
+        start: float,
+        end: float,
+        title: str,
+        source: str = "manual",
+        batch_id: Optional[str] = None,
+        candidate_id: Optional[str] = None,
+        caption_style: Optional[str] = None,
+        caption_motion: Optional[str] = None,
+        subtitles_behind_subject: Optional[bool] = None,
+    ) -> str:
+        """Create a child job that edits only one interval of a long-form parent job."""
+        parent = self.db.get_job(parent_job_id)
+        if not parent:
+            raise ValueError("Parent job not found")
+        source_path = Path(parent.source_file)
+        if not source_path.exists():
+            raise ValueError("Parent source video is not available")
+
+        start_f = max(0.0, float(start))
+        end_f = float(end)
+        if end_f <= start_f:
+            raise ValueError("Short end timestamp must be greater than start timestamp")
+
+        child = Job.create(str(source_path), campaign_id=parent.campaign_id)
+        safe_title = re.sub(r"[^A-Za-z0-9._ -]+", "", str(title or "Short")).strip()[:70] or "Short"
+        child.source_filename = f"{source_path.stem} - {safe_title}.mp4"
+        child.transcript_segments = parent.transcript_segments
+        child.transcript_text = parent.transcript_text
+
+        from ai_broll_autopilot.services.shorts_workflow import workflow_record
+        parent_plan = parent.edit_plan or {}
+        parent_niche = (parent_plan.get("niche") or {}).get("id") or parent_plan.get("niche_id")
+        parent_style = (parent_plan.get("style") or {}).get("id") or parent_plan.get("style_id")
+        child.edit_plan = {
+            "workflow": workflow_record(
+                parent_job_id=parent_job_id,
+                source=source,
+                start=start_f,
+                end=end_f,
+                title=safe_title,
+                batch_id=batch_id,
+                candidate_id=candidate_id,
+                caption_style=caption_style,
+                caption_motion=caption_motion,
+                subtitles_behind_subject=subtitles_behind_subject,
+                niche_id=parent_niche,
+                style_id=parent_style,
+            ),
+        }
+
+        await self.queue.enqueue(child)
+
+        parent_plan = parent.edit_plan or {}
+        children = parent_plan.setdefault("short_edits", [])
+        children.append({
+            "job_id": child.job_id,
+            "title": safe_title,
+            "source": source,
+            "start": round(start_f, 3),
+            "end": round(end_f, 3),
+            "batch_id": batch_id,
+            "candidate_id": candidate_id,
+            "status": "queued",
+        })
+        parent.edit_plan = parent_plan
+        self.db.save_job(parent)
+        return child.job_id
+
     async def start(self):
         """Start the background autopilot worker queue."""
         logger.info("Initializing AI B-Roll Autopilot worker queue...")
@@ -106,29 +179,101 @@ class Orchestrator:
         suppress_hook: bool = False,
         text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Prepare normal/behind-subject caption layers and a reusable subject matte via CaptionCompositor."""
-        from ai_broll_autopilot.services.caption_compositor import caption_compositor
-
+        """Prepare normal/behind-subject caption layers and a reusable subject matte."""
+        subtitles = edit_plan.get("subtitles", []) if edit_plan else []
         render_settings = edit_plan.get("render_settings", {}) if edit_plan else {}
-        caption_motion = render_settings.get("caption_motion", "word-pop")
-
-        return await caption_compositor.prepare_caption_render_assets(
-            source_video=source_video,
-            edit_plan=edit_plan,
-            transcript_segments=transcript_segments,
-            work_dir=work_dir,
-            style_preset=style_preset,
-            position=position,
-            custom_margin_v=custom_margin_v,
-            hook_text=hook_text,
-            hook_duration=hook_duration,
-            suppress_hook=suppress_hook,
-            text_emphasis_events=text_emphasis_events,
-            caption_motion=caption_motion,
+        force_behind = bool(render_settings.get("subtitles_behind_subject", False))
+        segments = annotate_segments_for_subject_captions(
+            transcript_segments,
+            subtitles,
+            force_behind_subject=force_behind,
         )
+        behind_enabled = has_behind_subject_segments(segments)
+
+        all_ass_dest = work_dir / "subtitles_kinetic.ass"
+        try:
+            self.sub_engine.generate_ass_file(
+                segments=segments or transcript_segments,
+                output_path=all_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=hook_text,
+                hook_duration=hook_duration,
+                suppress_hook=suppress_hook,
+                text_emphasis_events=text_emphasis_events,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+            )
+        except Exception as se:
+            logger.warning(f"Could not generate kinetic subtitles: {se}")
+            return None, None, None
+
+        if not behind_enabled:
+            return (
+                str(all_ass_dest.resolve()) if all_ass_dest.exists() else None,
+                None,
+                None,
+            )
+
+        normal_ass_dest = work_dir / "subtitles_normal.ass"
+        behind_ass_dest = work_dir / "subtitles_behind_subject.ass"
+        try:
+            self.sub_engine.generate_ass_file(
+                segments=segments,
+                output_path=normal_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=hook_text,
+                hook_duration=hook_duration,
+                suppress_hook=suppress_hook,
+                text_emphasis_events=text_emphasis_events,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+                only_behind_subject=False,
+            )
+            self.sub_engine.generate_ass_file(
+                segments=segments,
+                output_path=behind_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=None,
+                hook_duration=None,
+                suppress_hook=True,
+                text_emphasis_events=None,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+                only_behind_subject=True,
+            )
+
+            matte_dest = work_dir / "subject_matte.mp4"
+            await asyncio.to_thread(
+                subject_isolation_service.generate_person_matte_video,
+                source_video,
+                str(matte_dest),
+            )
+            if not matte_dest.exists():
+                raise RuntimeError("Subject matte file was not created")
+
+            return (
+                str(normal_ass_dest.resolve()) if normal_ass_dest.exists() else None,
+                str(behind_ass_dest.resolve()) if behind_ass_dest.exists() else None,
+                str(matte_dest.resolve()),
+            )
+        except Exception as me:
+            logger.warning(f"Could not prepare behind-subject captions: {me}. Falling back to normal subtitles.")
+            return (
+                str(all_ass_dest.resolve()) if all_ass_dest.exists() else None,
+                None,
+                None,
+            )
 
     async def process_job(self, job: Job):
         """Process a single job end-to-end through the state machine."""
+        workflow = (job.edit_plan or {}).get("workflow") if job.edit_plan else None
+        if workflow and workflow.get("type") == "short_edit":
+            await self._process_short_edit_job(job)
+            return
+
         from ai_broll_autopilot.campaigns import campaign_registry
         campaign = campaign_registry.get_campaign(job.campaign_id)
         logger.info(f"=== Starting Autopilot for Job {job.job_id} [Campaign: {campaign.name}] ({job.source_filename}) ===")
@@ -166,8 +311,8 @@ class Orchestrator:
                 curated_moment_id=moment_id_cand
             )
 
-            # Audio-aware B-roll Super Director: listen to the source audio and
-            # re-time visual opportunities around the most impactful dialogue.
+            # Audio-aware B-roll Super Director: identify the most impactful
+            # dialogue moments from both words and vocal delivery before retrieval.
             try:
                 niche_ctx = (edit_plan.get("niche") or {}).get("name") if isinstance(edit_plan, dict) else None
                 style_ctx = (edit_plan.get("style") or {}).get("name") if isinstance(edit_plan, dict) else None
@@ -192,10 +337,7 @@ class Orchestrator:
                         super_analysis.get("model"),
                     )
             except Exception as super_err:
-                logger.warning(
-                    "B-roll Super Director skipped; preserving existing Director plan: %s",
-                    super_err,
-                )
+                logger.warning("B-roll Super Director skipped; preserving existing Director plan: %s", super_err)
 
             job.edit_plan = edit_plan
             self.db.save_job(job)
@@ -315,6 +457,8 @@ class Orchestrator:
                 preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
                 frame_overlay_path=frame_overlay_path,
                 viewport=getattr(campaign, "frame_viewport", None),
+                source_start_time=source_start,
+                render_duration=short_duration,
             )
 
             # 7. REVIEWING & AUTO-REPAIR LOOP
@@ -447,6 +591,257 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"Job {job.job_id} failed: {e}", exc_info=True)
             self._update_state(job, JobState.FAILED, progress=job.progress, error=str(e), msg=f"Failed: {e}")
+
+
+    async def _process_short_edit_job(self, job: Job):
+        """Run a child short through Stockpile's editorial and render pipeline."""
+        from ai_broll_autopilot.campaigns import campaign_registry
+        from ai_broll_autopilot.services.edit_director import edit_director, EditPlan
+        from ai_broll_autopilot.services.razor_caption import RazorCaptionEngine
+        from ai_broll_autopilot.services.shorts_workflow import normalize_clip_transcript, build_clip_candidate
+
+        workflow = (job.edit_plan or {}).get("workflow", {})
+        interval = workflow.get("source_interval", {})
+        source_start = float(interval.get("start", 0.0))
+        source_end = float(interval.get("end", 0.0))
+        campaign = campaign_registry.get_campaign(job.campaign_id)
+        work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
+        work_dir.mkdir(parents=True, exist_ok=True)
+        broll_dir = work_dir / "broll"
+
+        try:
+            self._update_state(job, JobState.INGESTING, progress=0.10, msg="Preparing selected short interval")
+            full_duration = get_video_duration(job.source_file)
+            source_start = max(0.0, min(source_start, full_duration))
+            source_end = max(source_start + 0.25, min(source_end, full_duration))
+            short_duration = source_end - source_start
+
+            if not job.transcript_segments:
+                self._update_state(job, JobState.TRANSCRIBING, progress=0.20, msg="Transcribing source for selected short")
+                transcription_result = await self.transcriber.transcribe(job.source_file)
+                job.transcript_text = transcription_result["text"]
+                job.transcript_segments = transcription_result["segments"]
+            else:
+                self._update_state(job, JobState.TRANSCRIBING, progress=0.20, msg="Reusing parent transcript")
+
+            niche_id = workflow.get("niche_id") or ((job.edit_plan or {}).get("niche", {}) or {}).get("id") or getattr(campaign, "niche_id", None) or "generic"
+            style_id = workflow.get("style_id") or ((job.edit_plan or {}).get("style", {}) or {}).get("id") or "clean_podcast"
+
+            self._update_state(job, JobState.DIRECTING, progress=0.35, msg="Building Stockpile edit for selected moment")
+            normalized = {
+                "id": workflow.get("candidate_id") or job.job_id,
+                "start": source_start,
+                "end": source_end,
+                "title": workflow.get("title") or Path(job.source_filename).stem,
+                "hook_text": workflow.get("title") or "",
+                "summary": workflow.get("title") or "",
+            }
+            clip_candidate = build_clip_candidate(normalized, full_duration)
+            plan_obj = await edit_director.plan_edit(
+                source_media={
+                    "path": job.source_file,
+                    "duration": full_duration,
+                    "width": Config.TARGET_WIDTH,
+                    "height": Config.TARGET_HEIGHT,
+                    "fps": Config.TARGET_FPS,
+                    "title": workflow.get("title") or job.source_filename,
+                },
+                transcript_segments=job.transcript_segments or [],
+                clip_candidate=clip_candidate,
+                niche_id=niche_id,
+                style_id=style_id,
+                custom_hook=workflow.get("title") or None,
+            )
+            plan = plan_obj.to_dict()
+
+            try:
+                super_analysis = await broll_super_director.analyze(
+                    source_video=job.source_file,
+                    transcript_segments=job.transcript_segments or [],
+                    video_duration=full_duration,
+                    output_dir=work_dir / "broll_super",
+                    niche=niche_id,
+                    style=style_id,
+                    target_shots=max(3, len(plan.get("shots", []) or [])),
+                )
+                plan = broll_super_director.apply_to_plan(
+                    plan,
+                    super_analysis,
+                    full_duration,
+                )
+            except Exception as super_err:
+                logger.warning("Child B-roll Super Director skipped: %s", super_err)
+
+            render_settings = plan.setdefault("render_settings", {})
+            render_settings["caption_engine"] = "rapid_razor"
+            render_settings["caption_style"] = workflow.get("caption_style") or campaign.subtitle_style
+            render_settings["caption_motion"] = workflow.get("caption_motion") or "word-pop"
+            render_settings["subtitles_behind_subject"] = (
+                bool(workflow.get("subtitles_behind_subject"))
+                if workflow.get("subtitles_behind_subject") is not None
+                else True
+            )
+            plan["workflow"] = workflow
+
+            self._update_state(job, JobState.MATCHING, progress=0.50, msg="Resolving contextual B-roll")
+            plan = await self.matcher.resolve_shots(plan, broll_dir)
+
+            self._update_state(job, JobState.PLANNING, progress=0.65, msg="Planning transitions and sound design")
+            if plan.get("shots"):
+                plan["shots"] = await self.transition_engine.plan_transitions(plan["shots"])
+                if not getattr(campaign, "preserve_dialogue_only", False):
+                    plan["shots"] = await self.sfx_analyzer.analyze_and_assign_sfx(plan["shots"], work_dir)
+
+            clip_segments = normalize_clip_transcript(job.transcript_segments or [], source_start, source_end)
+            razor_engine = RazorCaptionEngine(
+                enable_behind_subject=bool(render_settings.get("subtitles_behind_subject", True)),
+                enable_sfx=True,
+            )
+            broll_times = [
+                (float(s.get("start_time", 0.0)), float(s.get("end_time", 0.0)))
+                for s in plan.get("shots", [])
+            ]
+            subject_info = await asyncio.to_thread(
+                subject_isolation_service.analyze_subject_layout,
+                job.source_file,
+                max(0.0, source_start + min(1.0, short_duration / 2.0)),
+            )
+            razor_events = razor_engine.process(
+                clip_segments,
+                subject_info=subject_info,
+                broll_active_times=broll_times,
+            )
+            plan["razor_captions"] = razor_engine.to_edit_plan(razor_events)
+
+            self._update_state(job, JobState.RENDERING, progress=0.76, msg="Rendering kinetic captions and B-roll")
+            rendered_video = work_dir / f"rendered_{job.source_filename}"
+            normal_ass = work_dir / "razor_captions.ass"
+            normal_events = [
+                ev for ev in razor_events
+                if not ev.requires_behind_subject
+            ]
+            razor_engine.generate_ass(
+                normal_events,
+                output_path=normal_ass,
+                style_preset=render_settings.get("caption_style") or campaign.subtitle_style,
+                position=getattr(campaign, "subtitle_position", "bottom"),
+            )
+
+            behind_ass = None
+            matte_path = None
+            if any(ev.requires_behind_subject for ev in razor_events) and render_settings.get("subtitles_behind_subject", True):
+                behind_ass_path = work_dir / "razor_captions_behind_subject.ass"
+                behind_path = razor_engine.generate_behind_subject_ass(
+                    razor_events,
+                    output_path=behind_ass_path,
+                    style_preset=render_settings.get("caption_style") or campaign.subtitle_style,
+                )
+                if behind_path and behind_path.exists():
+                    matte = work_dir / "subject_matte.mp4"
+                    await asyncio.to_thread(
+                        subject_isolation_service.generate_person_matte_video,
+                        job.source_file,
+                        str(matte),
+                        8.0,
+                        540,
+                        960,
+                        source_start,
+                        short_duration,
+                    )
+                    if matte.exists():
+                        behind_ass = str(behind_path.resolve())
+                        matte_path = str(matte.resolve())
+
+            bgm_path = None
+            if getattr(campaign, "allow_bgm", False):
+                try:
+                    p = self.bgm_engine.get_track_path(getattr(campaign, "bgm_genre", None) or "upbeat_phonk")
+                    if p and p.exists():
+                        bgm_path = str(p.resolve())
+                except Exception:
+                    bgm_path = None
+
+            plan["workflow"]["status"] = "rendering"
+            job.edit_plan = plan
+            self.db.save_job(job)
+
+            final_rendered_path = await self.renderer.render(
+                job.source_file,
+                plan,
+                str(rendered_video),
+                ass_subtitles_path=str(normal_ass.resolve()) if normal_ass.exists() else None,
+                behind_subject_ass_path=behind_ass,
+                subject_matte_path=matte_path,
+                bgm_path=bgm_path,
+                bgm_volume=0.14,
+                ducking_enabled=True,
+                watermark_path=campaign.watermark_asset_path if getattr(campaign, "watermark_required", False) else None,
+                watermark_position=getattr(campaign, "watermark_position", "bottom_safe"),
+                watermark_scale=getattr(campaign, "watermark_scale", 0.28),
+                preserve_dialogue_only=getattr(campaign, "preserve_dialogue_only", False),
+                viewport=getattr(campaign, "frame_viewport", None),
+                source_start_time=source_start,
+                render_duration=short_duration,
+            )
+
+            self._update_state(job, JobState.REVIEWING, progress=0.90, msg="Checking generated short")
+            try:
+                job.review_data = await self.reviewer.review_video(final_rendered_path, plan, work_dir / "review_frames")
+            except Exception as review_error:
+                logger.warning(f"Short review skipped: {review_error}")
+                job.review_data = None
+
+            self._update_state(job, JobState.UPLOADING, progress=0.95, msg="Packaging generated short")
+            delivery_res = await self.delivery.deliver(job, final_rendered_path, None)
+            job.output_video_path = delivery_res["final_video"]
+            job.drive_file_url = delivery_res.get("drive_url")
+
+            try:
+                openreel_dir = Path(job.output_video_path).parent / "openreel"
+                openreel_dir.mkdir(parents=True, exist_ok=True)
+                openreel_adapter.export_project_files(
+                    edit_plan=EditPlan.from_dict(plan),
+                    output_dir=openreel_dir,
+                    project_filename=f"{job.job_id}.oreel",
+                )
+            except Exception as oreel_error:
+                logger.warning(f"OpenReel export for child short skipped: {oreel_error}")
+
+            plan["workflow"]["status"] = "completed"
+            plan["render_stale"] = False
+            plan["last_render_revision"] = int(plan.get("edit_revision", 1))
+            job.edit_plan = plan
+            self._update_parent_short_status(job, "COMPLETED")
+            self._update_state(job, JobState.COMPLETED, progress=1.0, msg="Edited short completed")
+        except Exception as e:
+            workflow = (job.edit_plan or {}).setdefault("workflow", {})
+            workflow["status"] = "failed"
+            workflow["error"] = str(e)
+            job.edit_plan = job.edit_plan or {}
+            job.edit_plan["workflow"] = workflow
+            self._update_parent_short_status(job, "FAILED")
+            self._update_state(job, JobState.FAILED, progress=job.progress, error=str(e), msg=f"Short edit failed: {e}")
+
+    def _update_parent_short_status(self, job: Job, status: str):
+        """Mirror child short status into its parent EditPlan when the parent still exists."""
+        workflow = (job.edit_plan or {}).get("workflow", {}) if job.edit_plan else {}
+        parent_id = workflow.get("parent_job_id")
+        if not parent_id:
+            return
+
+        parent = self.db.get_job(parent_id)
+        if not parent or not parent.edit_plan:
+            return
+
+        changed = False
+        for item in parent.edit_plan.get("short_edits", []):
+            if item.get("job_id") == job.job_id:
+                item["status"] = status
+                changed = True
+                break
+
+        if changed:
+            self.db.save_job(parent)
 
     def _update_state(
         self,
