@@ -159,6 +159,22 @@ REFERENCE STYLE — CINEMATIC EDITORIAL SHORT:
    - You may designate up to 1-2 shots as "style": "meme" if a wild claim, rage outburst, or high-energy reaction occurs.
    - For all other shots, use real stock footage ("style": "stockpile")."""
 
+        pacing_directive = (
+            """
+- Generate intentional contextual cuts, normally 1.2s to 3.2s each.
+- A strong archival/payoff visual may hold up to 5.0s when it completes the story.
+- Leave natural breathing room; do not force B-roll just to satisfy a fixed cadence.
+- Use hard cuts as the default and reserve transitions/SFX for meaningful editorial events.
+"""
+            if editing_style_id == "cinematic_editorial"
+            else
+            """
+- Generate EXACTLY the requested rapid, snappy cuts (1.5s to 2.4s each).
+- Keep the speaker on screen for 1.0s to 1.8s between cutaways.
+- Keep visual pacing high and distributed across the full duration.
+"""
+        )
+
         director_prompt = f"""You are the Master AI Video Director for high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
 CAMPAIGN: {campaign.name}
 CONTENT DOMAIN: {niche_desc}
@@ -170,8 +186,8 @@ MANDATORY DIRECTING OBJECTIVES:
    - Total Video Duration: {video_duration:.2f} seconds.
    - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
    - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
-   - Generate EXACTLY {target_shots} rapid, snappy cuts (1.5s to 2.4s each).
-   - ABSOLUTE PROHIBITION ON FRONT-LOADING:
+   - Generate approximately {target_shots} meaningful cut opportunities.
+{pacing_directive}   - ABSOLUTE PROHIBITION ON FRONT-LOADING:
      DO NOT cluster all cuts in the first 10-15 seconds and leave the second half empty!
      You MUST spread B-roll cutaways across the ENTIRE video from start to finish!
    - MANDATORY DISTRIBUTION PER ACT:
@@ -181,9 +197,9 @@ MANDATORY DIRECTING OBJECTIVES:
    - MAXIMUM SPEAKER STAGNATION GAP:
      Never leave more than 4.0 seconds of continuous speaker alone without a B-roll cutaway or visual event.
    - SPEAKER BREATHING ROOM:
-     Leave at least 1.0s to 1.8s of speaker on screen between cutaways so the edit breathes naturally.
+     Follow the active pacing directive above; preserve natural A-roll breathing room.
    - Keep speaker on screen for the first 0.8s to 1.5s opening hook.
-   - Cutaway duration: 1.5s to 2.4s. NEVER let any cutaway drag out longer than 2.5 seconds. Cut back to speaker smoothly.
+   - Cutaway duration: normally 1.2s to 3.2s; longer payoff holds are allowed only for cinematic_editorial.
 
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
    - Visuals MUST directly amplify the EXACT topic and words being spoken at each timestamp!
