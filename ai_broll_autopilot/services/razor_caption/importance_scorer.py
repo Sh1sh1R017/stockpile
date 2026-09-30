@@ -30,10 +30,28 @@ import re
 from typing import List, Optional, Set
 
 from .caption_event import CaptionEvent, EmphasisLevel, LayerMode
+from .presets import get_preset, map_word_to_emoji, ZapCapPreset
 
 # ---------------------------------------------------------------------------
 # Word-category lookup sets
 # ---------------------------------------------------------------------------
+
+_NEGATION_WORDS: Set[str] = {
+    "not", "no", "never", "wrong", "can't", "cant", "couldn't", "couldnt",
+    "won't", "wont", "don't", "dont", "stop", "stopped", "fake", "lie",
+    "lies", "mistake", "mistakes", "bad", "terrible", "worst", "fail", "failed"
+}
+
+_MONEY_WORDS: Set[str] = {
+    "money", "dollar", "dollars", "cash", "rich", "million", "millions",
+    "billion", "billions", "bucks", "lottery", "jackpot", "crypto", "bitcoin",
+    "revenue", "profit", "wealth", "expensive", "pay", "paid", "worth"
+}
+
+_CTA_WORDS: Set[str] = {
+    "subscribe", "follow", "click", "comment", "share", "watch", "listen",
+    "link", "bio", "tap", "check", "download", "join"
+}
 
 _FUNCTION_WORDS: Set[str] = {
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
@@ -92,7 +110,8 @@ _PROPER_NOUN_PATTERN = re.compile(r'^[A-Z][a-z]+$')  # Capitalized word
 class ImportanceScorer:
     """Scores each CaptionEvent and assigns EmphasisLevel in a single pass.
 
-    Call score() to enrich a list of events in-place.
+    Call score() to enrich a list of events in-place with ZapCap typography,
+    semantic states, custom color palettes, and emojis.
     """
 
     def __init__(
@@ -101,20 +120,37 @@ class ImportanceScorer:
         strong_threshold: float = 0.62,
         moderate_threshold: float = 0.44,
         enable_behind_subject: bool = True,
+        preset_name: str = "hormozi",
+        palette: Optional[Dict[str, str]] = None,
+        enable_emojis: bool = True,
     ):
         self.hook_threshold = hook_threshold
         self.strong_threshold = strong_threshold
         self.moderate_threshold = moderate_threshold
         self.enable_behind_subject = enable_behind_subject
+        self.preset_name = preset_name
+        self.palette = palette or {}
+        self.enable_emojis = enable_emojis
         self._seen_words: Set[str] = set()   # for novelty tracking
 
     def score(self, events: List[CaptionEvent]) -> List[CaptionEvent]:
-        """Score and assign emphasis to all events.  Mutates in-place."""
+        """Score and assign emphasis, semantic type, emojis, and typography to all events. Mutates in-place."""
         self._seen_words.clear()
+
+        preset = get_preset(self.preset_name)
+        main_c = self.palette.get("main") or preset.fill_color
+        second_c = self.palette.get("second") or preset.highlight_color
+        third_c = self.palette.get("third") or preset.secondary_color
 
         # First pass: compute raw scores
         for ev in events:
             ev.word_importance_score = self._compute_raw(ev)
+            ev.style_preset = preset.key
+            ev.color_palette = {
+                "main": main_c,
+                "second": second_c,
+                "third": third_c,
+            }
 
         # Second pass: normalize and assign EmphasisLevel
         scores = [ev.word_importance_score for ev in events]
@@ -138,6 +174,7 @@ class ImportanceScorer:
 
         for rank, (i, ev) in enumerate(indexed):
             norm = (ev.word_importance_score - mn) / score_range  # 0.0→1.0
+            clean_w = ev.word.lower().strip(".,!?:;\"'()[]{}")
 
             if norm >= self.hook_threshold and hook_count < hook_budget:
                 ev.emphasis = EmphasisLevel.HOOK
@@ -151,8 +188,8 @@ class ImportanceScorer:
                 # Typography for HOOK
                 ev.font_weight = "Black"
                 ev.font_size_scale = 1.25
-                ev.accent_color = "#FFE600"
-                ev.fill_color = "#FFE600"
+                ev.accent_color = second_c
+                ev.fill_color = second_c
                 ev.emphasis_scale = 1.2
                 ev.sfx_event = "MAJOR_HOOK"
 
@@ -161,7 +198,8 @@ class ImportanceScorer:
                 strong_count += 1
                 ev.font_weight = "ExtraBold"
                 ev.font_size_scale = 1.12
-                ev.fill_color = "#FFE600"
+                ev.accent_color = second_c
+                ev.fill_color = second_c
                 ev.emphasis_scale = 1.1
                 ev.sfx_event = "KEYWORD_POP"
 
@@ -170,13 +208,46 @@ class ImportanceScorer:
                 moderate_count += 1
                 ev.font_weight = "Bold"
                 ev.font_size_scale = 1.05
+                ev.accent_color = second_c
+                ev.fill_color = main_c
                 ev.emphasis_scale = 1.04
 
             else:
                 ev.emphasis = EmphasisLevel.NORMAL
                 ev.font_weight = "Bold"
                 ev.font_size_scale = 1.0
+                ev.accent_color = second_c
+                ev.fill_color = main_c
                 ev.emphasis_scale = 1.0
+
+            # ── ZapCap Semantic Classification ──────────────────────────
+            if _CURRENCY_PATTERN.search(ev.word) or clean_w in _MONEY_WORDS:
+                ev.semantic_type = "money"
+                ev.fill_color = third_c  # Money / wealth color
+                ev.font_weight = "ExtraBold"
+            elif _NUM_PATTERN.search(ev.word):
+                ev.semantic_type = "number"
+                ev.fill_color = second_c
+                ev.font_weight = "ExtraBold"
+            elif clean_w in _NEGATION_WORDS:
+                ev.semantic_type = "negation"
+                ev.fill_color = "#EF4444"  # Strong negation crimson
+                ev.font_weight = "ExtraBold"
+            elif clean_w in _CTA_WORDS:
+                ev.semantic_type = "cta"
+                ev.fill_color = second_c
+            elif ev.emphasis == EmphasisLevel.HOOK or clean_w in _HOOK_VOCAB:
+                ev.semantic_type = "hook"
+            elif ev.action_word:
+                ev.semantic_type = "action"
+            elif ev.emphasis == EmphasisLevel.STRONG:
+                ev.semantic_type = "strong"
+            else:
+                ev.semantic_type = "normal"
+
+            # ── Contextual Emoji Mapping ─────────────────────────────────
+            if self.enable_emojis:
+                ev.emoji = map_word_to_emoji(ev.word)
 
         return events
 

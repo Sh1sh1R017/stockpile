@@ -309,6 +309,23 @@ class EditDirectorService:
             for c in spec.captions
         ]
 
+        # 6b. Content-Aware Rapid Razor Captions
+        razor_captions_data = []
+        try:
+            from ai_broll_autopilot.services.razor_caption.engine import RazorCaptionEngine
+            broll_active_times = [
+                (float(s["start_time"]), float(s["end_time"]))
+                for s in shots_data if s.get("asset_path")
+            ]
+            razor_engine = RazorCaptionEngine()
+            events = razor_engine.process(
+                segments=clip_segments,
+                broll_active_times=broll_active_times,
+            )
+            razor_captions_data = [e.to_edit_plan_entry() for e in events]
+        except Exception as re_err:
+            logger.warning(f"Could not generate Razor captions: {re_err}")
+
         # -------------------------------------------------------------
         # 7. Content-Aware Motion Graphics Engine
         # -------------------------------------------------------------
@@ -383,6 +400,7 @@ class EditDirectorService:
             text_overlays=text_overlays_data,
             graphics=graphics_data,
             subtitles=subtitles,
+            razor_captions=razor_captions_data,
             zooms=zooms_data,
             audio_cues=audio_cues_data,
             cadence_profile=cadence_profile,

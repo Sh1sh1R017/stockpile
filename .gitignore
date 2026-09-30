@@ -34,3 +34,5 @@ clips/
 openreel/
 *.pyc
 __pycache__/
+*.pt
+

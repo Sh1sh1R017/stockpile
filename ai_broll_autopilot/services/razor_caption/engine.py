@@ -165,6 +165,68 @@ class RazorCaptionEngine:
         """Serialize events to EditPlan razor_captions schema."""
         return [ev.to_edit_plan_entry() for ev in events]
 
+    def to_subtitles(self, events: List[CaptionEvent], preset_name: str = "hormozi") -> List[Dict[str, Any]]:
+        """Convert CaptionEvents to canonical EditPlan subtitles format for OpenReel and rendering."""
+        from .presets import get_preset
+        preset = get_preset(preset_name)
+        phrases: Dict[int, List[CaptionEvent]] = {}
+        for ev in events:
+            phrases.setdefault(ev.phrase_id, []).append(ev)
+
+        # Chunk any oversized phrases into beats of 3
+        rechunked: Dict[int, List[CaptionEvent]] = {}
+        idx = 0
+        for pid in sorted(phrases.keys()):
+            ev_list = phrases[pid]
+            if len(ev_list) > 4:
+                for k in range(0, len(ev_list), 3):
+                    rechunked[idx] = ev_list[k:k + 3]
+                    idx += 1
+            else:
+                rechunked[idx] = ev_list
+                idx += 1
+
+        subtitles = []
+        for p_id in sorted(rechunked.keys()):
+            group = rechunked[p_id]
+            if not group:
+                continue
+            words_meta = [
+                {
+                    "word": ev.word,
+                    "start": round(ev.start_time, 4),
+                    "end": round(ev.end_time, 4),
+                    "semantic_type": ev.semantic_type,
+                    "emoji": ev.emoji,
+                    "emphasis": ev.emphasis.value,
+                    "layer": ev.layer.value,
+                }
+                for ev in group
+            ]
+            has_behind = any(ev.requires_behind_subject for ev in group)
+            subtitles.append({
+                "id": f"sub_{p_id+1:03d}",
+                "text": " ".join(ev.word for ev in group),
+                "startTime": round(group[0].start_time, 4),
+                "endTime": round(group[-1].end_time, 4),
+                "animationStyle": preset.default_animation,
+                "motionProfile": preset.default_animation,
+                "motionRecipe": f"motion-anything:{preset.default_animation}",
+                "behind_subject": has_behind,
+                "behindSubject": has_behind,
+                "style": {
+                    "fontFamily": preset.font_family,
+                    "fontSize": preset.font_size,
+                    "color": preset.fill_color,
+                    "highlightColor": preset.highlight_color,
+                    "strokeColor": preset.stroke_color,
+                    "strokeWidth": preset.stroke_width,
+                    "preset": preset.key,
+                },
+                "words": words_meta,
+            })
+        return subtitles
+
     def generate_ass(
         self,
         events: List[CaptionEvent],

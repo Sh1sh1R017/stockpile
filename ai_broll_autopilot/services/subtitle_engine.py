@@ -158,8 +158,8 @@ class SubtitleEngine:
                 s for s in segments
                 if bool(s.get("behind_subject") or s.get("behindSubject")) == behind_subject_filter
             ]
-            # When generating behind-subject ASS, suppress top-layer hook/emphasis overlays
-            if behind_subject_filter is True:
+            # When generating behind-subject ASS, suppress top-layer hook unless hook_text is explicitly designated for behind-subject
+            if behind_subject_filter is True and not hook_text:
                 suppress_hook = True
                 text_emphasis_events = None
         else:

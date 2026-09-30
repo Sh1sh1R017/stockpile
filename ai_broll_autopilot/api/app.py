@@ -139,15 +139,22 @@ class StockSwapRequest(BaseModel):
 
 class JobSettingsRequest(BaseModel):
     subtitles_enabled: Optional[bool] = Field(None, description="Toggle kinetic subtitles on/off")
-    subtitle_style: Optional[str] = Field(None, description="Subtitle style: hormozi, beast, clean")
+    subtitle_style: Optional[str] = Field(None, description="Subtitle style / ZapCap preset: hormozi, beast, clean, etc.")
+    preset: Optional[str] = Field(None, description="ZapCap preset alias for subtitle_style")
     subtitle_position: Optional[str] = Field(None, description="Subtitle position: bottom, center, top")
     subtitles_behind_subject: Optional[bool] = Field(None, description="Place kinetic captions behind the detected foreground subject")
+    custom_colors: Optional[Dict[str, str]] = Field(None, description="Custom 3-color palette {main, second, third}")
+    enable_emojis: Optional[bool] = Field(None, description="Toggle contextual emojis on/off")
+    words_per_beat: Optional[int] = Field(None, ge=1, le=8, description="Words grouped per caption beat (1-4 recommended)")
+    subtitle_y_percent: Optional[float] = Field(None, ge=0.0, le=100.0, description="Vertical position percentage (0=top, 100=bottom)")
+    caption_motion: Optional[str] = Field(None, description="Caption motion profile: word-pop, bounce, scale, fade, snap")
     bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
     bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
     bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
     hdr_upscale_enabled: Optional[bool] = Field(None, description="Toggle SDR2HDR upscale & HDR10 output")
     hdr_output_scale: Optional[float] = Field(None, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)")
     hdr_tone: Optional[str] = Field(None, description="HDR tone: vivid or reference")
+
 
 
 class HdrUpscaleRequest(BaseModel):
@@ -2026,9 +2033,16 @@ async def get_bgm_track_audio(track_id: str):
     return FileResponse(path=str(p), media_type=media_type, filename=p.name)
 
 
+@app.get("/api/caption-presets")
+async def get_caption_presets():
+    """Return all 21 ZapCap-style typography and visual presets."""
+    from ai_broll_autopilot.services.razor_caption.presets import list_all_presets
+    return {"status": "success", "presets": list_all_presets()}
+
+
 @app.post("/api/jobs/{job_id}/settings")
 async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
-    """Update subtitle formatting and background music settings for a job."""
+    """Update subtitle formatting, ZapCap preset, positioning, and background music settings for a job."""
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2037,18 +2051,51 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
         job.edit_plan = {"shots": []}
 
     settings = job.edit_plan.get("render_settings", {})
+    caption_changed = False
+
     if req.subtitles_enabled is not None:
         settings["subtitles_enabled"] = req.subtitles_enabled
-    if req.subtitle_style is not None:
-        settings["subtitle_style"] = req.subtitle_style
+        caption_changed = True
+    if req.preset is not None:
+        settings["preset"] = req.preset.lower()
+        settings["subtitle_style"] = req.preset.lower()
+        caption_changed = True
+    elif req.subtitle_style is not None:
+        settings["subtitle_style"] = req.subtitle_style.lower()
+        settings["preset"] = req.subtitle_style.lower()
+        caption_changed = True
     if req.subtitle_position is not None:
         settings["subtitle_position"] = req.subtitle_position
+        caption_changed = True
+    if req.subtitle_y_percent is not None:
+        settings["subtitle_y_percent"] = req.subtitle_y_percent
+        caption_changed = True
+    if req.custom_colors is not None:
+        settings["custom_colors"] = req.custom_colors
+        caption_changed = True
+    if req.enable_emojis is not None:
+        settings["enable_emojis"] = req.enable_emojis
+        caption_changed = True
+    if req.words_per_beat is not None:
+        settings["words_per_beat"] = req.words_per_beat
+        caption_changed = True
+    if req.caption_motion is not None:
+        settings["caption_motion"] = req.caption_motion
+        caption_changed = True
+
     if req.subtitles_behind_subject is not None:
         settings["subtitles_behind_subject"] = req.subtitles_behind_subject
+        job.edit_plan["subtitles_behind_subject"] = req.subtitles_behind_subject
         for subtitle in job.edit_plan.get("subtitles", []):
             subtitle["behind_subject"] = req.subtitles_behind_subject
+        caption_changed = True
+
+    if caption_changed:
+        # Clear cached razor captions so fresh events are generated with the new styling upon re-render
+        job.edit_plan.pop("razor_captions", None)
         job.edit_plan["render_stale"] = True
         job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
+
     if req.bgm_track_id is not None:
         settings["bgm_track_id"] = req.bgm_track_id if req.bgm_track_id != "none" else None
     if req.bgm_volume is not None:
@@ -2066,6 +2113,7 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
     job.edit_plan["render_settings"] = settings
     db.save_job(job)
     return {"status": "success", "render_settings": settings}
+
 
 
 async def _execute_rerender_job(job_id: str):
@@ -2114,6 +2162,19 @@ async def _execute_rerender_job(job_id: str):
         behind_subject_ass_path = None
         subject_matte_path = None
         if sub_enabled and job.transcript_segments:
+            hook_txt = job.edit_plan.get("hook_text")
+            if not hook_txt and getattr(campaign, "curated_moments", None):
+                hook_txt = campaign.curated_moments[0].screen_hook
+
+            user_margin_v = None
+            if settings.get("subtitle_y_percent") is not None:
+                y_pct = float(settings["subtitle_y_percent"])
+                user_margin_v = max(80, min(1700, int(1920 * (1.0 - y_pct / 100.0))))
+            elif sub_pos in ["top", "center"]:
+                user_margin_v = None
+            else:
+                user_margin_v = getattr(campaign, "subtitle_margin_v", 280)
+
             ass_path, behind_subject_ass_path, subject_matte_path = await orchestrator._prepare_caption_render_assets(
                 source_video=job.source_file,
                 edit_plan=job.edit_plan,
@@ -2121,11 +2182,11 @@ async def _execute_rerender_job(job_id: str):
                 work_dir=work_dir,
                 style_preset=sub_style,
                 position=sub_pos,
-                custom_margin_v=getattr(campaign, "subtitle_margin_v", 280),
-                hook_text=None,
-                hook_duration=None,
-                suppress_hook=True,
-                text_emphasis_events=None,
+                custom_margin_v=user_margin_v,
+                hook_text=hook_txt,
+                hook_duration=4.0,
+                suppress_hook=False,
+                text_emphasis_events=job.edit_plan.get("text_emphasis_graphics"),
             )
             caption_motion = job.edit_plan.get("render_settings", {}).get("caption_motion", caption_motion)
 
