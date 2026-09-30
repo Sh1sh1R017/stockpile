@@ -66,6 +66,10 @@ def compose_impact_group(events: List[CaptionEvent]) -> List[CaptionEvent]:
         return events
 
     hero = max(hero_candidates, key=lambda e: (e.word_importance_score, e.emphasis.value, e.emotional_importance))
+    # Chaos budget decides whether a candidate earns the expensive hero
+    # composition. Keyword presence alone is never enough.
+    if getattr(hero, "chaos_tier", "normal") not in {"impact", "absurd"}:
+        return events
     seed = _seed(events)
 
     # Hero typography: deliberately much larger and visually distinct.
