@@ -51,7 +51,7 @@ class MemeReactionEngineTests(unittest.TestCase):
         events = self.engine.build_events([
             {"word": "NEVER", "start": 1.0, "end": 1.2, "importance": 0.9, "semantic_type": "negation"},
             {"word": "INSANE", "start": 1.5, "end": 1.8, "importance": 0.95, "semantic_type": "strong"},
-            {"word": "STOP", "start": 3.0, "end": 3.2, "importance": 0.9, "semantic_type": "negation"},
+            {"word": "STOP", "start": 3.5, "end": 3.7, "importance": 0.9, "semantic_type": "negation"},
         ])
         self.assertEqual(len(events), 2)
 

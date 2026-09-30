@@ -76,7 +76,7 @@ def test_super_director_prompt_explicitly_requires_audio_tone():
 
     assert "LISTEN TO THE ATTACHED AUDIO" in prompt
     assert "tone, vocal intensity, pauses" in prompt
-    assert "MOST IMPACTFUL DIALOGUE" in prompt
+    assert "exact impactful dialogue" in prompt
     assert "visualizability" in prompt
 
 
@@ -90,8 +90,8 @@ def test_super_director_prompt_rejects_vague_broll_and_requires_observable_actio
     )
 
     assert "WHO is visible, WHAT are they physically doing, WHERE are they" in prompt
-    assert "abstract \"metaphors\"" in prompt
-    assert "typing their own name into search" in prompt
+    assert "METAPHORS" in prompt
+    assert "types their own name into search" in prompt
     assert "BAD queries" in prompt
     assert "4-8 words" in prompt
     assert "digital action literally" in prompt
