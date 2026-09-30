@@ -1,7 +1,8 @@
 """Default Viral Shorts Campaign Preset.
 
-Standard high-velocity viral short-form editing with ~60% B-roll coverage,
-Alex Hormozi kinetic subtitles, streamer reaction cutaways, and auto-ducked upbeat phonk BGM.
+Reference-matched cinematic social editorial workflow:
+meaning-driven visual punctuation, restrained motion, large sentence-aware captions,
+and cinematic/archival B-roll instead of generic meme-heavy coverage.
 """
 
 from ai_broll_autopilot.campaigns.base import CampaignConfig
@@ -13,7 +14,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     rate="N/A (Standard Studio Workflow)",
     total_budget="N/A",
     platforms=["TikTok", "Instagram Reels", "YouTube Shorts"],
-    description="High-retention viral editing formula featuring ~60% B-roll coverage, creator reaction cutaways (Speed, CaseOh, Jynxzi), Hormozi punch subtitles, and auto-ducked upbeat phonk music.",
+    description="Cinematic social editorial short-form workflow with narrative B-roll, restrained punch-ins, large center captions, selective SFX, and auto-ducked music.",
 
     # Video specs
     target_width=1080,
@@ -24,14 +25,14 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Audio rules
     allow_bgm=True,
-    bgm_genre="upbeat_phonk",
+    bgm_genre="chill_lofi",
     preserve_dialogue_only=False,
 
     # Visual & B-roll rules
     allow_ai_broll=False,
-    max_broll_ratio=0.45,
-    max_cutaway_seconds=2.5,
-    speed_multiplier=1.25,
+    max_broll_ratio=0.60,
+    max_cutaway_seconds=2.2,
+    speed_multiplier=1.0,
     niche_id="generic",
 
     # Watermark rules
@@ -41,16 +42,18 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Subtitle rules
     subtitles_required=True,
-    subtitle_style="hormozi",
-    subtitle_position="bottom",
-    subtitle_margin_v=280,
+    subtitle_style="cinematic_editorial",
+    subtitle_position="center",
+    subtitle_margin_v=0,
     hook_required=False,
 
     rules_checklist=[
-        "Keep pacing rapid with cuts every 1.5s to 2.4s.",
-        "Include punchy creator reaction memes in first 5s.",
-        "Word-by-word kinetic subtitle highlighting.",
-        "Sidechain audio auto-ducking under dialogue."
+        "Open with 0.8–1.3s of clean A-roll, then cut on meaningful sentence beats.",
+        "Use B-roll as narrative punctuation with literal, emotionally relevant visuals.",
+        "Keep B-roll cutaways roughly 0.8–2.2s and permit micro-cut sequences when the sentence changes visual beat.",
+        "Use large sentence-aware center captions, normally 2–4 words visible at a time, with restrained pale-green emphasis.",
+        "Avoid generic meme filler, neon effects, constant zooms, and decorative transitions.",
+        "Use hard cuts by default; reserve SFX for major visual punctuation and keep BGM low under dialogue."
     ],
     instant_rejections=[],
     director_system_prompt=None,
