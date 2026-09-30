@@ -52,15 +52,36 @@ def get_job_edit_plan(job: Job) -> EditPlan:
             text_overlays = []
             hook = plan_dict.get("hook_text")
             if hook:
+                # Opening-hook typography: deliberately oversized and centered behind the
+                # subject, rather than looking like a normal subtitle/caption card.
+                hook_clean = " ".join(str(hook).split())
+                hook_display = hook_clean.upper()
+                # A single strong hook word gets the tall editorial treatment from the
+                # reference style; multi-word hooks stay readable as one centered phrase.
+                if len(hook_clean.split()) == 1 and len(hook_clean) <= 18:
+                    hook_display = "\n".join(list(hook_display))
                 text_overlays.append({
-                    "id": "hook_card_1",
-                    "text": str(hook).strip(),
-                    "start_time": 0.3,
+                    "id": "opening_hook_behind_subject",
+                    "kind": "opening_hook_typography",
+                    "text": hook_display,
+                    "start_time": 0.15,
                     "duration": 2.8,
-                    "position": "top",
+                    "position": "center",
                     "behind_subject": True,
                     "animation": "pop",
-                    "font_size": 68,
+                    "font_size": 180,
+                    "style": {
+                        "fontSize": 180,
+                        "fontWeight": 900,
+                        "color": "#FFFFFF",
+                        "outlineColor": "#000000",
+                        "outlineWidth": 7,
+                        "shadow": True,
+                    },
+                    "transform": {
+                        "position": {"x": 0.5, "y": 0.52},
+                        "scale": 1.0,
+                    },
                 })
             for idx, gr in enumerate(plan_dict.get("text_emphasis_graphics", [])):
                 text_overlays.append({
@@ -72,6 +93,31 @@ def get_job_edit_plan(job: Job) -> EditPlan:
                     "behind_subject": gr.get("behind_subject", False),
                     "animation": gr.get("animation", "pop"),
                 })
+
+        # Normalize hook-style behind-subject overlays even when the AI planner already
+        # supplied one. This keeps the opening hook visually consistent with the reference
+        # treatment instead of silently falling back to subtitle-sized typography.
+        for overlay in text_overlays:
+            overlay_id = str(overlay.get("id", "")).lower()
+            if not overlay.get("behind_subject") or not (
+                "hook" in overlay_id or overlay.get("kind") == "opening_hook_typography"
+            ):
+                continue
+            style = overlay.setdefault("style", {})
+            style.setdefault("fontSize", 180)
+            style.setdefault("fontWeight", 900)
+            style.setdefault("color", "#FFFFFF")
+            style.setdefault("outlineColor", "#000000")
+            style.setdefault("outlineWidth", 7)
+            transform = overlay.setdefault("transform", {})
+            transform.setdefault("position", {"x": 0.5, "y": 0.52})
+            overlay.setdefault("start_time", 0.15)
+            overlay.setdefault("duration", 2.8)
+            overlay["position"] = "center"
+
+            raw_text = " ".join(str(overlay.get("text", "")).split())
+            if raw_text and len(raw_text.split()) == 1 and len(raw_text) <= 18:
+                overlay["text"] = "\n".join(list(raw_text.upper()))
 
         # 3. Resolve audio cues & sfx: extract stinger sfx from shots transitions
         audio_cues = plan_dict.get("audio_cues") or {}
