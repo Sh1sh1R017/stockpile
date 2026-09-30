@@ -337,3 +337,46 @@ def test_openreel_two_way_sync():
     assert updated_plan.shots[1]["end_time"] == 10.0
 
 
+
+
+def test_cinematic_social_editorial_reference_style():
+    from ai_broll_autopilot.styles import style_registry
+    from ai_broll_autopilot.campaigns import campaign_registry
+    from ai_broll_autopilot.services.subtitle_engine import SubtitleEngine
+    from ai_broll_autopilot.services.timeline import TimelineEngine
+
+    style = style_registry.get_style("cinematic_social_editorial")
+    assert style is not None
+    assert style.caption_position == "center"
+    assert style.caption_words_per_group == 3
+    assert style.broll_min_duration == 0.8
+    assert style.broll_max_duration == 2.2
+    assert style.visual_container_width_ratio == 0.944
+    assert style.visual_container_height_ratio == 0.574
+    assert style.visual_container_radius == 52
+    assert style.use_black_canvas is True
+
+    campaign = campaign_registry.get_campaign("default")
+    assert campaign.subtitle_style == "cinematic_editorial"
+    assert campaign.subtitle_position == "center"
+    assert campaign.max_cutaway_seconds == 2.2
+
+    subtitle_engine = SubtitleEngine()
+    assert "cinematic_editorial" in subtitle_engine.STYLE_PRESETS
+
+    graph, _, _ = TimelineEngine().build_filtergraph(
+        shots=[
+            {
+                "shot_id": "broll_1",
+                "start_time": 1.5,
+                "end_time": 2.8,
+                "duration": 1.3,
+                "asset_path": "broll.mp4",
+            }
+        ],
+        reference_style=True,
+        reference_card_mask_idx=2,
+    )
+    assert "color=c=#050505:s=1080x1920" in graph
+    assert "alphamerge[base_card_rounded]" in graph
+    assert "alphamerge[broll_ref_card_1]" in graph
