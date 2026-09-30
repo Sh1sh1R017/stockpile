@@ -86,8 +86,6 @@ class RenderedHookText(str):
     def upper(self):
         clean = super().strip().upper()
         if 4 <= len(clean) <= 18 and " " not in clean:
-            # ASS line breaks create the tall stacked-letter treatment from the
-            # reference; inline overrides make the hook larger than captions.
             return r"{\fs180\bord7\shad4}" + r"\N".join(clean)
         return clean
 
@@ -138,6 +136,13 @@ class CaptionEvent:
     exit_duration_ms: int = 80
     emphasis_scale: float = 1.0
 
+    # Explicit recipe parameters let downstream renderers create the
+    # "word flies at the camera" treatment without having to infer intent from
+    # a generic OVERSHOOT animation.
+    motion_recipe: str = "kinetic:word-pop"
+    motion_params: Optional[Dict[str, Any]] = None
+    video_effect: Optional[str] = None
+
     font_weight: str = "Bold"
     font_size_scale: float = 1.0
     tracking: float = 0.0
@@ -164,9 +169,6 @@ class CaptionEvent:
     mode: CaptionMode = CaptionMode.RAPID_RAZOR
 
     def __setattr__(self, name, value):
-        # The importance scorer assigns the layer after construction. Wrapping
-        # the word here keeps canonical text clean while making the existing
-        # ASS writer render a giant stacked opening hook.
         if name == "layer" and value == LayerMode.BEHIND_SUBJECT:
             current = self.__dict__.get("word")
             if current is not None and not isinstance(current, RenderedHookText):
@@ -205,6 +207,9 @@ class CaptionEvent:
                 "enter_ms": self.enter_duration_ms,
                 "exit_ms": self.exit_duration_ms,
             },
+            "motionRecipe": self.motion_recipe,
+            "motionParams": self.motion_params or {},
+            "videoEffect": self.video_effect,
             "emphasis": {
                 "level": self.emphasis.value,
                 "scale": round(self.emphasis_scale, 3),
