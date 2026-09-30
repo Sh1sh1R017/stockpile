@@ -140,7 +140,15 @@ class BrollSuperDirector:
 
         existing = list(plan.get("shots") or [])
         if not existing:
-            existing = [{} for _ in range(min(8, len(moments)))]
+            existing = [{} for _ in range(min(10, len(moments)))]
+
+        style_data = plan.get("style") if isinstance(plan.get("style"), dict) else {}
+        reference_style = bool(
+            plan.get("reference_editing")
+            or style_data.get("reference_style")
+            or style_data.get("id") in {"cinematic_social_editorial", "cinematic_editorial"}
+        )
+        hero_max_duration = float(style_data.get("hero_broll_max_duration", 7.5 if reference_style else 2.6))
 
         moments.sort(
             key=lambda m: (
@@ -175,12 +183,20 @@ class BrollSuperDirector:
             moment = selected[idx]
             shot = dict(original)
             start = float(moment["start"])
+            moment_duration = float(moment.get("recommended_duration", 2.2) or 2.2)
+            # Reference edits mix short visual punctuation with occasional hero
+            # holds; other styles keep the original tighter cut ceiling.
+            duration_cap = hero_max_duration if (
+                reference_style
+                and float(moment.get("impact_score", 0) or 0) >= 85
+                and float(moment.get("visualizability", 0) or 0) >= 85
+            ) else 2.6
             duration = min(
                 float(shot.get("duration", 2.0) or 2.0),
-                float(moment.get("recommended_duration", 2.2) or 2.2),
-                2.6,
+                moment_duration,
+                duration_cap,
             )
-            duration = max(1.2, duration)
+            duration = max(0.8 if reference_style else 1.2, duration)
             end = min(video_duration, start + duration)
             if end - start < 1.0:
                 continue
@@ -236,7 +252,11 @@ class BrollSuperDirector:
         )
         plan["broll_super_analysis"] = analysis
         plan["broll_selection_model"] = analysis.get("model", self.model_name)
-        plan["broll_selection_policy"] = "emotion-first"
+        plan["broll_selection_policy"] = (
+            "reference-emotion-first"
+            if reference_style
+            else "emotion-first"
+        )
         return plan
 
     @staticmethod
@@ -269,9 +289,31 @@ class BrollSuperDirector:
         style: str,
         requested_shots: int,
     ) -> str:
+        reference_mode = str(style).strip().lower() in {
+            "cinematic social editorial",
+            "cinematic_social_editorial",
+            "cinematic editorial",
+        }
+        reference_rules = ""
+        if reference_mode:
+            reference_rules = """
+REFERENCE EDITING MODE:
+- Treat B-roll as the primary visual language, aiming for roughly 85-95% visual
+  coverage when the asset library can support it.
+- Do not leave long stretches of talking-head footage merely because the line is
+  not an obvious "impact" moment.
+- Identify sequential visual beats across the full dialogue so the edit can feel
+  like a cinematic montage.
+- Use mixed timing: many 0.8-2.2s cutaways plus rare 3-8s hero holds.
+- A hero hold is appropriate when one strong visual can carry a complete thought,
+  reveal, consequence, or payoff.
+- Start with a strong visual whenever possible; no mandatory talking-head intro.
+"""
+
         return f"""You are the B-ROLL SUPER DIRECTOR for an AI short-form editor.
 
 LISTEN TO THE ATTACHED AUDIO. Do not treat the transcript as sufficient evidence.
+{reference_rules}
 
 Find the dialogue moments where B-roll adds the most emotional and narrative
 value. Do not force B-roll onto every sentence.

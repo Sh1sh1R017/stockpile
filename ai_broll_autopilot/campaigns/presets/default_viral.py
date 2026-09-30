@@ -30,7 +30,7 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Visual & B-roll rules
     allow_ai_broll=False,
-    max_broll_ratio=0.60,
+    max_broll_ratio=0.90,
     max_cutaway_seconds=2.2,
     speed_multiplier=1.0,
     niche_id="generic",
@@ -49,12 +49,13 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
     hook_required=False,
 
     rules_checklist=[
-        "Open with 0.8–1.3s of clean A-roll, then cut on meaningful sentence beats.",
-        "Use B-roll as narrative punctuation with literal, emotionally relevant visuals.",
-        "Keep B-roll cutaways roughly 0.8–2.2s and permit micro-cut sequences when the sentence changes visual beat.",
+        "Open on the strongest visual beat; do not require a clean A-roll intro.",
+        "Target high visual coverage so the short feels like a cinematic story montage rather than a talking-head clip with occasional filler.",
+        "Mix 0.8–2.2s cutaways with occasional 3–8s hero visuals when one shot carries the narrative payoff.",
+        "Use literal archival/documentary/cinematic visuals that match the spoken idea, tone, and consequence.",
         "Use large sentence-aware center captions, normally 2–4 words visible at a time, with restrained pale-green emphasis.",
-        "Avoid generic meme filler, neon effects, constant zooms, and decorative transitions.",
-        "Use hard cuts by default; reserve SFX for major visual punctuation and keep BGM low under dialogue."
+        "Avoid generic meme filler, neon effects, constant zooms, flashy transitions, and automatic whoosh-on-every-cut behavior.",
+        "Use hard cuts by default; reserve SFX for meaningful reveals or punctuation and keep BGM low under dialogue."
     ],
     instant_rejections=[],
     director_system_prompt=None,

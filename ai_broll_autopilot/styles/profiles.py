@@ -62,10 +62,25 @@ PROFILES = [
         id="cinematic_social_editorial",
         name="Cinematic Social Editorial",
         description=(
-            "Reference-inspired narrative short-form style: black canvas, editorial vertical imagery, "
-            "rapid but deliberate story cutaways, large white kinetic captions, selective pale-green emphasis, "
-            "and restrained camera motion. B-roll behaves like visual punctuation rather than generic filler."
+            "Reference-matched cinematic social editorial: a near-black canvas with a centered rounded "
+            "editorial card, sentence-aware center captions, meaningful visual swaps, restrained motion, "
+            "and long hero visual holds when the story beat deserves them."
         ),
+        editorial_guidelines=[
+            "Use a near-black canvas with one centered rounded-corner visual card; avoid full-bleed 9:16 imagery.",
+            "Prefer literal, cinematic, archival, or documentary visuals that communicate the spoken idea.",
+            "Open on the strongest visual beat; do not reserve a mandatory clean talking-head intro.",
+            "Target approximately 85-95% visual coverage when suitable assets exist; short A-roll moments are punctuation, not the default.",
+            "Use mixed pacing: 0.8-2.2s micro cutaways plus occasional 3-8s hero holds for strong narrative/payoff visuals.",
+            "Cut on meaning, phrase changes, or visual reveals rather than on a fixed timer.",
+            "Keep transitions mostly hard cuts. Avoid flashy wipes, glitch transitions, and constant digital zooms.",
+            "Use large center-stacked captions, usually 2-4 words per beat, with one restrained warm/pale-green emphasis word or phrase.",
+            "Keep captions inside the visual card and away from the extreme bottom safe zone.",
+            "Use SFX selectively on reveals or major visual punctuation; keep dialogue dominant and BGM understated.",
+        ],
+        reference_style=True,
+        broll_target_ratio=0.90,
+        hero_broll_max_duration=7.5,
         font_family="Inter",
         font_size=56,
         font_weight="bold",
