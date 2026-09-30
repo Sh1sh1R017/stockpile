@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from .caption_event import CaptionEvent, CaptionState, AnimationType, EmphasisLevel, EnergyLevel
 from .impact_composition import compose_impact_group
@@ -47,12 +47,20 @@ def _clamp_ms(v: int) -> int:
 class CaptionStateMachine:
     """Assign entry/exit animations and phrase-level visual hierarchy."""
 
-    def wire(self, events: List[CaptionEvent]) -> List[CaptionEvent]:
-        """Resolve animations, hero/support composition and impact recipes."""
+    def wire(
+        self,
+        events: List[CaptionEvent],
+        editorial_intents: Optional[List[Any]] = None,
+    ) -> List[CaptionEvent]:
+        """Resolve animations using shared editorial intent when available."""
+
         # Compose each phrase as a visual unit first. This is what turns
         # "JOEY DIAZ WAS PURE CHAOS" into supporting text + a dominant CHAOS
         # treatment instead of four identical subtitle words.
-        self._apply_chaos_budget(events)
+        if editorial_intents:
+            self._apply_editorial_intents(events, editorial_intents)
+        else:
+            self._apply_chaos_budget(events)
 
         by_phrase = {}
         for ev in events:
@@ -72,6 +80,50 @@ class CaptionStateMachine:
             self._apply_impact_recipe(ev)
             prev = ev
         return events
+
+    @staticmethod
+    def _apply_editorial_intents(events: List[CaptionEvent], editorial_intents: List[Any]) -> None:
+        """Apply Creative Director decisions to caption words by moment time range."""
+        ranges = []
+        for intent in editorial_intents:
+            if hasattr(intent, "start_time"):
+                start = float(getattr(intent, "start_time", 0.0))
+                end = float(getattr(intent, "end_time", start))
+                getter = lambda key, default=None, obj=intent: getattr(obj, key, default)
+            elif isinstance(intent, dict):
+                start = float(intent.get("start_time", 0.0))
+                end = float(intent.get("end_time", start))
+                getter = lambda key, default=None, obj=intent: obj.get(key, default)
+            else:
+                continue
+            ranges.append((start, end, getter))
+
+        for ev in events:
+            matched = None
+            for start, end, getter in ranges:
+                if start <= ev.start_time < max(end, start + 0.01):
+                    matched = getter
+                    break
+            if matched is None and ranges:
+                matched = min(ranges, key=lambda item: abs(item[0] - ev.start_time))[2]
+            if matched is None:
+                continue
+
+            ev.chaos_score = float(matched("chaos_score", ev.chaos_score) or 0.0)
+            ev.chaos_tier = str(
+                matched("chaos_tier", matched("treatment", ev.chaos_tier)) or "normal"
+            )
+            ev.chaos_budget_remaining = float(
+                matched("chaos_budget_remaining", ev.chaos_budget_remaining) or 0.0
+            )
+            ev.hook_relevance = float(matched("hook_relevance", ev.hook_relevance) or 0.0)
+            ev.speaker_emphasis = float(matched("speaker_emphasis", ev.speaker_emphasis) or 0.0)
+            ev.semantic_importance = float(
+                matched("semantic_importance", ev.semantic_importance) or 0.0
+            )
+            ev.emotional_importance = float(
+                matched("emotional_importance", ev.emotional_importance) or 0.0
+            )
 
     @staticmethod
     def _apply_chaos_budget(events: List[CaptionEvent]) -> None:
