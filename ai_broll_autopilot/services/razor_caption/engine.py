@@ -44,14 +44,17 @@ class RazorCaptionEngine:
         hook_threshold: float = 0.78,
         strong_threshold: float = 0.62,
         moderate_threshold: float = 0.44,
+        preset_name: str = "hormozi",
     ):
         self.mode = mode
         self.segmenter = RazorSegmenter(max_group_size=max_group_size, mode=mode)
+        self.preset_name = preset_name
         self.scorer = ImportanceScorer(
             hook_threshold=hook_threshold,
             strong_threshold=strong_threshold,
             moderate_threshold=moderate_threshold,
             enable_behind_subject=enable_behind_subject,
+            preset_name=preset_name,
         )
         self.energy_analyzer = EnergyAnalyzer()
         self.spatial_engine = SpatialEngine(enable_subject_avoidance=True)
@@ -154,6 +157,8 @@ class RazorCaptionEngine:
                 "videoEffect": hero.video_effect,
                 "behind_subject": has_behind,
                 "behindSubject": has_behind,
+                "position": hero.region.value,
+                "spatial_region": hero.region.value,
                 "style": {
                     "fontFamily": preset.font_family,
                     "fontSize": preset.font_size,
@@ -162,6 +167,9 @@ class RazorCaptionEngine:
                     "strokeColor": preset.stroke_color,
                     "strokeWidth": preset.stroke_width,
                     "preset": preset.key,
+                    "uppercase": preset.uppercase,
+                    "letterSpacing": preset.letter_spacing,
+                    "lineHeight": preset.line_spacing,
                 },
                 "words": words_meta,
             })
