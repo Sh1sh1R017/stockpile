@@ -45,7 +45,10 @@ class StyleProfile:
     broll_max_duration: float = 2.2
     max_continuous_aroll_seconds: float = 3.5
     max_zoom_scale: float = 1.05
-    visual_container_scale: float = 0.92
+    visual_container_scale: float = 0.944
+    visual_container_width_ratio: float = 0.944
+    visual_container_height_ratio: float = 0.574
+    visual_container_radius: int = 52
     use_black_canvas: bool = False
 
     # Audio Mix
@@ -85,6 +88,9 @@ class StyleProfile:
             "max_continuous_aroll_seconds": self.max_continuous_aroll_seconds,
             "max_zoom_scale": self.max_zoom_scale,
             "visual_container_scale": self.visual_container_scale,
+            "visual_container_width_ratio": self.visual_container_width_ratio,
+            "visual_container_height_ratio": self.visual_container_height_ratio,
+            "visual_container_radius": self.visual_container_radius,
             "use_black_canvas": self.use_black_canvas,
             "sound_effects_enabled": self.sound_effects_enabled,
             "bgm_ducking_volume": self.bgm_ducking_volume,
