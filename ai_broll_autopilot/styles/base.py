@@ -42,6 +42,19 @@ class StyleProfile:
     sound_effects_enabled: bool = True
     bgm_ducking_volume: float = 0.15     # Music volume during active speech (0.0 to 1.0)
     bgm_normal_volume: float = 0.35      # Music volume during music-forward moments
+    # Reference-style editorial controls
+    # These fields let the director reproduce a concrete short-form look without
+    # coupling the rules to one niche.
+    caption_preset: str = "hormozi"
+    caption_words_per_group: int = 3
+    caption_spatial_mode: str = "standard"
+    video_frame_mode: str = "fullscreen"     # "fullscreen" or "rounded_landscape_card"
+    video_frame_scale: float = 1.0
+    video_frame_border_radius: float = 0.0
+    broll_visual_mode: str = "contextual"
+    broll_min_duration: float = 1.2
+    broll_max_duration: float = 3.5
+    broll_target_coverage: float = 0.40
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert style profile to a JSON-serializable dictionary."""
@@ -71,6 +84,16 @@ class StyleProfile:
             "sound_effects_enabled": self.sound_effects_enabled,
             "bgm_ducking_volume": self.bgm_ducking_volume,
             "bgm_normal_volume": self.bgm_normal_volume,
+            "caption_preset": self.caption_preset,
+            "caption_words_per_group": self.caption_words_per_group,
+            "caption_spatial_mode": self.caption_spatial_mode,
+            "video_frame_mode": self.video_frame_mode,
+            "video_frame_scale": self.video_frame_scale,
+            "video_frame_border_radius": self.video_frame_border_radius,
+            "broll_visual_mode": self.broll_visual_mode,
+            "broll_min_duration": self.broll_min_duration,
+            "broll_max_duration": self.broll_max_duration,
+            "broll_target_coverage": self.broll_target_coverage,
         }
 
     def to_openreel_subtitle_style(self) -> Dict[str, Any]:
