@@ -88,6 +88,21 @@ class SubtitleEngine:
             "words_per_group": 3,
             "box_badge": True,
         },
+        "cinematic_social": {
+            "name": "Cinematic Social Center",
+            "active_color": "&H008BD9F1&",    # Warm cream/gold highlight in BGR
+            "inactive_color": "&H00FFFFFF&",
+            "outline_color": "&H00000000&",
+            "font_name": "Arial",
+            "font_size": 68,
+            "outline_width": 2.5,
+            "shadow_offset": 2.0,
+            "uppercase": False,
+            "words_per_group": 3,
+            "margin_l": 80,
+            "margin_r": 80,
+            "margin_v": 0,
+        },
         "capcut_cyber": {
             "name": "CapCut Cyber Cyan",
             "active_color": "&H00FFFF00&",    # Bright Neon Cyan in BGR (&HAABBGGRR)
