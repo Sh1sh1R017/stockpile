@@ -88,3 +88,9 @@ def test_creative_director_owns_timeline_chaos_budget():
     assert intents[0].chaos_tier == intents[0].treatment
     assert 0.0 <= intents[0].chaos_budget_remaining <= 1.0
     assert intents[1].chaos_budget_remaining <= intents[0].chaos_budget_remaining
+
+
+def test_editorial_moment_is_constructible_as_dataclass():
+    moment = make_moment()
+    assert moment.moment_id == "m1"
+    assert moment.duration == 1.5
