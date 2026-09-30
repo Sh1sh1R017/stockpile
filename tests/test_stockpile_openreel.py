@@ -362,7 +362,7 @@ def test_cinematic_social_editorial_reference_style():
     assert campaign.max_cutaway_seconds == 2.2
 
     subtitle_engine = SubtitleEngine()
-    assert "cinematic_editorial" in subtitle_engine.STYLE_PRESETS
+    assert "cinematic_editorial" in subtitle_engine.PRESETS
 
     graph, _, _ = TimelineEngine().build_filtergraph(
         shots=[
