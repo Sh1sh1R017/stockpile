@@ -120,6 +120,16 @@ export interface ShotDetail {
     reason?: string;
     audio_url?: string;
   };
+  emotion?: string;
+  sentiment?: string;
+  tone_of_voice?: string;
+  tone_intensity?: number;
+  impact_score?: number;
+  visualizability?: number;
+  broll_priority?: number;
+  visual_strategy?: string;
+  broll_search_queries?: string[];
+  avoid_visuals?: string[];
 }
 
 export interface JobDetail extends JobSummary {
