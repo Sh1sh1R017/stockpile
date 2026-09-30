@@ -116,6 +116,9 @@ class CaptionStateMachine:
             ev.chaos_budget_remaining = float(
                 matched("chaos_budget_remaining", ev.chaos_budget_remaining) or 0.0
             )
+            ev.editorial_treatment = str(
+                matched("treatment", matched("chaos_tier", ev.editorial_treatment)) or "normal"
+            )
             ev.hook_relevance = float(matched("hook_relevance", ev.hook_relevance) or 0.0)
             ev.speaker_emphasis = float(matched("speaker_emphasis", ev.speaker_emphasis) or 0.0)
             ev.semantic_importance = float(
@@ -170,11 +173,16 @@ class CaptionStateMachine:
 
             budget = max(0.0, budget - CHAOS_COSTS.get(desired, 0.0))
             ev.chaos_tier = desired
+            ev.editorial_treatment = desired
             ev.chaos_budget_remaining = budget
             previous_time = ev.start_time
 
     @staticmethod
     def _apply_impact_recipe(ev: CaptionEvent) -> None:
+        # Shared intent is authoritative. Do not let keyword/emphasis heuristics
+        # re-promote a quiet or normal moment after Creative Director approval.
+        if ev.editorial_treatment in {"quiet", "normal"}:
+            return
         is_extreme = ev.chaos_tier in {"impact", "absurd"}
         is_strong = ev.chaos_tier == "kinetic" or (ev.semantic_type or "").strip().lower() in {"strong", "action"} or ev.emphasis == EmphasisLevel.STRONG
 
