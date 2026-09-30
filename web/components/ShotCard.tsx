@@ -219,6 +219,39 @@ export const ShotCard: React.FC<ShotCardProps> = React.memo(
           </div>
         )}
 
+        {/* Super Director emotional intent */}
+        {(shot.emotion || shot.tone_of_voice || shot.broll_priority !== undefined) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {shot.emotion && (
+              <span className="rounded-full border border-fuchsia-500/20 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-fuchsia-300">
+                {shot.emotion}
+              </span>
+            )}
+            {shot.sentiment && (
+              <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-400">
+                {shot.sentiment}
+              </span>
+            )}
+            {shot.tone_of_voice && (
+              <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-cyan-300">
+                tone: {shot.tone_of_voice}
+              </span>
+            )}
+            {shot.broll_priority !== undefined && (
+              <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[9px] font-semibold text-amber-300">
+                visual priority {Math.round(shot.broll_priority)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {shot.visual_strategy && (
+          <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/5 px-3 py-2">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-cyan-400">Super Director Visual Intent</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-zinc-300">{shot.visual_strategy}</p>
+          </div>
+        )}
+
         {/* Emotional Metaphor */}
         {shot.visceral_human_metaphor && shot.style !== "meme" && (
           <div className="text-xs text-zinc-300 bg-zinc-950/70 p-3 rounded-xl border border-zinc-800/80 space-y-1">
