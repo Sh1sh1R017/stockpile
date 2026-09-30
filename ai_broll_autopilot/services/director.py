@@ -289,7 +289,10 @@ Return ONLY a valid JSON object matching this schema:
             # Validate and clamp shot timestamps to video bounds and campaign constraints
             clean_shots = []
             last_end = 0.0
-            max_dur = float(Config.MAX_CLIP_DURATION_SECONDS)
+            reference_editing = bool(getattr(style_profile, "reference_style", False))
+            configured_max_dur = float(Config.MAX_CLIP_DURATION_SECONDS)
+            hero_max_dur = float(getattr(style_profile, "hero_broll_max_duration", configured_max_dur))
+            max_dur = max(configured_max_dur, hero_max_dur) if reference_editing else configured_max_dur
 
             for shot in plan_data.get("shots", []):
                 # Strictly filter out any A-roll / speaker shots
@@ -310,9 +313,16 @@ Return ONLY a valid JSON object matching this schema:
                 if not campaign.allow_ai_broll or style not in ("stockpile", "collage", "meme"):
                     style = "stockpile"
 
-                # Fast-paced short-form duration: 1.4s to 2.4s (snappy cuts)
-                max_clip = min(campaign.max_cutaway_seconds, max_dur)
-                duration = min(max_clip, max(1.2, float(shot.get("duration", 2.0))))
+                # Reference edits use two timing scales: short punctuation and rare
+                # long hero holds. Other styles retain the campaign ceiling.
+                style_max_cut = (
+                    hero_max_dur
+                    if reference_editing
+                    else float(campaign.max_cutaway_seconds)
+                )
+                max_clip = min(style_max_cut, max_dur)
+                min_clip = 0.8 if reference_editing else 1.2
+                duration = min(max_clip, max(min_clip, float(shot.get("duration", 2.0))))
                 if style == "meme":
                     duration = min(2.0, max(1.3, duration))
                 end = min(video_duration, start + duration)
@@ -363,8 +373,8 @@ Return ONLY a valid JSON object matching this schema:
                 clean_shots.append(shot_entry)
                 last_end = end
 
-            # Memes assignment only for campaigns that allow AI/meme B-roll
-            if campaign.allow_ai_broll:
+            # Meme assignment is explicitly disabled for the reference treatment.
+            if campaign.allow_ai_broll and allow_memes and not reference_editing:
                 from ai_broll_autopilot.services.meme_engine import MemeEngine
                 if clean_shots:
                     clean_shots[0]["style"] = "meme"
