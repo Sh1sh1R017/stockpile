@@ -15,18 +15,15 @@ class Config:
     INPUT_DIR: Path = PROJECT_ROOT / os.getenv("LOCAL_INPUT_FOLDER", "input")
     OUTPUT_DIR: Path = PROJECT_ROOT / os.getenv("LOCAL_OUTPUT_FOLDER", "output")
     DB_PATH: Path = PROJECT_ROOT / "autopilot.db"
-
     STOCKPILE_DIR: Path = PROJECT_ROOT / "src"
     COLLAGE_DIR: Path = PROJECT_ROOT / "gbro-collage-broll"
     ERDUO_DIR: Path = PROJECT_ROOT / "erduo-broll-loop-engineering"
-
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     GEMINI_BROLL_SUPER_MODEL: str = os.getenv("GEMINI_BROLL_SUPER_MODEL", "gemini-2.5-pro")
     GEMINI_BROLL_SUPER_FALLBACK_MODELS: List[str] = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
     GEMINI_FALLBACK_MODELS: List[str] = ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-3.5-flash-lite"]
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
-
     TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))
     MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "3"))
     STOCKPILE_START_OFFSET_SECONDS: float = float(os.getenv("STOCKPILE_START_OFFSET_SECONDS", "6.0"))
@@ -42,20 +39,17 @@ class Config:
     WATERMARK_GEMINI_ENABLED: bool = True
     WATERMARK_CV_FALLBACK: bool = True
     MAX_WATERMARK_CANDIDATE_RETRIES: int = 4
-
     TARGET_WIDTH: int = 1080
     TARGET_HEIGHT: int = 1920
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
-
-    # Hardware encoding: auto detects h264_nvenc and falls back to CPU x264.
-    # Set STOCKPILE_NVENC=0 to force CPU encoding; set STOCKPILE_NVENC=1 to require NVENC.
     NVENC_MODE: str = os.getenv("STOCKPILE_NVENC", "auto").strip().lower()
     NVENC_PRESET: str = os.getenv("STOCKPILE_NVENC_PRESET", "p4")
     NVENC_CQ: int = int(os.getenv("STOCKPILE_NVENC_CQ", str(VIDEO_CRF)))
-
+    # Successful renderer output already uses +faststart and normalized timestamps.
+    # Keep full packet/atom inspection off the hot render path by default.
+    FAST_RENDER_VALIDATION: bool = os.getenv("STOCKPILE_FAST_VALIDATION", "1").strip().lower() not in {"0", "false", "off"}
     EDITOR_ENGINE: str = os.getenv("EDITOR_ENGINE", "openreel")
-
     HDR_ENABLED: bool = False
     HDR_DEFAULT_SCALE: float = 1.0
     HDR_DEFAULT_TONE: str = "vivid"
@@ -63,7 +57,6 @@ class Config:
     HDR_FAST_MODE: bool = True
     HDR_PROCESSING_SCALE: float = 0.6
     HDR_MODEL_PATH: Path = PROJECT_ROOT / "models" / "enhancement_model_reuse_v1.pt"
-
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     GOOGLE_DRIVE_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_OUTPUT_FOLDER_ID", "")
