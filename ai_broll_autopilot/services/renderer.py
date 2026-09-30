@@ -226,13 +226,15 @@ class Renderer:
         rounded_card_stream_idx = None
         style_cfg = edit_plan.get("style", {}) if isinstance(edit_plan, dict) else {}
         use_rounded_card = (
-            str(style_cfg.get("video_frame_mode", "")) == "rounded_landscape_card"
+            str(style_cfg.get("video_frame_mode", "")) in ("rounded_source_card", "rounded_landscape_card")
         )
         rounded_viewport = viewport
         if use_rounded_card and not rounded_viewport:
-            # Reference default for a 1080x1920 export: a centered ~16:9 card.
+            # Reference default for a 1080x1920 export: a centered,
+            # square-ish source card matching the supplied final edit.
             card_w = int(self.timeline.width * float(style_cfg.get("video_frame_scale", 0.97) or 0.97))
-            card_h = int(round(card_w * 9 / 16))
+            card_aspect = float(style_cfg.get("video_frame_aspect_ratio", 0.945) or 0.945)
+            card_h = int(round(card_w / max(card_aspect, 0.1)))
             rounded_viewport = (
                 (self.timeline.width - card_w) // 2,
                 (self.timeline.height - card_h) // 2,
