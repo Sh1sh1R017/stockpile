@@ -157,7 +157,7 @@ class CreativeDirector:
             elapsed = max(0.0, float(moment.start_time) - float(previous_time))
             budget = min(1.0, budget + elapsed * self.CHAOS_REGEN_PER_SEC)
 
-            desired = intent.treatment if intent.treatment in {"normal", "kinetic", "impact", "absurd"} else "normal"
+            desired = intent.treatment if intent.treatment in {"quiet", "normal", "kinetic", "impact", "absurd"} else "normal"
             if desired == "absurd" and budget < self.CHAOS_COSTS["absurd"]:
                 desired = "impact" if budget >= self.CHAOS_COSTS["impact"] else "kinetic" if budget >= self.CHAOS_COSTS["kinetic"] else "normal"
             elif desired == "impact" and budget < self.CHAOS_COSTS["impact"]:
