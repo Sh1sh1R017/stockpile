@@ -226,6 +226,49 @@ class BrollSuperDirector:
             cleaned.append(shot)
             last_end = end
 
+        # Reference style should remain visually active after emotion retiming.
+        # Extend strong visual moments into open space rather than adding filler.
+        if reference_style and cleaned:
+            target_seconds = video_duration * float(
+                style_data.get("broll_target_ratio", 0.90) or 0.90
+            )
+            total_seconds = sum(float(s.get("duration", 0.0)) for s in cleaned)
+            hero_cap = float(getattr(style_data, "hero_broll_max_duration", 7.5)) if False else float(style_data.get("hero_broll_max_duration", hero_max_duration) or hero_max_duration)
+            standard_cap = float(style_data.get("broll_max_duration", 2.2) or 2.2)
+
+            for _ in range(4):
+                if total_seconds >= target_seconds:
+                    break
+                changed = False
+                for idx, shot in enumerate(cleaned):
+                    start_time = float(shot.get("start_time", 0.0))
+                    current = float(shot.get("duration", 0.0))
+                    impact = float(shot.get("impact_score", 0.0) or 0.0)
+                    visual = float(shot.get("visualizability", 0.0) or 0.0)
+                    cap = hero_cap if impact >= 85 and visual >= 85 else standard_cap
+                    next_start = (
+                        float(cleaned[idx + 1].get("start_time", video_duration))
+                        if idx + 1 < len(cleaned)
+                        else video_duration
+                    )
+                    room = max(0.0, next_start - start_time - 0.08)
+                    desired = min(
+                        cap,
+                        room,
+                        current + max(0.0, target_seconds - total_seconds),
+                    )
+                    if desired > current + 0.05:
+                        shot["duration"] = round(desired, 2)
+                        shot["end_time"] = round(start_time + desired, 2)
+                        total_seconds = sum(
+                            float(s.get("duration", 0.0)) for s in cleaned
+                        )
+                        changed = True
+                        if total_seconds >= target_seconds:
+                            break
+                if not changed:
+                    break
+
         total = round(sum(float(s.get("duration", 0)) for s in cleaned), 2)
         plan["shots"] = cleaned
         plan["broll_shot_count"] = len(cleaned)
@@ -236,7 +279,12 @@ class BrollSuperDirector:
         )
         plan["broll_super_analysis"] = analysis
         plan["broll_selection_model"] = analysis.get("model", self.model_name)
-        plan["broll_selection_policy"] = "emotion-first"
+        plan["broll_selection_policy"] = (
+            "reference-emotion-first"
+            if reference_style
+            else "emotion-first"
+        )
+        plan["reference_editing_version"] = "2.0"
         return plan
 
     @staticmethod
