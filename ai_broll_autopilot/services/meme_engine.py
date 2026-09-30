@@ -334,47 +334,61 @@ class MemeEngine:
         )
 
     def select_meme_sfx(self, template_key: str, meme_intensity: str = "subtle") -> Optional[Dict[str, Any]]:
-        """Select a hilarious, punchy sound effect from our 189 SFX catalog for the meme."""
-        preferred_map = {
-            "stepped_in_shit": "81_vine_boom.mp3",
-            "drake": "59_cartoon_slip_whoosh.mp3",
-            "clown": "01_bonk_impact.mp3",
-            "same_picture": "11_bruh.mp3",
-            "batman_slap": "01_bonk_impact.mp3",
-            "gta_ah_shit": "60_sad_violin.mp3",
-            "the_trusted_doctor": "81_vine_boom.mp3",
-            "ishowspeed_shock": "81_vine_boom.mp3",
-            "moms_kinda_homeless": "60_sad_violin.mp3",
-            "not_your_personal_pornstar": "01_bonk_impact.mp3",
-            "caseoh_rage": "01_bonk_impact.mp3",
-            "jynxzi_freakout": "03_metal_pipe.mp3",
-            "gigachad": "03_metal_pipe.mp3",
-            "hide_the_pain_harold": "11_bruh.mp3"
-        }
-        subtle_map = {"drake": "05_mouse_click.mp3", "same_picture": "05_mouse_click.mp3", "gta_ah_shit": "19_sigh_yawn.mp3", "hide_the_pain_harold": "19_sigh_yawn.mp3", "the_trusted_doctor": "05_mouse_click.mp3", "stepped_in_shit": "53_cartoon_slip_whoosh.mp3"}
-        meme_map = {"stepped_in_shit": "75_vine_boom.mp3", "drake": "02_what_meme.mp3", "same_picture": "11_bruh.mp3", "gta_ah_shit": "54_sad_violin.mp3", "hide_the_pain_harold": "11_bruh.mp3", "the_trusted_doctor": "11_bruh.mp3", "ishowspeed_shock": "12_are_you_serious_my_brother.mp3", "moms_kinda_homeless": "27_please_man_i_need_this.mp3", "not_your_personal_pornstar": "16_hey_yo_what_the_fuck.mp3"}
-        pool = meme_map if meme_intensity in {"meme", "absurd"} else subtle_map
-        target_fn = pool.get(template_key, "53_cartoon_slip_whoosh.mp3")
+        """Select subtle-first or intentionally meme-heavy punchline SFX."""
+        intensity = str(meme_intensity or "subtle").lower()
+        if intensity not in {"subtle", "kinetic", "impact", "meme", "absurd"}:
+            intensity = "subtle"
 
-        # Find in catalog
+        subtle_map = {
+            "drake": "05_mouse_click.mp3",
+            "same_picture": "05_mouse_click.mp3",
+            "gta_ah_shit": "19_sigh_yawn.mp3",
+            "hide_the_pain_harold": "19_sigh_yawn.mp3",
+            "the_trusted_doctor": "05_mouse_click.mp3",
+            "stepped_in_shit": "53_cartoon_slip_whoosh.mp3",
+        }
+        meme_map = {
+            "stepped_in_shit": "75_vine_boom.mp3",
+            "drake": "02_what_meme.mp3",
+            "same_picture": "11_bruh.mp3",
+            "gta_ah_shit": "54_sad_violin.mp3",
+            "hide_the_pain_harold": "11_bruh.mp3",
+            "the_trusted_doctor": "11_bruh.mp3",
+            "ishowspeed_shock": "12_are_you_serious_my_brother.mp3",
+            "moms_kinda_homeless": "27_please_man_i_need_this.mp3",
+            "not_your_personal_pornstar": "16_hey_yo_what_the_fuck.mp3",
+        }
+
+        if intensity == "subtle":
+            target_fn, volume, priority = subtle_map.get(template_key, "05_mouse_click.mp3"), 0.22, "subtle"
+        elif intensity in {"meme", "absurd"}:
+            target_fn, volume, priority = meme_map.get(template_key, "75_vine_boom.mp3"), 0.34, "meme"
+        else:
+            target_fn, volume, priority = subtle_map.get(template_key, "53_cartoon_slip_whoosh.mp3"), 0.27, "subtle"
+
         for item in self.sfx_catalog:
             if item.get("file") == target_fn or Path(item.get("path", "")).name == target_fn:
                 return {
                     "file": item["file"],
                     "path": item["path"],
                     "name": item["name"],
-                    "volume": 0.22 if meme_intensity == "subtle" else 0.34, "mix_policy": "duck_under_voice", "priority": "meme" if meme_intensity in {"meme", "absurd"} else "subtle"
+                    "volume": volume,
+                    "mix_policy": "duck_under_voice",
+                    "priority": priority,
                 }
 
-        # Fallback to vine boom or bonk if available in split_sfx
-        local_sfx = SPLIT_SFX_DIR / "81_vine_boom.mp3"
-        if local_sfx.exists():
-            return {
-                "file": local_sfx.name,
-                "path": str(local_sfx),
-                "name": "Vine Boom",
-                "volume": 0.50
-            }
+        # Final fallback stays subtle unless a meme/absurd tier was explicitly earned.
+        fallback = "75_vine_boom.mp3" if intensity in {"meme", "absurd"} else "05_mouse_click.mp3"
+        for item in self.sfx_catalog:
+            if item.get("file") == fallback or Path(item.get("path", "")).name == fallback:
+                return {
+                    "file": item["file"],
+                    "path": item["path"],
+                    "name": item["name"],
+                    "volume": 0.30 if intensity in {"meme", "absurd"} else 0.20,
+                    "mix_policy": "duck_under_voice",
+                    "priority": "meme" if intensity in {"meme", "absurd"} else "subtle",
+                }
         return None
 
     @classmethod
@@ -541,7 +555,9 @@ Return ONLY a JSON object:
                 "category": "Meme Stinger",
                 "volume": sfx_info["volume"],
                 "start_offset": 0.05,
-                "reason": f"Punchline SFX for {t_key} meme"
+                "reason": f"Punchline SFX for {t_key} meme",
+                "mix_policy": sfx_info.get("mix_policy", "duck_under_voice"),
+                "priority": sfx_info.get("priority", "subtle"),
             }
 
         # 5. Render 1080x1920 MP4 with high-velocity dynamic punch-in zoom motion (1.25x+ energy)
