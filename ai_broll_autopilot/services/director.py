@@ -181,10 +181,10 @@ MANDATORY DIRECTING OBJECTIVES:
      • Act 2 ({t_act1:.1f}s to {t_act2:.1f}s): MUST place {quota_act2} cutaway(s)
      • Act 3 ({t_act2:.1f}s to {video_duration:.1f}s): MUST place {quota_act3} cutaway(s)
    - MAXIMUM SPEAKER STAGNATION GAP:
-     Never leave more than 4.0 seconds of continuous speaker alone without a B-roll cutaway or visual event.
+     Never leave more than {style.max_continuous_aroll_seconds:.1f} seconds of continuous speaker alone without a B-roll cutaway or meaningful visual event.
    - SPEAKER BREATHING ROOM:
-     Leave at least 1.0s to 1.8s of speaker on screen between cutaways so the edit breathes naturally.
-   - Keep speaker on screen for the first 0.8s to 1.5s opening hook.
+     Leave at least 0.7s to 1.6s of speaker on screen between cutaways so the edit breathes naturally.
+   - Keep speaker on screen for the first 0.8s to 1.3s opening hook.
    - Cutaway duration: {style.broll_min_duration:.1f}s to {style.broll_max_duration:.1f}s for the selected style. Never let a contextual cutaway drag without a visual reason.
 
 2. ACCURATE CONTEXTUAL MATCHING (CRITICAL):
@@ -204,7 +204,7 @@ MANDATORY DIRECTING OBJECTIVES:
    - "search_prompt" MUST describe a concrete, observable shot: subject + physical action + relevant object/context.
    - "micro_prompts" MUST be 3-5 alternate retrieval queries for the SAME visual event, not generic emotion synonyms.
    - Use 4-8 natural stock-search words. Prefer "person reading search results laptop" over "person feeling insecure".
-   - Every shot must be specific enough that a human editor could visualize the exact 1.5-2.4 second clip before searching.
+   - Every shot must be specific enough that a human editor could visualize the exact 0.8-2.2 second clip before searching.
    - BAD: "concerned person laptop", "show embarrassment", "human consequence", "frustrated professional".
    - GOOD: "young adult reading search results laptop", "close up typing name search bar", "person closes laptop embarrassed".
    - For digital actions, show the digital action literally. For emotional consequences, show an observable physical reaction.
