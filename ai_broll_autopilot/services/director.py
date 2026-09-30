@@ -177,8 +177,15 @@ MANDATORY DIRECTING OBJECTIVES:
      • All visual shots must have "style": "stockpile" (real-world stock footage) unless memes are allowed.
 {meme_instructions}
 
-3. OPTIMIZED STOCK FOOTAGE SEARCH PROMPTS:
-   - "search_prompt" MUST be 2 to 4 clean, photogenic keywords optimized for stock video search.
+3. OPTIMIZED STOCK FOOTAGE SEARCH PROMPTS — RETRIEVAL, NOT VAGUE CONCEPTS:
+   - "search_prompt" MUST describe a concrete, observable shot: subject + physical action + relevant object/context.
+   - "micro_prompts" MUST be 3-5 alternate retrieval queries for the SAME visual event, not generic emotion synonyms.
+   - Use 4-8 natural stock-search words. Prefer "person reading search results laptop" over "person feeling insecure".
+   - Every shot must be specific enough that a human editor could visualize the exact 1.5-2.4 second clip before searching.
+   - BAD: "concerned person laptop", "show embarrassment", "human consequence", "frustrated professional".
+   - GOOD: "young adult reading search results laptop", "close up typing name search bar", "person closes laptop embarrassed".
+   - For digital actions, show the digital action literally. For emotional consequences, show an observable physical reaction.
+   - Do not invent drama, props, locations, brands, or events not supported by the dialogue.
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT (DIVIDED INTO 3 ACTS):
@@ -206,15 +213,21 @@ Return ONLY a valid JSON object matching this schema:
       "duration": 2.0,
       "style": "stockpile",
       "dialogue_quote": "Exact spoken line from transcript",
-      "emotional_core": "Topic theme",
-      "visceral_human_metaphor": "Realistic contextual scene matching the quote",
+      "emotional_core": "Underlying human meaning, not the visual itself",
+      "visceral_human_metaphor": "Concrete observable scene; never an abstract emotion",
+      "visual_subject": "Specific person/object being shown",
+      "visual_action": "Specific physical action visible on camera",
+      "visual_setting": "Specific supported environment",
+      "key_object": "Object or interface that anchors the scene",
+      "shot_composition": "Specific wide/medium/close-up/over-shoulder framing",
       "micro_prompts": [
-        "relevant search term 1",
-        "relevant search term 2"
+        "literal stock-search query 1",
+        "literal stock-search query 2",
+        "literal stock-search query 3"
       ],
-      "search_prompt": "contextual search keywords",
+      "search_prompt": "Best concrete stock-search query",
       "overlay_type": "cutaway",
-      "narrative_reason": "Contextual visual amplification of spoken concept"
+      "narrative_reason": "Why this exact visible action communicates the spoken line"
     }}
   ]
 }}"""
