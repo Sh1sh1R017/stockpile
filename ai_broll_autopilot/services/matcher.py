@@ -46,12 +46,27 @@ class Matcher:
         niche_id = plan.get("niche_id") or getattr(campaign, "niche_id", None)
         from ai_broll_autopilot.niches import niche_registry
         niche = niche_registry.get_profile(niche_id) if niche_id else None
+        editing_style = str(
+            plan.get("editing_style")
+            or (plan.get("style") or {}).get("id")
+            or (plan.get("style") or {}).get("style_id")
+            or getattr(campaign, "editing_style", "clean_podcast")
+        )
 
         # Memes allowed only if both campaign AND niche profile permit meme cutaways
         allow_memes = bool(campaign.allow_ai_broll and (getattr(niche.editing, "meme_cutaways", False) if niche else False))
 
         # Resolve all shots concurrently with asyncio.gather
-        tasks = [self._resolve_single_shot(shot, job_cache_dir, allow_memes=allow_memes, niche_id=niche_id) for shot in shots]
+        tasks = [
+            self._resolve_single_shot(
+                shot,
+                job_cache_dir,
+                allow_memes=allow_memes,
+                niche_id=niche_id,
+                editing_style=editing_style,
+            )
+            for shot in shots
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
         resolved_shots = [s for s in results if s is not None]
@@ -66,6 +81,7 @@ class Matcher:
         job_cache_dir: Path,
         allow_memes: bool = False,
         niche_id: Optional[str] = None,
+        editing_style: str = "clean_podcast",
     ) -> Optional[Dict[str, Any]]:
         """Resolve a single B-roll shot concurrently."""
         shot_id = shot.get("shot_id", "shot")
@@ -158,17 +174,25 @@ class Matcher:
         # 3. Try Pexels royalty-free vertical footage if API key is provided
         if not asset_path and pexels_service.is_available():
             pexels_prompt = semantic_queries[0] if semantic_queries else prompt
-            logger.info(f"Attempting Pexels stock video search for [{shot_id}]: '{pexels_prompt}'")
+            orientation = "landscape" if editing_style == "cinematic_editorial" else "portrait"
+            logger.info(
+                f"Attempting Pexels stock video search for [{shot_id}]: "
+                f"'{pexels_prompt}' orientation={orientation}"
+            )
             p_out = job_cache_dir / f"{shot_id}_pexels.mp4"
             asset_path = await pexels_service.search_and_download(
-                pexels_prompt, p_out, duration=target_duration, orientation="portrait"
+                pexels_prompt, p_out, duration=target_duration, orientation=orientation
             )
 
         # 4. If not cached or resolved from Pexels, acquire asset based on style
         if not asset_path:
             # Stockpile pipeline: check if rapid-fire micro-cut montage is requested
             micro_prompts = shot.get("micro_prompts", [])
-            if Config.RAPID_FIRE_MONTAGE_ENABLED and len(micro_prompts) > 1:
+            if (
+                Config.RAPID_FIRE_MONTAGE_ENABLED
+                and editing_style != "cinematic_editorial"
+                and len(micro_prompts) > 1
+            ):
                 asset_path = await self._build_rapid_montage(
                     micro_prompts, target_duration, job_cache_dir, shot_id
                 )
@@ -187,8 +211,12 @@ class Matcher:
             logger.info(f"Stockpile footage unavailable for [{shot_id}] ('{prompt}'). Trying Pexels stock video fallback...")
             p_fallback = job_cache_dir / f"{shot_id}_pexels_fallback.mp4"
             fallback_prompt = semantic_queries[0] if semantic_queries else prompt
+            fallback_orientation = "landscape" if editing_style == "cinematic_editorial" else "portrait"
             asset_path = await pexels_service.search_and_download(
-                fallback_prompt, p_fallback, duration=target_duration, orientation="portrait"
+                fallback_prompt,
+                p_fallback,
+                duration=target_duration,
+                orientation=fallback_orientation,
             )
             if asset_path and Path(asset_path).exists():
                 logger.info(f"Resolved clean Pexels stock footage for [{shot_id}]: {Path(asset_path).name}")
