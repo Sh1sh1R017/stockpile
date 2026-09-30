@@ -1,10 +1,4 @@
-"""CaptionEvent — core data contract for the Rapid Razor Caption Engine.
-
-Every word that appears on screen is represented as a CaptionEvent. The engine
-never deals with raw text strings after this point; all downstream stages
-(segmenter, importance scorer, spatial engine, state machine) operate on these
-typed objects.
-"""
+"""CaptionEvent — core data contract for the Rapid Razor Caption Engine."""
 
 from __future__ import annotations
 
@@ -94,11 +88,9 @@ class RenderedHookText(str):
 class CaptionEvent:
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     word: str = ""
-
     start_time: float = 0.0
     end_time: float = 0.0
     duration: float = 0.0
-
     confidence: float = 1.0
     speaker: str = "default"
     sentence_id: int = 0
@@ -113,10 +105,8 @@ class CaptionEvent:
     hook_relevance: float = 0.0
     speaker_emphasis: float = 0.0
     word_importance_score: float = 0.0
-
     emphasis: EmphasisLevel = EmphasisLevel.NORMAL
     emotion: str = "neutral"
-
     segment_break_before: bool = False
     segment_break_reason: str = ""
 
@@ -124,7 +114,6 @@ class CaptionEvent:
     position_x: float = 0.5
     position_y: float = 0.85
     position_reason: str = ""
-
     layer: LayerMode = LayerMode.ABOVE_SUBJECT
     subject_id: Optional[str] = None
     collision_resolved: bool = False
@@ -135,13 +124,14 @@ class CaptionEvent:
     enter_duration_ms: int = 120
     exit_duration_ms: int = 80
     emphasis_scale: float = 1.0
-
-    # Explicit recipe parameters let downstream renderers create the
-    # "word flies at the camera" treatment without having to infer intent from
-    # a generic OVERSHOOT animation.
     motion_recipe: str = "kinetic:word-pop"
     motion_params: Optional[Dict[str, Any]] = None
     video_effect: Optional[str] = None
+
+    # Impact-composition metadata. These are deliberately separate from the
+    # semantic score so the renderer can style a phrase without guessing.
+    composition_role: str = "normal"
+    typography_style: str = "standard"
 
     font_weight: str = "Bold"
     font_size_scale: float = 1.0
@@ -153,17 +143,13 @@ class CaptionEvent:
     accent_color: str = "#FFE600"
     opacity: float = 1.0
     rotation_deg: float = 0.0
-
     sfx_event: Optional[str] = None
-
     beat_aligned: bool = False
     nearest_beat_time: Optional[float] = None
-
     semantic_type: str = "normal"
     emoji: Optional[str] = None
     style_preset: str = "hormozi"
     color_palette: Optional[Dict[str, str]] = None
-
     state: CaptionState = CaptionState.IDLE
     energy: EnergyLevel = EnergyLevel.MEDIUM
     mode: CaptionMode = CaptionMode.RAPID_RAZOR
@@ -190,11 +176,7 @@ class CaptionEvent:
             "semantic_type": self.semantic_type,
             "emoji": self.emoji,
             "style_preset": self.style_preset,
-            "color_palette": self.color_palette or {
-                "main": self.fill_color,
-                "second": self.accent_color,
-                "third": "#00FF66",
-            },
+            "color_palette": self.color_palette or {"main": self.fill_color, "second": self.accent_color, "third": "#00FF66"},
             "position": {
                 "region": self.region.value,
                 "x": round(self.position_x, 4),
@@ -210,6 +192,10 @@ class CaptionEvent:
             "motionRecipe": self.motion_recipe,
             "motionParams": self.motion_params or {},
             "videoEffect": self.video_effect,
+            "composition": {
+                "role": self.composition_role,
+                "typographyStyle": self.typography_style,
+            },
             "emphasis": {
                 "level": self.emphasis.value,
                 "scale": round(self.emphasis_scale, 3),
