@@ -869,11 +869,18 @@ Return ONLY a valid JSON object matching this schema:
             s["shot_id"] = f"broll_{idx+1}"
 
         # 6. Smooth Coverage Balancing (scale durations proportionally rather than deleting shots)
-        style_ratio = getattr(
-            active_style if "active_style" in locals() else None,
-            "broll_target_coverage",
-            None,
-        )
+        style_ratio = None
+        if is_cinematic:
+            try:
+                from ai_broll_autopilot.styles import style_registry
+                style_ratio = getattr(
+                    style_registry.get_style("cinematic_editorial"),
+                    "broll_target_coverage",
+                    None,
+                )
+            except Exception:
+                style_ratio = None
+
         target_ratio = (
             float(style_ratio)
             if is_cinematic and style_ratio is not None
