@@ -28,3 +28,46 @@ def test_normal_sentence_is_not_forced_into_chaos_composition():
     ]
     CaptionStateMachine().wire(events)
     assert all(e.composition_role == "normal" for e in events)
+
+
+def test_chaos_budget_rations_back_to_back_impacts():
+    events = [
+        CaptionEvent(word="CHAOS", phrase_id=1, start_time=0.0, end_time=0.4,
+                     word_importance_score=0.96, hook_relevance=0.9,
+                     emphasis=EmphasisLevel.HOOK, semantic_type="chaos"),
+        CaptionEvent(word="INSANE", phrase_id=2, start_time=0.3, end_time=0.7,
+                     word_importance_score=0.96, hook_relevance=0.9,
+                     emphasis=EmphasisLevel.HOOK, semantic_type="chaos"),
+    ]
+    CaptionStateMachine().wire(events)
+    assert events[0].chaos_tier == "absurd"
+    assert events[0].motion_recipe == "kinetic:word-impact-camera"
+    assert events[1].chaos_tier in {"normal", "kinetic"}
+    assert events[1].motion_recipe != "kinetic:word-impact-camera"
+    assert events[1].composition_role != "hero"
+
+
+def test_chaos_budget_recovers_for_later_peak():
+    events = [
+        CaptionEvent(word="CHAOS", phrase_id=1, start_time=0.0, end_time=0.4,
+                     word_importance_score=0.96, emphasis=EmphasisLevel.HOOK,
+                     semantic_type="chaos"),
+        CaptionEvent(word="INSANE", phrase_id=2, start_time=5.0, end_time=5.4,
+                     word_importance_score=0.96, emphasis=EmphasisLevel.HOOK,
+                     semantic_type="chaos"),
+    ]
+    CaptionStateMachine().wire(events)
+    assert events[0].chaos_tier == "absurd"
+    assert events[1].chaos_tier == "absurd"
+    assert all(e.motion_recipe == "kinetic:word-impact-camera" for e in events)
+
+
+def test_keyword_alone_does_not_spend_chaos_budget():
+    events = [
+        CaptionEvent(word="CRAZY", phrase_id=3, start_time=0.0, end_time=0.4,
+                     word_importance_score=0.1),
+    ]
+    CaptionStateMachine().wire(events)
+    assert events[0].chaos_tier == "normal"
+    assert events[0].composition_role == "normal"
+    assert events[0].motion_recipe != "kinetic:word-impact-camera"
