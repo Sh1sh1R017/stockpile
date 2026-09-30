@@ -16,9 +16,7 @@ class StyleRegistry:
         for style in PROFILES:
             self.register(style)
         # Backward-compatible alias used by older cinematic editorial branches.
-        cinematic = self._styles.get("cinematic_social_editorial")
-        if cinematic:
-            self._styles["cinematic_editorial"] = cinematic
+        self._aliases = {"cinematic_editorial": "cinematic_social_editorial"}
 
     def register(self, style: StyleProfile):
         """Register a visual style profile."""
@@ -32,6 +30,8 @@ class StyleRegistry:
         clean_id = style_id.strip().lower()
         if clean_id in self._styles:
             return self._styles[clean_id]
+        if clean_id in self._aliases:
+            return self._styles[self._aliases[clean_id]]
         logger.info(f"Style profile '{style_id}' not found, falling back to 'clean_podcast'.")
         return self._styles.get("clean_podcast", PROFILES[0])
 
