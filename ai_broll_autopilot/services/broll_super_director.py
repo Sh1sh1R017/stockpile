@@ -191,11 +191,11 @@ class BrollSuperDirector:
                 and float(moment.get("impact_score", 0) or 0) >= 85
                 and float(moment.get("visualizability", 0) or 0) >= 85
             ) else 2.6
-            duration = min(
-                float(shot.get("duration", 2.0) or 2.0),
-                moment_duration,
-                duration_cap,
-            )
+            original_duration = float(shot.get("duration", 2.0) or 2.0)
+            if reference_style:
+                duration = min(moment_duration, duration_cap)
+            else:
+                duration = min(original_duration, moment_duration, duration_cap)
             duration = max(0.8 if reference_style else 1.2, duration)
             end = min(video_duration, start + duration)
             if end - start < 1.0:
