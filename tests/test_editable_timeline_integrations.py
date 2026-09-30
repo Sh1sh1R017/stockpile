@@ -182,10 +182,14 @@ def test_openreel_round_trips_subject_caption_metadata():
     )
 
     project = openreel_adapter.create_openreel_project(plan)
-    sub = project["project"]["timeline"]["subtitles"][0]
+    sub = next(
+        c for c in project["project"]["textClips"]
+        if c["trackId"] == "track_captions"
+    )
     assert sub["behindSubject"] is True
-    assert sub["motionProfile"] == "typewriter"
-    assert sub["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert sub["metadata"]["motionProfile"] == "typewriter"
+    assert sub["metadata"]["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert project["project"]["timeline"]["subtitles"] == []
     assert "subtitle-behind-subject" in project["project"]["capabilities"]
 
     updated = openreel_adapter.update_edit_plan_from_openreel(plan, project)
