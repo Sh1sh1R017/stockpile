@@ -34,6 +34,8 @@ class TimelineEngine:
         cyber_grid_backdrop_idx: int = None,
         cyber_grid_mask_before_idx: int = None,
         cyber_grid_mask_after_idx: int = None,
+        reference_style: bool = False,
+        reference_card_mask_idx: int = None,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
         subject-aware typography and behind-subject captions, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
@@ -100,26 +102,61 @@ class TimelineEngine:
             filters.append("[comp_b][v_after]overlay=440:320:eof_action=pass[cyber_comp]")
             current_layer = "cyber_comp"
         else:
-            if viewport:
+            if reference_style and reference_card_mask_idx is not None:
+                # Reference style: a centered editorial card on a near-black canvas.
+                # Measurements are based on the supplied final edit: ~94% canvas width
+                # and ~57% canvas height, with strongly rounded corners.
+                card_w = int(round(self.width * 0.944))
+                card_h = int(round(self.height * 0.574))
+                card_w -= card_w % 2
+                card_h -= card_h % 2
+                card_x = (self.width - card_w) // 2
+                card_y = (self.height - card_h) // 2
+
+                reference_scale = (
+                    f"scale={card_w}:{card_h}:force_original_aspect_ratio=increase,"
+                    f"crop={card_w}:{card_h},setsar=1,fps={self.fps},"
+                    f"eq=contrast=1.05:saturation=1.03:brightness=-0.01"
+                )
+                filters.append(f"[0:v]{reference_scale}[base_card]")
+                filters.append(
+                    f"[{reference_card_mask_idx}:v]scale={card_w}:{card_h},"
+                    f"format=gray[reference_mask]"
+                )
+                filters.append("[base_card][reference_mask]alphamerge[base_card_rounded]")
+                filters.append(
+                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d=300[reference_canvas]"
+                )
+                filters.append(
+                    f"[reference_canvas][base_card_rounded]overlay={card_x}:{card_y}:eof_action=pass[base]"
+                )
+
+                scale_and_pad = (
+                    f"scale={card_w}:{card_h}:force_original_aspect_ratio=increase,"
+                    f"crop={card_w}:{card_h},setsar=1,fps={self.fps},"
+                    f"eq=contrast=1.05:saturation=1.03:brightness=-0.01"
+                )
+                current_layer = "base"
+            elif viewport:
                 vp_x, vp_y, vp_w, vp_h = viewport
                 scale_and_pad = (
                     f"scale={vp_w}:{vp_h}:force_original_aspect_ratio=increase,"
                     f"crop={vp_w}:{vp_h},pad={self.width}:{self.height}:{vp_x}:{vp_y}:color=black,setsar=1,fps={self.fps}"
                 )
                 filters.append(f"[0:v]{scale_and_pad}[base]")
+                current_layer = "base"
             else:
                 scale_and_pad = (
                     f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
                     f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={self.fps}"
                 )
                 filters.append(f"[0:v]{scale_and_pad}[base]")
+                current_layer = "base"
 
             # If subject matte compositing is enabled, split base into background and subject foreground source
-            if subject_matte_stream_idx is not None:
+            if subject_matte_stream_idx is not None and not reference_style:
                 filters.append("[base]split=2[base_bg][subject_src]")
                 current_layer = "base_bg"
-            else:
-                current_layer = "base"
 
         # -------------------------------------------------------------
         # 1b. Backward-Compatible Subject-Aware Layered Text Overlay
@@ -159,6 +196,15 @@ class TimelineEngine:
         # -------------------------------------------------------------
         # 2. B-Roll Video Overlays with Dynamic Transitions (Single Layout)
         # -------------------------------------------------------------
+        reference_mask_labels = []
+        if reference_style and reference_card_mask_idx is not None and shots:
+            reference_mask_labels = [f"ref_mask_{i}" for i in range(len(shots) + 1)]
+            filters.append(
+                f"[{reference_card_mask_idx}:v]scale={self.width}:{self.height},format=gray,"
+                f"split={len(reference_mask_labels)}"
+                + "".join(f"[{label}]" for label in reference_mask_labels)
+            )
+
         if layout_mode != "before_after_cyber_grid":
             for idx, shot in enumerate(shots, start=1):
                 if not shot.get("asset_path"):
@@ -183,12 +229,34 @@ class TimelineEngine:
                 )
                 speed = float(shot.get("speed") or (Config.STREAMER_SPEED_MULTIPLIER if is_streamer_or_meme else Config.BROLL_SPEED_MULTIPLIER))
 
+                if reference_style:
+                    type_in = "cut"
+
                 # Snappy fast-paced transitions (0.18s max)
                 dur_in = min(0.20, trans.get("duration_in", 0.18))
                 dur_out = min(0.20, trans.get("duration_out", 0.18))
 
                 # Apply transition effects with high-velocity speed acceleration
-                if type_in == "slide_left":
+                if reference_style:
+                    reference_card_label = f"broll_ref_card_{idx}"
+                    mask_label = reference_mask_labels[idx] if idx < len(reference_mask_labels) else None
+                    filters.append(
+                        f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
+                        f"{scale_and_pad},setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
+                    )
+                    if mask_label:
+                        filters.append(
+                            f"[{scaled_broll}][{mask_label}]alphamerge[{reference_card_label}]"
+                        )
+                    else:
+                        reference_card_label = scaled_broll
+                    filters.append(
+                        f"[{current_layer}][{reference_card_label}]"
+                        f"overlay=x='(W-w)/2':y='(H-h)/2':"
+                        f"enable='between(t,{start_t:.2f},{end_t:.2f})':"
+                        f"eof_action=pass[{next_layer}]"
+                    )
+                elif type_in == "slide_left":
                     # Whip slide in from right
                     filters.append(
                         f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
