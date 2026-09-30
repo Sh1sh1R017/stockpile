@@ -144,6 +144,14 @@ class OpenReelAdapter(EditorAdapter):
         name = project_name or edit_plan.title or "Stockpile Viral Short"
         duration = float(edit_plan.target_duration)
         now_ms = int(time.time() * 1000)
+        style_id = str(
+            edit_plan.style.get("id", edit_plan.style.get("style_id", ""))
+            if isinstance(edit_plan.style, dict) else ""
+        ).lower()
+        reference_style = style_id == "cinematic_social_editorial"
+        visual_scale = 0.92 if reference_style else 1.0
+        border_radius = 28 if reference_style else 0
+        caption_y = 0.58 if reference_style else 0.82
 
         # 1. Media Library Setup
         media_items: List[Dict[str, Any]] = []
@@ -356,7 +364,7 @@ class OpenReelAdapter(EditorAdapter):
                 "id": f"kf_zoom_{uuid.uuid4().hex[:6]}",
                 "time": z_time,
                 "property": "transform.scale",
-                "value": {"x": z_scale, "y": z_scale},
+                "value": {"x": visual_scale * z_scale, "y": visual_scale * z_scale},
                 "easing": zoom.get("easing", "snappy"),
             })
 
@@ -384,10 +392,11 @@ class OpenReelAdapter(EditorAdapter):
                     "audioEffects": [],
                     "transform": {
                         "position": {"x": 0.5, "y": 0.5},
-                        "scale": {"x": 1.0, "y": 1.0},
+                        "scale": {"x": visual_scale, "y": visual_scale},
                         "rotation": 0,
                         "anchor": {"x": 0.5, "y": 0.5},
                         "opacity": 1.0,
+                        "borderRadius": border_radius,
                         "fitMode": "cover",
                     },
                     "volume": 1.0,
@@ -406,10 +415,11 @@ class OpenReelAdapter(EditorAdapter):
                 "audioEffects": [],
                 "transform": {
                     "position": {"x": 0.5, "y": 0.5},
-                    "scale": {"x": 1.0, "y": 1.0},
+                    "scale": {"x": visual_scale, "y": visual_scale},
                     "rotation": 0,
                     "anchor": {"x": 0.5, "y": 0.5},
                     "opacity": 1.0,
+                    "borderRadius": border_radius,
                     "fitMode": "cover",
                 },
                 "volume": 1.0,
@@ -799,7 +809,7 @@ class OpenReelAdapter(EditorAdapter):
                 "text": s.get("text", ""),
                 "style": sub_style,
                 "transform": {
-                    "position": {"x": 0.5, "y": 0.35 if behind_subject else 0.82},
+                    "position": {"x": 0.5, "y": 0.36 if behind_subject else caption_y},
                     "scale": {"x": 1.0, "y": 1.0},
                     "rotation": 0,
                     "anchor": {"x": 0.5, "y": 0.5},
@@ -877,6 +887,14 @@ class OpenReelAdapter(EditorAdapter):
                 "subtitles": [],
                 "duration": duration,
                 "markers": timeline_markers,
+                **(
+                    {
+                        "backgroundFillMode": "color",
+                        "layoutBackgroundColor": "#050505",
+                    }
+                    if reference_style
+                    else {}
+                ),
             },
             "mediaLibrary": {
                 "items": media_items,
