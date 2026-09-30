@@ -351,7 +351,10 @@ class MemeEngine:
             "gigachad": "03_metal_pipe.mp3",
             "hide_the_pain_harold": "11_bruh.mp3"
         }
-        target_fn = preferred_map.get(template_key, "81_vine_boom.mp3")
+        subtle_map = {"drake": "05_mouse_click.mp3", "same_picture": "05_mouse_click.mp3", "gta_ah_shit": "19_sigh_yawn.mp3", "hide_the_pain_harold": "19_sigh_yawn.mp3", "the_trusted_doctor": "05_mouse_click.mp3", "stepped_in_shit": "53_cartoon_slip_whoosh.mp3"}
+        meme_map = {"stepped_in_shit": "75_vine_boom.mp3", "drake": "02_what_meme.mp3", "same_picture": "11_bruh.mp3", "gta_ah_shit": "54_sad_violin.mp3", "hide_the_pain_harold": "11_bruh.mp3", "the_trusted_doctor": "11_bruh.mp3", "ishowspeed_shock": "12_are_you_serious_my_brother.mp3", "moms_kinda_homeless": "27_please_man_i_need_this.mp3", "not_your_personal_pornstar": "16_hey_yo_what_the_fuck.mp3"}
+        pool = meme_map if meme_intensity in {"meme", "absurd"} else subtle_map
+        target_fn = pool.get(template_key, "53_cartoon_slip_whoosh.mp3")
 
         # Find in catalog
         for item in self.sfx_catalog:
@@ -360,7 +363,7 @@ class MemeEngine:
                     "file": item["file"],
                     "path": item["path"],
                     "name": item["name"],
-                    "volume": 0.50
+                    "volume": 0.22 if meme_intensity == "subtle" else 0.34, "mix_policy": "duck_under_voice", "priority": "meme" if meme_intensity in {"meme", "absurd"} else "subtle"
                 }
 
         # Fallback to vine boom or bonk if available in split_sfx
@@ -527,7 +530,9 @@ Return ONLY a JSON object:
         self.render_meme(t_key, t_path, captions, img_out)
 
         # 4. Select punchline SFX
-        sfx_info = self.select_meme_sfx(t_key)
+        meme_intensity = str(shot.get("chaos_tier") or shot.get("meme_intensity") or "subtle").lower()
+        if meme_intensity not in {"subtle", "kinetic", "impact", "meme", "absurd"}: meme_intensity = "subtle"
+        sfx_info = self.select_meme_sfx(t_key, meme_intensity)
         if sfx_info:
             shot["contextual_sfx"] = {
                 "name": sfx_info["name"],
