@@ -178,7 +178,9 @@ class EditorialIntelligencePipeline:
                 duration=2.2,
                 position="center",
                 style="bold_impact",
-                behind_subject=True,
+                # Subject-aware placement is resolved later by the render settings /
+                # caption compositor; do not override the user's setting here.
+                behind_subject=False,
                 highlight_color="#FFDD00",
             )
         )
