@@ -337,3 +337,68 @@ def test_openreel_two_way_sync():
     assert updated_plan.shots[1]["end_time"] == 10.0
 
 
+
+
+def test_cinematic_editorial_reference_style():
+    style = style_registry.get_style("cinematic_editorial")
+    assert style.caption_preset == "editorial_story"
+    assert style.caption_words_per_group == 3
+    assert style.video_frame_mode == "rounded_landscape_card"
+    assert style.video_frame_scale == 0.97
+    assert style.video_frame_border_radius == 28.0
+    assert style.broll_min_duration == 1.2
+    assert style.broll_max_duration == 3.2
+
+    plan = EditPlan(
+        plan_id="cinematic_reference",
+        title="Cinematic Reference",
+        target_duration=8.0,
+        source_media={"path": "C:/media/raw.mp4", "duration": 20.0, "width": 1920, "height": 1080},
+        clip_interval={"in_point": 0.0, "out_point": 8.0},
+        niche={"id": "generic", "name": "General"},
+        style=style.to_dict(),
+        shots=[
+            {
+                "shot_id": "broll_1",
+                "start_time": 2.0,
+                "duration": 2.2,
+                "end_time": 4.2,
+                "asset_path": "C:/media/broll.mp4",
+                "search_query": "archival property footage",
+            }
+        ],
+        text_overlays=[],
+        subtitles=[
+            {
+                "id": "sub_1",
+                "text": "closer to the source",
+                "startTime": 0.5,
+                "endTime": 2.0,
+                "position": "center",
+                "spatial_region": "center",
+                "behind_subject": False,
+                "words": [],
+                "style": {
+                    "fontFamily": "Inter",
+                    "fontSize": 68,
+                    "color": "#FFFFFF",
+                    "highlightColor": "#EBD45A",
+                },
+            }
+        ],
+        zooms=[],
+        audio_cues={},
+    )
+    project = openreel_adapter.create_openreel_project(plan)
+    timeline_tracks = {t["id"]: t for t in project["project"]["timeline"]["tracks"]}
+    main_clip = timeline_tracks["track_video_main"]["clips"][0]
+    broll_clip = timeline_tracks["track_video_broll"]["clips"][0]
+    assert main_clip["transform"]["fitMode"] == "contain"
+    assert main_clip["transform"]["scale"]["x"] == 0.97
+    assert main_clip["transform"]["borderRadius"] == 28.0
+    assert broll_clip["transform"]["fitMode"] == "contain"
+    assert broll_clip["transform"]["borderRadius"] == 28.0
+    assert project["project"]["timeline"]["subtitles"] == []
+    caption = next(c for c in project["project"]["textClips"] if c["trackId"] == "track_captions")
+    assert caption["transform"]["position"]["x"] == 0.5
+    assert caption["transform"]["position"]["y"] == 0.82
