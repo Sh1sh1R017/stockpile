@@ -320,12 +320,27 @@ class EditDirectorService:
                 (float(s["start_time"]), float(s["end_time"]))
                 for s in shots_data if s.get("asset_path")
             ]
-            razor_engine = RazorCaptionEngine()
+            razor_preset = getattr(style, "caption_preset", "hormozi")
+            razor_group_size = int(getattr(style, "caption_words_per_group", 5) or 5)
+            razor_engine = RazorCaptionEngine(
+                max_group_size=max(1, min(6, razor_group_size)),
+                preset_name=razor_preset,
+            )
             events = razor_engine.process(
                 segments=clip_segments,
                 broll_active_times=broll_active_times,
             )
             razor_captions_data = [e.to_edit_plan_entry() for e in events]
+
+            # The reference editorial style is phrase-driven rather than
+            # sentence-driven: 2-4 words update rapidly, with the hero word
+            # carrying the strongest semantic emphasis.
+            if style.id == "cinematic_editorial":
+                subtitles = razor_engine.to_subtitles(
+                    events,
+                    preset_name=razor_preset,
+                )
+
         except Exception as re_err:
             logger.warning(f"Could not generate Razor captions: {re_err}")
 
@@ -376,6 +391,18 @@ class EditDirectorService:
             "max_broll_ratio": niche.editing.max_broll_ratio,
             "zoom_intensity": style.zoom_intensity,
             "is_podcast": is_podcast,
+            "caption_preset": getattr(style, "caption_preset", "hormozi"),
+            "caption_words_per_group": int(getattr(style, "caption_words_per_group", 3) or 3),
+            "caption_spatial_mode": getattr(style, "caption_spatial_mode", "standard"),
+            "video_frame_mode": getattr(style, "video_frame_mode", "fullscreen"),
+            "video_frame_scale": float(getattr(style, "video_frame_scale", 1.0) or 1.0),
+            "video_frame_border_radius": float(
+                getattr(style, "video_frame_border_radius", 0.0) or 0.0
+            ),
+            "broll_visual_mode": getattr(style, "broll_visual_mode", "contextual"),
+            "broll_min_duration": float(getattr(style, "broll_min_duration", 1.2) or 1.2),
+            "broll_max_duration": float(getattr(style, "broll_max_duration", 3.5) or 3.5),
+            "broll_target_coverage": float(getattr(style, "broll_target_coverage", 0.4) or 0.4),
         }
 
         # -------------------------------------------------------------
