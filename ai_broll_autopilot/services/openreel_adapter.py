@@ -710,7 +710,10 @@ class OpenReelAdapter(EditorAdapter):
             },
             "timeline": {
                 "tracks": tracks_list,
-                "subtitles": openreel_subtitles,
+                # Captions are materialized as editable project.textClips on
+                # track_captions. Keeping duplicate timeline.subtitles here
+                # would make OpenReel render them twice.
+                "subtitles": [],
                 "duration": duration,
                 "markers": [
                     {
@@ -730,6 +733,9 @@ class OpenReelAdapter(EditorAdapter):
             "svgClips": [],
             "stickerClips": [],
             "capabilities": ["tracks-universal", "behind-subject", "subtitle-behind-subject"],
+            "metadata": {
+                "stockpileSubtitleData": openreel_subtitles,
+            },
         }
 
         return {
