@@ -324,6 +324,7 @@ class EditDirectorService:
             events = razor_engine.process(
                 segments=clip_segments,
                 broll_active_times=broll_active_times,
+                editorial_intents=spec.edit_intents,
             )
             razor_captions_data = [e.to_edit_plan_entry() for e in events]
         except Exception as re_err:
