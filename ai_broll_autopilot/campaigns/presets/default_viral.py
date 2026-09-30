@@ -29,10 +29,11 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Visual & B-roll rules
     allow_ai_broll=False,
-    max_broll_ratio=0.45,
-    max_cutaway_seconds=2.5,
+    max_broll_ratio=0.55,
+    max_cutaway_seconds=3.2,
     speed_multiplier=1.25,
     niche_id="generic",
+    editing_style="cinematic_editorial",
 
     # Watermark rules
     watermark_required=False,
@@ -41,16 +42,19 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     # Subtitle rules
     subtitles_required=True,
-    subtitle_style="hormozi",
-    subtitle_position="bottom",
-    subtitle_margin_v=280,
+    subtitle_style="editorial_story",
+    subtitle_position="center",
+    subtitle_margin_v=0,
     hook_required=False,
 
     rules_checklist=[
-        "Keep pacing rapid with cuts every 1.5s to 2.4s.",
-        "Include punchy creator reaction memes in first 5s.",
-        "Word-by-word kinetic subtitle highlighting.",
-        "Sidechain audio auto-ducking under dialogue."
+        "Use the cinematic editorial reference style: black 9:16 canvas with a centered contained landscape card and rounded corners.",
+        "Use fewer, stronger contextual cutaways. Prefer archival, documentary, news, film, TV, location, object, and reaction visuals directly tied to the dialogue.",
+        "Captions are phrase-level (about 2-4 words), centered inside the video card, with restrained white typography and selective warm-yellow/cool accent emphasis.",
+        "Use hard cuts and subtle 1.04x-1.08x punch-ins only on genuine emphasis; do not constantly zoom or add flashy transitions.",
+        "Allow longer visual holds near the payoff when the source material benefits from it.",
+        "Sidechain audio auto-ducking under dialogue; SFX should land on major visual/caption hits rather than every cut.",
+        "Do not inject unrelated streamer memes or generic corporate stock into documentary/editorial stories."
     ],
     instant_rejections=[],
     director_system_prompt=None,
