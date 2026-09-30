@@ -351,10 +351,33 @@ class OpenReelAdapter(EditorAdapter):
         frame_mode = str(style_cfg.get("video_frame_mode", "fullscreen"))
         frame_scale = float(style_cfg.get("video_frame_scale", 1.0) or 1.0)
         frame_radius = float(style_cfg.get("video_frame_border_radius", 0.0) or 0.0)
-        use_rounded_card = frame_mode == "rounded_landscape_card"
+        target_card_aspect = float(style_cfg.get("video_frame_aspect_ratio", 0.945) or 0.945)
+        use_rounded_card = frame_mode in ("rounded_source_card", "rounded_landscape_card")
 
-        # Reference-derived framing: preserve the source aspect ratio inside the
-        # black 9:16 canvas instead of forcing a full-height crop.
+        # Reference-derived framing: crop the raw/stock media into the same
+        # square-ish editorial card before containing it on the 9:16 canvas.
+        source_w = float(source_media.get("width", 1920) or 1920)
+        source_h = float(source_media.get("height", 1080) or 1080)
+        source_aspect = source_w / max(source_h, 1.0)
+        card_crop = None
+        if use_rounded_card and target_card_aspect > 0:
+            if source_aspect > target_card_aspect:
+                crop_w = max(0.05, min(1.0, target_card_aspect / source_aspect))
+                card_crop = {
+                    "x": round((1.0 - crop_w) / 2.0, 4),
+                    "y": 0.0,
+                    "width": round(crop_w, 4),
+                    "height": 1.0,
+                }
+            elif source_aspect < target_card_aspect:
+                crop_h = max(0.05, min(1.0, source_aspect / target_card_aspect))
+                card_crop = {
+                    "x": 0.0,
+                    "y": round((1.0 - crop_h) / 2.0, 4),
+                    "width": 1.0,
+                    "height": round(crop_h, 4),
+                }
+
         video_fit_mode = "contain" if use_rounded_card else "cover"
         video_xy_scale = frame_scale if use_rounded_card else 1.0
         base_video_transform = {
@@ -367,6 +390,8 @@ class OpenReelAdapter(EditorAdapter):
         }
         if use_rounded_card and frame_radius > 0:
             base_video_transform["borderRadius"] = frame_radius
+        if card_crop is not None:
+            base_video_transform["crop"] = card_crop
 
         # Build keyframes for punch-in zooms
         keyframes = []
