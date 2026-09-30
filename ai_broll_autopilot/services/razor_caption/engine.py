@@ -234,7 +234,7 @@ class RazorCaptionEngine:
                 "\\fscx18\\fscy18\\frz-4"
                 f"\\t(0,{impact_ms},\\fscx172\\fscy172\\blur0\\frz2)"
                 f"\\t({impact_ms},{settle_ms},\\fscx125\\fscy125\\frz0)"
-                f"\\t({settle_ms},{dur_ms},\\fscx100\\fscy100)}"
+                f"\\t({settle_ms},{dur_ms},\\fscx100\\fscy100)}}"
             )
             clean = str(ev.word).replace("{", "\\{").replace("}", "\\}")
             additions.append(

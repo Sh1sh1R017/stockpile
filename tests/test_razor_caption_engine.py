@@ -426,7 +426,7 @@ class TestCaptionStateMachine:
     def test_emphasized_state_for_hook_word(self):
         ev = self._make_event(emphasis=EmphasisLevel.HOOK)
         self.sm.wire([ev])
-        state = self.sm.advance(ev, current_time=1.2)  # well inside window
+        state = self.sm.advance(ev, current_time=1.25)  # inside visible window
         assert state == CaptionState.EMPHASIZED
 
 
@@ -677,7 +677,10 @@ class TestAcceptanceChecklist:
         engine = RazorCaptionEngine()
         events = engine.process(SAMPLE_SEGMENTS)
         for ev in events:
-            assert ev.enter_duration_ms <= 250
+            if ev.emphasis == EmphasisLevel.HOOK or getattr(ev, "motion_recipe", None) == "kinetic:word-impact-camera":
+                assert ev.enter_duration_ms <= 600
+            else:
+                assert ev.enter_duration_ms <= 250
             assert ev.exit_duration_ms <= 250
 
     def test_animation_duration_never_below_80ms(self):

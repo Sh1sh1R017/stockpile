@@ -105,10 +105,11 @@ class CaptionStateMachine:
 
     def advance(self, ev: CaptionEvent, current_time: float) -> CaptionState:
         """Advance a single event's state based on current playback time."""
-        enter_sec = ev.enter_duration_ms / 1000.0
-        exit_sec = ev.exit_duration_ms / 1000.0
+        total_dur = max(0.05, ev.end_time - ev.start_time)
+        enter_sec = min(total_dur * 0.35, ev.enter_duration_ms / 1000.0)
+        exit_sec = min(total_dur * 0.25, ev.exit_duration_ms / 1000.0)
         visible_start = ev.start_time + enter_sec
-        exit_start = ev.end_time - exit_sec
+        exit_start = max(visible_start, ev.end_time - exit_sec)
 
         if current_time < ev.start_time:
             ev.state = CaptionState.IDLE
