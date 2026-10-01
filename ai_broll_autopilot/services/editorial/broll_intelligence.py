@@ -224,8 +224,33 @@ class BrollIntelligence:
                                        rejection_reason="Watermarked asset")
         duration_raw = asset.get("duration")
         if duration_raw is None:
-            return BrollCandidateScore(decision="RETAIN_A_ROLL", final_score=0.0, confidence=0.0,
-                                       rejection_reason="Unknown asset duration")
+            # Catalog/test/import paths are not guaranteed to carry ffprobe
+            # metadata. Probe a real local file before rejecting it; the matcher
+            # remains the final hard media-eligibility gate.
+            candidate_path = asset.get("file_path") or asset.get("asset_path") or asset.get("path")
+            if candidate_path:
+                try:
+                    from ai_broll_autopilot.services.broll_library import extract_media_metadata
+                    metadata = extract_media_metadata(Path(str(candidate_path)))
+                    probed_duration = metadata.get("duration")
+                    if probed_duration is not None and float(probed_duration) > 0:
+                        duration_raw = float(probed_duration)
+                        asset["duration"] = duration_raw
+                        if asset.get("width") is None:
+                            asset["width"] = metadata.get("width")
+                        if asset.get("height") is None:
+                            asset["height"] = metadata.get("height")
+                except Exception as exc:
+                    logger.debug("Could not probe candidate duration for %s: %s", candidate_path, exc)
+
+        if duration_raw is None:
+            return BrollCandidateScore(
+                decision="RETAIN_A_ROLL",
+                final_score=0.0,
+                confidence=0.0,
+                rejection_reason="Unknown asset duration",
+            )
+
         speed = max(0.1, float(asset.get("speed") or getattr(Config, "BROLL_SPEED_MULTIPLIER", 1.0)))
         effective_duration = float(duration_raw) / speed
         if effective_duration + 0.05 < target_duration:
