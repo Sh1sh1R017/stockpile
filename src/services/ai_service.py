@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import List
+from typing import List, Optional
 from google.genai import Client
 from google.genai import types
 
@@ -27,10 +27,10 @@ def strip_markdown_code_blocks(text: str) -> str:
 class AIService:
     """Service for AI-powered phrase extraction and video evaluation using Gemini."""
 
-    def __init__(self, api_key: str, model_name: str = "gemini-2.0-flash-001"):
+    def __init__(self, api_key: Optional[str], model_name: str = "gemini-2.0-flash-001"):
         self.api_key = api_key
         self.model_name = model_name
-        self.client = Client(api_key=api_key)
+        self.client = Client(api_key=api_key) if api_key else None
         self.fallback_models = [
             "gemini-flash-latest",
             "gemini-3.5-flash",
@@ -66,6 +66,11 @@ TRANSCRIPT ↓
 <<<
 {transcript}
 >>>"""
+
+        if self.client is None:
+            logger.info("Gemini unavailable; using heuristic phrase extraction.")
+            words = [w.strip() for w in transcript.split() if len(w.strip()) > 3]
+            return [" ".join(words[i:i+4]) + " clean clip" for i in range(0, min(len(words), 30), 4)][:10]
 
         models_to_try = [self.model_name] + [m for m in self.fallback_models if m != self.model_name]
         response_text = None
@@ -148,6 +153,9 @@ The search phrase is evidence, not permission to invent a connection. Prefer an 
 OUTPUT ONLY:
 [{{"video_id":"abc123","score":10}},{{"video_id":"def456","score":8}}]
 """
+
+        if self.client is None:
+            return self._heuristic_evaluate_videos(search_phrase, video_results)
 
         models_to_try = [self.model_name] + [m for m in self.fallback_models if m != self.model_name]
         scored_results = None
