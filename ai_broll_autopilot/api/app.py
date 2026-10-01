@@ -2404,8 +2404,14 @@ async def get_job_hdr_status(job_id: str):
     if task:
         return task
 
-    # Check if already completed and persisted
+    # Cross-worker fallback: task state is persisted in the job edit plan.
     job = db.get_job(job_id)
+    if job and job.edit_plan and job.edit_plan.get("hdr_task"):
+        persisted_task = dict(job.edit_plan["hdr_task"])
+        if persisted_task.get("status") != "completed" or not job.edit_plan.get("hdr_output"):
+            return persisted_task
+
+    # Check if already completed and persisted
     if job and job.edit_plan and "hdr_output" in job.edit_plan:
         hdr_info = job.edit_plan["hdr_output"]
         p = Path(hdr_info.get("path", ""))
