@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ai_broll_autopilot.config import Config
+from ai_broll_autopilot.api.path_safety import safe_join
 from ai_broll_autopilot.core.database import Database
 from ai_broll_autopilot.core.job import Job, JobState
 from ai_broll_autopilot.orchestrator import Orchestrator
@@ -459,6 +460,8 @@ async def get_sfx_audio(filename: str):
     """Serve individual SFX from the 189 unified sound effect library."""
     import urllib.parse
     clean_fn = urllib.parse.unquote(filename).strip()
+    if Path(clean_fn).name != clean_fn or "/" in clean_fn or "\\" in clean_fn:
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     # 1. Check local split_sfx
     sfx_path = Config.OUTPUT_DIR / "split_sfx" / clean_fn
@@ -2846,7 +2849,14 @@ async def export_openreel_endpoint(req: ExportOpenReelRequest):
         audio_cues=p_data.get("audio_cues", {}),
     )
 
-    out_folder = Path(req.output_folder) if req.output_folder else (Config.OUTPUT_DIR / "openreel_projects" / plan.plan_id)
+    try:
+        out_folder = (
+            safe_join(Config.OUTPUT_DIR, req.output_folder)
+            if req.output_folder
+            else Config.OUTPUT_DIR / "openreel_projects" / plan.plan_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     files = openreel_adapter.export_project_files(
         edit_plan=plan,
         output_dir=out_folder,
@@ -2881,7 +2891,10 @@ async def get_library_endpoint(niche_id: Optional[str] = None, limit: int = 50):
 @app.post("/api/library/index")
 async def index_library_endpoint(req: LibraryIndexRequest):
     """Index video files from a local directory into the B-roll library."""
-    p = Path(req.directory_path)
+    try:
+        p = safe_join(Config.PROJECT_ROOT, req.directory_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=400, detail="Directory not found")
     count = broll_library.index_directory(p, niche_id=req.niche_id, tags=req.tags)
