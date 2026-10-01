@@ -291,12 +291,29 @@ class BrollSuperDirector:
                 if total_seconds >= target_seconds:
                     break
                 changed = False
-                for idx, shot in enumerate(cleaned):
+                ordered_indices = sorted(
+                    range(len(cleaned)),
+                    key=lambda i: (
+                        0 if str(cleaned[i].get("cadence_role", "standard")).lower().strip() == "hero" else
+                        1 if str(cleaned[i].get("cadence_role", "standard")).lower().strip() == "standard" else
+                        2
+                    )
+                )
+                for idx in ordered_indices:
+                    shot = cleaned[idx]
                     start_time = float(shot.get("start_time", 0.0))
                     current = float(shot.get("duration", 0.0))
                     impact = float(shot.get("impact_score", 0.0) or 0.0)
                     visual = float(shot.get("visualizability", 0.0) or 0.0)
-                    cap = hero_max_duration if impact >= 85 and visual >= 85 else standard_cap
+                    cadence_role = str(shot.get("cadence_role", "standard")).lower().strip()
+                    if cadence_role == "hero" and impact >= 75 and visual >= 75:
+                        cap = hero_max_duration
+                    elif cadence_role == "micro":
+                        # Preserve the reference's quick visual punctuation. Do not
+                        # inflate micro cuts merely to chase the coverage ratio.
+                        cap = float(style_data.get("micro_broll_max_duration", 0.85))
+                    else:
+                        cap = standard_cap
                     next_start = (
                         float(cleaned[idx + 1].get("start_time", video_duration))
                         if idx + 1 < len(cleaned)
