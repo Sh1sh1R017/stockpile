@@ -144,6 +144,31 @@ def collect_plan_invariant_violations(
             violations.append(f"shots[{index}]: B-roll overlaps a previous accepted B-roll interval")
         previous_end = end
 
+    # Referential integrity for editorial events emitted by the canonical
+    # EditorialEditSpecification, when it is embedded in the plan.
+    spec = plan.get("editorial_spec") if isinstance(plan.get("editorial_spec"), dict) else plan
+    if isinstance(spec, dict):
+        shot_ids = {str(item.get("shot_id")) for item in _items(spec.get("broll_shots", [])) if item.get("shot_id")}
+        moment_ids = {str(item.get("moment_id")) for item in _items(spec.get("moments", [])) if item.get("moment_id")}
+        caption_ids = {str(item.get("id") or item.get("caption_id")) for item in _items(spec.get("captions", [])) if item.get("id") or item.get("caption_id")}
+        camera_ids = {str(item.get("id") or item.get("camera_id")) for item in _items(spec.get("camera_moves", [])) if item.get("id") or item.get("camera_id")}
+        valid_targets = shot_ids | moment_ids | caption_ids | camera_ids
+
+        for index, cue in enumerate(_items(spec.get("sfx_cues", []))):
+            target_id = cue.get("target_id")
+            if not target_id:
+                violations.append(f"sfx_cues[{index}]: missing target_id")
+            elif str(target_id) not in valid_targets:
+                violations.append(f"sfx_cues[{index}]: target_id {target_id!r} does not exist")
+
+        seen_camera_ids = set()
+        for index, move in enumerate(_items(spec.get("camera_moves", []))):
+            camera_id = move.get("id") or move.get("camera_id")
+            if camera_id and camera_id in seen_camera_ids:
+                violations.append(f"camera_moves[{index}]: duplicate camera id {camera_id!r}")
+            if camera_id:
+                seen_camera_ids.add(camera_id)
+
     # Word timestamps must stay inside their parent transcript segment when
     # transcript data is available in the plan/test fixture.
     segments = plan.get("transcript_segments", [])
