@@ -57,8 +57,11 @@ class PacingModel:
 
         # A punch-in is for the speaker; don't stack it on stock footage.
         for cam in camera_moves:
+            cam_start = float(cam.timestamp)
+            cam_end = cam_start + max(0.0, float(cam.duration))
             collides_with_broll = any(
-                b.start_time <= cam.timestamp < b.end_time for b in balanced_broll
+                cam_start < float(b.end_time) and cam_end > float(b.start_time)
+                for b in balanced_broll
             )
             if collides_with_broll:
                 logger.debug(f"Descheduled camera punch-in at {cam.timestamp:.2f}s: overlaps with B-roll.")
