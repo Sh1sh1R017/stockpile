@@ -935,10 +935,10 @@ Return ONLY a valid JSON object matching this schema:
         for idx, shot in enumerate(cleaned, 1):
             shot["shot_id"] = shot.get("shot_id") or f"broll_{idx}"
 
-        total_broll = round(sum(float(shot["duration"]) for shot in cleaned), 2)
-        coverage_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0.0
+        total_broll = sum(float(shot["duration"]) for shot in cleaned)
+        coverage_pct = (total_broll / video_duration) * 100 if video_duration > 0 else 0.0
         logger.info(
-            "Timeline audit completed without coverage padding: %d shots, %.2fs B-roll (%.1f%% coverage)",
+            "Timeline audit completed without coverage padding: %d shots, %.4fs B-roll (%.4f%% coverage)",
             len(cleaned), total_broll, coverage_pct,
         )
         return cleaned, coverage_pct
