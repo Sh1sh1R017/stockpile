@@ -53,6 +53,7 @@ class Config:
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
     FONT_PATH: str = os.getenv("STOCKPILE_FONT_PATH", "")
+    MAX_UPLOAD_SIZE_MB: int = int(os.getenv("STOCKPILE_MAX_UPLOAD_MB", "500"))
 
     FAST_RENDER_ENABLED: bool = os.getenv("STOCKPILE_FAST_RENDER", "1").strip().lower() not in {"0", "false", "off"}
     FAST_RENDER_WIDTH: int = int(os.getenv("STOCKPILE_FAST_RENDER_WIDTH", "720"))
