@@ -311,6 +311,9 @@ class ContextualBrollDecision:
             "rejection_reason": self.scores.rejection_reason,
             "status": self.status,
             "asset_path": self.asset_path,
+            "approved_start_time": round(float(self.approved_start_time), 3) if self.approved_start_time is not None else None,
+            "approved_end_time": round(float(self.approved_end_time), 3) if self.approved_end_time is not None else None,
+            "adjustment_log": list(self.adjustment_log),
         }
 
 
