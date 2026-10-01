@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ai_broll_autopilot.config import Config
-from ai_broll_autopilot.api.path_safety import safe_join
+from ai_broll_autopilot.api.path_safety import safe_join, validate_external_url
 from ai_broll_autopilot.core.database import Database
 from ai_broll_autopilot.core.job import Job, JobState
 from ai_broll_autopilot.orchestrator import Orchestrator
@@ -1272,6 +1272,14 @@ async def import_youtube_video(req: YouTubeJobRequest):
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="YouTube URL is required")
+    try:
+        url = validate_external_url(
+            url,
+            allowed_hosts={"youtube.com", "youtu.be"},
+            require_https=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     target_campaign = req.campaign_id or "default"
     logger.info(f"Importing YouTube video from URL: {url} (Campaign: {target_campaign})")
@@ -1838,7 +1846,17 @@ async def swap_shot_stock_footage(job_id: str, shot_id: str, req: StockSwapReque
 
     new_asset = None
     if req.download_url:
-        new_asset = await pexels_service.download_candidate(req.download_url, out_file, duration=target_dur)
+        try:
+            safe_download_url = validate_external_url(
+                req.download_url,
+                allowed_hosts={"pexels.com"},
+                require_https=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        new_asset = await pexels_service.download_candidate(
+            safe_download_url, out_file, duration=target_dur
+        )
     elif req.prompt:
         new_asset = await pexels_service.search_and_download(req.prompt, out_file, duration=target_dur, orientation="portrait")
 
