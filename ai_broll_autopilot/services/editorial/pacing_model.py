@@ -88,8 +88,15 @@ class PacingModel:
             if overlap > 0:
                 proposed_end = round(current.start_time, 2)
                 if proposed_end - previous.start_time >= min_broll_duration:
+                    old_end = previous.end_time
                     previous.end_time = proposed_end
                     previous.duration = round(previous.end_time - previous.start_time, 2)
+                    previous.adjustment_log.append({
+                        "stage": "pacing",
+                        "reason": "trimmed_overlap",
+                        "previous_end_time": round(float(old_end), 3),
+                        "new_end_time": round(float(proposed_end), 3),
+                    })
                 else:
                     # Preserve the already accepted earlier shot and reject the
                     # overlapping later one instead of extending either clip.
