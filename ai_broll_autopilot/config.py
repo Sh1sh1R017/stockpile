@@ -29,7 +29,7 @@ class Config:
 
     TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))
     # Short, punchy B-roll by default. Long holds are opt-in via the edit plan.
-    MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "1.8"))
+    MAX_CLIP_DURATION_SECONDS: float = float(os.getenv("MAX_CLIP_DURATION_SECONDS", "1.8"))
     BROLL_MIN_RENDER_DURATION: float = float(os.getenv("BROLL_MIN_RENDER_DURATION", "0.65"))
     BROLL_MAX_RENDER_DURATION: float = float(os.getenv("BROLL_MAX_RENDER_DURATION", "1.8"))
     BROLL_HERO_MAX_DURATION: float = float(os.getenv("BROLL_HERO_MAX_DURATION", "2.4"))
