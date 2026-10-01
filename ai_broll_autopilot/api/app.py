@@ -889,7 +889,7 @@ async def get_job_editor_project(job_id: str, engine: Optional[str] = None):
 
 @app.post("/api/jobs/{job_id}/rebalance")
 async def rebalance_job_timeline(job_id: str):
-    """Audit and rebalance B-roll cutaway distribution across the entire timeline to eliminate gaps."""
+    """Validate existing B-roll distribution without filling gaps or adding shots."""
     clean_job_id = job_id
     while "%" in clean_job_id:
         unquoted = urllib.parse.unquote(clean_job_id)
@@ -902,8 +902,6 @@ async def rebalance_job_timeline(job_id: str):
 
     from ai_broll_autopilot.services.director import Director
     from ai_broll_autopilot.campaigns import campaign_registry
-    from ai_broll_autopilot.services.matcher import Matcher
-
     campaign = campaign_registry.get_campaign(job.campaign_id)
     director = Director(api_key=None)
 
@@ -923,13 +921,8 @@ async def rebalance_job_timeline(job_id: str):
     job.edit_plan["broll_coverage_seconds"] = round(sum(s["duration"] for s in rebalanced_shots), 2)
     job.edit_plan["broll_coverage_percentage"] = cov_pct
 
-    # Resolve any newly added shots that lack asset_path
-    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    matcher = Matcher(db)
-    resolved_plan = await matcher.resolve_shots(job.edit_plan, work_dir)
-    job.edit_plan = resolved_plan
-
+    # The rebalance endpoint is validation-only. Never acquire or insert new
+    # B-roll as a side effect of a timeline audit.
     db.save_job(job)
     return {
         "status": "success",
