@@ -330,9 +330,8 @@ Return ONLY a valid JSON object matching this schema:
             clean_shots = []
             last_end = 0.0
             reference_editing = bool(getattr(style_profile, "reference_style", False))
-            configured_max_dur = float(Config.MAX_CLIP_DURATION_SECONDS)
-            hero_max_dur = float(getattr(style_profile, "hero_broll_max_duration", configured_max_dur))
-            max_dur = max(configured_max_dur, hero_max_dur) if reference_editing else configured_max_dur
+            configured_max_dur = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", Config.MAX_CLIP_DURATION_SECONDS))
+            max_dur = configured_max_dur
 
             for shot in plan_data.get("shots", []):
                 # Strictly filter out any A-roll / speaker shots
@@ -362,24 +361,13 @@ Return ONLY a valid JSON object matching this schema:
                 requested_duration = float(shot.get("duration", 1.5) or 1.5)
                 if reference_editing:
                     if requested_role not in {"micro", "standard", "hero"}:
-                        requested_role = (
-                            "micro" if requested_duration <= 0.85
-                            else "hero" if requested_duration >= 3.0
-                            else "standard"
-                        )
-                    if requested_role == "micro":
-                        min_clip = float(getattr(style_profile, "micro_broll_min_duration", 0.45))
-                        max_clip = float(getattr(style_profile, "micro_broll_max_duration", 0.85))
-                    elif requested_role == "hero":
-                        min_clip = float(getattr(style_profile, "hero_broll_min_duration", 3.0))
-                        max_clip = float(getattr(style_profile, "hero_broll_max_duration", 7.5))
-                    else:
-                        min_clip = max(0.85, float(getattr(style_profile, "broll_min_duration", 0.8)))
-                        max_clip = float(getattr(style_profile, "broll_max_duration", 2.2))
+                        requested_role = "micro" if requested_duration <= 0.85 else "standard"
+                    min_clip = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+                    max_clip = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
                 else:
                     requested_role = "standard"
-                    min_clip = 1.2
-                    max_clip = float(campaign.max_cutaway_seconds)
+                    min_clip = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+                    max_clip = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
                 max_clip = min(max_clip, max_dur)
                 duration = min(max_clip, max(min_clip, requested_duration))
                 if style == "meme":
