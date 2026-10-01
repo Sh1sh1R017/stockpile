@@ -3,7 +3,6 @@
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.services.director import Director
 from ai_broll_autopilot.services.reviewer import Reviewer
-from services.ai_service import AIService
 from ai_broll_autopilot.campaigns import campaign_registry
 
 
@@ -29,5 +28,10 @@ def test_reviewer_constructor_is_offline_safe_without_api_key():
 
 
 def test_source_ai_service_constructor_is_offline_safe_without_api_key():
+    import sys
+
+    sys.path.insert(0, str(Config.STOCKPILE_DIR))
+    from services.ai_service import AIService
+
     service = AIService(api_key=None)
     assert service.client is None
