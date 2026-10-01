@@ -13,6 +13,7 @@ from ai_broll_autopilot.services.collage_bridge import CollageBridge
 from ai_broll_autopilot.services.watermark_scanner import watermark_scanner
 from ai_broll_autopilot.services.pexels import pexels_service
 from ai_broll_autopilot.services.meme_engine import MemeEngine
+from ai_broll_autopilot.services.broll_library import extract_media_metadata
 
 # Import Stockpile services directly from src/
 sys.path.insert(0, str(Config.STOCKPILE_DIR))
@@ -59,6 +60,32 @@ class Matcher:
         plan["matched_count"] = len(resolved_shots)
         logger.info(f"Successfully matched {len(resolved_shots)} of {len(shots)} shots in parallel")
         return plan
+
+    async def _asset_is_eligible(self, asset_path: str, target_duration: float, speed: float = 1.0) -> bool:
+        """Verify real media metadata before an asset enters the canonical plan."""
+        path = Path(asset_path)
+        if not path.exists():
+            return False
+        meta = await asyncio.to_thread(extract_media_metadata, path)
+        duration = float(meta.get("duration") or 0.0)
+        width = int(meta.get("width") or 0)
+        height = int(meta.get("height") or 0)
+        effective_duration = duration / max(0.1, float(speed or 1.0))
+        if duration <= 0.0:
+            logger.warning("Rejecting B-roll %s: unknown/invalid duration", path.name)
+            return False
+        if effective_duration + 0.05 < float(target_duration):
+            logger.warning("Rejecting B-roll %s: %.2fs effective media < %.2fs approved interval", path.name, effective_duration, target_duration)
+            return False
+        if min(width, height) < 720:
+            logger.warning("Rejecting B-roll %s: low resolution %sx%s", path.name, width, height)
+            return False
+        if Config.REJECT_WATERMARKS:
+            clean, reason, _ = await asyncio.to_thread(watermark_scanner.scan_video, path)
+            if not clean:
+                logger.warning("Rejecting B-roll %s: watermark scan failed (%s)", path.name, reason)
+                return False
+        return True
 
     async def _resolve_single_shot(
         self,
