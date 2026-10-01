@@ -102,55 +102,54 @@ class EditorialQualityGate:
                 severity="warning",
             ))
 
-        # Check durations (3-5s default, 2-3s high-energy, 6-8s reflective)
-        runaway_shots = [s for s in broll_shots if s.duration > 8.5 or s.duration < 1.4]
-        if not runaway_shots:
+        # Duration audit is read-only. Approval intervals must never be extended or
+        # rewritten by QA; any repair would need a fresh editorial decision.
+        min_broll = 0.65
+        max_broll = 1.8
+        out_of_bounds = [
+            s for s in broll_shots
+            if s.duration < min_broll or s.duration > max_broll
+        ]
+        if not out_of_bounds:
             checks.append(QualityCheckItem(
                 name="broll_adaptive_durations",
                 category="broll",
                 passed=True,
                 score=1.0,
-                message="All cutaway durations conform to adaptive pacing standards (1.5s - 8.0s).",
+                message="All approved cutaway durations are within the render contract (0.65s - 1.8s).",
             ))
         else:
-            # Auto-repair runaway durations
-            for s in runaway_shots:
-                if s.duration > 8.0:
-                    s.duration = 6.5
-                    s.end_time = s.start_time + 6.5
-                    repaired_items.append(f"Clamped runaway duration of [{s.shot_id}] to 6.5s.")
-                elif s.duration < 1.4:
-                    s.duration = 1.8
-                    s.end_time = s.start_time + 1.8
-                    repaired_items.append(f"Extended micro-clip [{s.shot_id}] to 1.8s for visual clarity.")
-
+            recommendations.append(
+                f"{len(out_of_bounds)} B-roll intervals fall outside the approved render contract; "
+                "no automatic duration mutation was applied."
+            )
             checks.append(QualityCheckItem(
                 name="broll_adaptive_durations",
                 category="broll",
-                passed=True,
-                score=0.9,
-                message=f"Repaired {len(runaway_shots)} out-of-bounds cutaway durations.",
-                severity="info",
+                passed=False,
+                score=0.8,
+                message=(
+                    f"{len(out_of_bounds)} cutaway intervals require explicit re-planning "
+                    "rather than automatic extension/clamping."
+                ),
+                severity="warning",
             ))
 
-        # Check Opening Face Rule: Never cover speaker face before 1.2s
+        # Opening timing is also read-only: moving a shot changes its approved
+        # semantic alignment, so it must be re-evaluated instead of shifted by QA.
         early_cuts = [s for s in broll_shots if s.start_time < 1.2]
         if early_cuts:
-            for s in early_cuts:
-                orig_st = s.start_time
-                s.start_time = 1.2
-                s.duration = max(1.5, s.end_time - s.start_time)
-                s.end_time = s.start_time + s.duration
-                repaired_items.append(
-                    f"Delayed cutaway [{s.shot_id}] from {orig_st:.1f}s to 1.2s to establish human speaker connection."
-                )
+            recommendations.append(
+                f"{len(early_cuts)} B-roll shot(s) begin before the 1.2s opening-face boundary; "
+                "re-evaluate them upstream rather than shifting their approved intervals."
+            )
             checks.append(QualityCheckItem(
                 name="opening_face_rule",
                 category="broll",
-                passed=True,
-                score=0.95,
-                message="Auto-repaired opening cutaway to preserve speaker face in initial 1.2s.",
-                severity="info",
+                passed=False,
+                score=0.8,
+                message="Early B-roll was not auto-shifted; approved timing was preserved.",
+                severity="warning",
             ))
         else:
             checks.append(QualityCheckItem(
