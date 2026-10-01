@@ -212,7 +212,21 @@ class EditorialIntelligencePipeline:
                 )
 
         # -------------------------------------------------------------
-        # STEP 7: SOUND DESIGN & SYNCHRONIZATION
+        # STEP 7: PACING & COGNITIVE PROCESSING LOAD BALANCING
+        # -------------------------------------------------------------
+        # Balance the approved visual timeline first. SFX do not participate
+        # in this pass because their final timing depends on the balanced shots
+        # and camera moves.
+        broll_decisions, camera_moves, _ = self.pacing_model.audit_and_balance_load(
+            moments=moments,
+            broll_shots=broll_decisions,
+            captions=captions,
+            camera_moves=camera_moves,
+            sfx_cues=[],
+        )
+
+        # -------------------------------------------------------------
+        # STEP 8: FINAL SOUND DESIGN AFTER VISUAL BALANCING
         # -------------------------------------------------------------
         sfx_cues = self.sound_designer.design_soundscape(
             moments=moments,
@@ -221,17 +235,6 @@ class EditorialIntelligencePipeline:
             broll_shots=broll_decisions,
             video_duration=target_duration,
             edit_intents=edit_intents,
-        )
-
-        # -------------------------------------------------------------
-        # STEP 8: PACING & COGNITIVE PROCESSING LOAD BALANCING
-        # -------------------------------------------------------------
-        broll_decisions, camera_moves, sfx_cues = self.pacing_model.audit_and_balance_load(
-            moments=moments,
-            broll_shots=broll_decisions,
-            captions=captions,
-            camera_moves=camera_moves,
-            sfx_cues=sfx_cues,
         )
         energy_curve = self.pacing_model.build_energy_curve(moments)
 
