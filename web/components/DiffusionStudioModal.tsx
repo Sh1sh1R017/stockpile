@@ -571,7 +571,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
                       </span>
                       {editorialSpec?.hook?.preamble_cut && (
                         <span className="bg-rose-950/60 text-rose-300 border border-rose-800/40 px-2 py-0.5 rounded font-mono">
-                          Trimmed: "{editorialSpec.hook.preamble_cut}"
+                          Trimmed: &quot;{editorialSpec.hook.preamble_cut}&quot;
                         </span>
                       )}
                     </div>
