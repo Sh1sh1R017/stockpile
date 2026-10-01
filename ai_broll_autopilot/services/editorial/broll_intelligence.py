@@ -214,6 +214,8 @@ class BrollIntelligence:
         description = str(asset.get("description") or "").lower()
         asset_text = f"{title} {tags_str} {prompt} {description}"
         moment_text = moment.text.lower()
+        def has_term(text: str, term: str) -> bool:
+            return re.search(r"(?<!\\w)" + re.escape(str(term).lower()) + r"(?!\\w)", text) is not None
 
         # Hard media eligibility: never approve assets that cannot cover the
         # entire editorial interval at their intended playback speed.
@@ -265,16 +267,16 @@ class BrollIntelligence:
 
         sentiment_score = 0.55
         mapping = self.SENTIMENT_FOOTAGE_MAPPINGS.get(moment.sentiment, {})
-        if any(b in asset_text for b in mapping.get("boost", [])):
+        if any(has_term(asset_text, b) for b in mapping.get("boost", [])):
             sentiment_score += 0.30
-        if any(p in asset_text for p in mapping.get("penalize", [])):
+        if any(has_term(asset_text, p) for p in mapping.get("penalize", [])):
             sentiment_score -= 0.55
         sentiment_score = min(1.0, max(0.05, sentiment_score))
 
         action_score = 0.50
         if moment.action != "explaining concept":
             action_terms = [t.strip() for t in moment.action.lower().split(" / ") if t.strip()]
-            action_score = 0.95 if any(term in asset_text for term in action_terms) else 0.35
+            action_score = 0.95 if any(has_term(asset_text, term) or set(re.findall(r"\\w+", term)).issubset(set(re.findall(r"\\w+", asset_text))) for term in action_terms) else 0.35
 
         narrative_score = 0.60
         if narrative_role in {BrollNarrativeRole.ILLUSTRATE, BrollNarrativeRole.EXPLAIN, BrollNarrativeRole.REINFORCE} and semantic_score >= 0.70:
