@@ -276,67 +276,8 @@ class BrollSuperDirector:
             cleaned.append(shot)
             last_end = end
 
-        # Preserve the reference's high visual coverage after emotional
-        # retiming. Extend strong shots into available gaps rather than inventing
-        # extra unrelated shots.
-        if reference_style and cleaned:
-            target_seconds = video_duration * float(
-                style_data.get("broll_target_ratio", 0.90) or 0.90
-            )
-            total_seconds = sum(float(s.get("duration", 0.0)) for s in cleaned)
-            standard_cap = float(
-                style_data.get("broll_max_duration", 2.2) or 2.2
-            )
-            for _ in range(4):
-                if total_seconds >= target_seconds:
-                    break
-                changed = False
-                ordered_indices = sorted(
-                    range(len(cleaned)),
-                    key=lambda i: (
-                        0 if str(cleaned[i].get("cadence_role", "standard")).lower().strip() == "hero" else
-                        1 if str(cleaned[i].get("cadence_role", "standard")).lower().strip() == "standard" else
-                        2
-                    )
-                )
-                for idx in ordered_indices:
-                    shot = cleaned[idx]
-                    start_time = float(shot.get("start_time", 0.0))
-                    current = float(shot.get("duration", 0.0))
-                    impact = float(shot.get("impact_score", 0.0) or 0.0)
-                    visual = float(shot.get("visualizability", 0.0) or 0.0)
-                    cadence_role = str(shot.get("cadence_role", "standard")).lower().strip()
-                    if cadence_role == "hero" and impact >= 75 and visual >= 75:
-                        cap = hero_max_duration
-                    elif cadence_role == "micro":
-                        # Preserve the reference's quick visual punctuation. Do not
-                        # inflate micro cuts merely to chase the coverage ratio.
-                        cap = float(style_data.get("micro_broll_max_duration", 0.85))
-                    else:
-                        cap = standard_cap
-                    next_start = (
-                        float(cleaned[idx + 1].get("start_time", video_duration))
-                        if idx + 1 < len(cleaned)
-                        else video_duration
-                    )
-                    room = max(0.0, next_start - start_time - 0.08)
-                    desired = min(
-                        cap,
-                        room,
-                        current + max(0.0, target_seconds - total_seconds),
-                    )
-                    if desired > current + 0.05:
-                        shot["duration"] = round(desired, 2)
-                        shot["end_time"] = round(start_time + desired, 2)
-                        total_seconds = sum(
-                            float(s.get("duration", 0.0)) for s in cleaned
-                        )
-                        changed = True
-                        if total_seconds >= target_seconds:
-                            break
-                if not changed:
-                    break
-
+        # Coverage is telemetry, not an objective. Never extend an approved
+        # or selected shot merely to approach a target coverage percentage.
         total = round(sum(float(s.get("duration", 0)) for s in cleaned), 2)
         plan["shots"] = cleaned
         plan["broll_shot_count"] = len(cleaned)
