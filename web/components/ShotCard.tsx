@@ -191,7 +191,7 @@ export const ShotCard: React.FC<ShotCardProps> = React.memo(
         {/* Dialogue Quote */}
         {shot.dialogue_quote && (
           <div className="text-xs text-zinc-300 italic border-l-2 border-indigo-500/60 pl-3 py-0.5 bg-indigo-950/20 rounded-r-lg">
-            "{shot.dialogue_quote}"
+            &quot;{shot.dialogue_quote}&quot;
           </div>
         )}
 
