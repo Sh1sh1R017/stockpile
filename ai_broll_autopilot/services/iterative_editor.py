@@ -168,8 +168,8 @@ class IterativeEditLoop:
             if (t2 - t1) < 2.5:
                 sfx_spacing_violations += 1
 
-        # Check opening face protection (B-roll should not start before 1.0s)
-        early_broll = any(float(s.get("start_time", 0.0)) < 1.0 for s in shots)
+        # Opening-face protection is a blocking 1.2s invariant.
+        early_broll = any(float(s.get("start_time", 0.0)) < 1.2 for s in shots)
 
         # Compute synthetic score
         score = 1.0
@@ -227,7 +227,7 @@ class IterativeEditLoop:
                 category="hook",
                 passed=False,
                 score=0.4,
-                message="B-roll starts before 1.0s, obscuring speaker facial hook.",
+                message="B-roll starts before 1.2s, obscuring speaker facial hook.",
                 severity="warning",
             ))
         else:
@@ -262,18 +262,14 @@ class IterativeEditLoop:
         audio_cues = getattr(plan, "audio_cues", plan_dict.get("audio_cues", {}))
         sfx_list = audio_cues.get("sfx", []) if isinstance(audio_cues, dict) else []
 
-        # REPAIR 1: Fix Early B-roll Hook Intrusion
-        for s in shots:
-            st = float(s.get("start_time", 0.0)) if isinstance(s, dict) else getattr(s, "start_time", 0.0)
-            if st < 1.2:
-                new_st = 1.3
-                if isinstance(s, dict):
-                    s["start_time"] = new_st
-                    s["duration"] = round(float(s.get("end_time", new_st + 2.0)) - new_st, 2)
-                else:
-                    s.start_time = new_st
-                    s.duration = round(s.end_time - new_st, 2)
-                repairs.append(f"Shifted early B-roll start from {st:.2f}s to {new_st:.2f}s to preserve speaker hook face.")
+        # REPAIR 1: Opening-hook violations are intentionally not retimed here.
+        # The approved B-roll interval belongs to the upstream editorial decision.
+        # Replanning is required rather than shifting the shot downstream.
+        if any(
+            (float(s.get("start_time", 0.0)) if isinstance(s, dict) else float(getattr(s, "start_time", 0.0))) < 1.2
+            for s in shots
+        ):
+            repairs.append("Opening B-roll violation retained for upstream replanning; no interval mutation applied.")
 
         # REPAIR 2: Fix SFX Clustering (Enforce >= 2.8s spacing)
         if len(sfx_list) > 1:
