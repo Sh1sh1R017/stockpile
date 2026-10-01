@@ -28,7 +28,12 @@ class Config:
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
 
     TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))
-    MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "3"))
+    # Short, punchy B-roll by default. Long holds are opt-in via the edit plan.
+    MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "1.8"))
+    BROLL_MIN_RENDER_DURATION: float = float(os.getenv("BROLL_MIN_RENDER_DURATION", "0.65"))
+    BROLL_MAX_RENDER_DURATION: float = float(os.getenv("BROLL_MAX_RENDER_DURATION", "1.8"))
+    BROLL_HERO_MAX_DURATION: float = float(os.getenv("BROLL_HERO_MAX_DURATION", "2.4"))
+    BROLL_REPEAT_GAP_SECONDS: float = float(os.getenv("BROLL_REPEAT_GAP_SECONDS", "5.0"))
     STOCKPILE_START_OFFSET_SECONDS: float = float(os.getenv("STOCKPILE_START_OFFSET_SECONDS", "6.0"))
     BROLL_SPEED_MULTIPLIER: float = float(os.getenv("BROLL_SPEED_MULTIPLIER", "1.25"))
     STREAMER_SPEED_MULTIPLIER: float = float(os.getenv("STREAMER_SPEED_MULTIPLIER", "1.30"))
@@ -48,13 +53,10 @@ class Config:
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
 
-    # Fast 9:16 render profile for low-VRAM/local machines. Default ON for
-    # responsive Stockpile renders; set STOCKPILE_FAST_RENDER=0 for 1080x1920.
     FAST_RENDER_ENABLED: bool = os.getenv("STOCKPILE_FAST_RENDER", "1").strip().lower() not in {"0", "false", "off"}
     FAST_RENDER_WIDTH: int = int(os.getenv("STOCKPILE_FAST_RENDER_WIDTH", "720"))
     FAST_RENDER_HEIGHT: int = int(os.getenv("STOCKPILE_FAST_RENDER_HEIGHT", "1280"))
 
-    # Hardware encoding: auto detects h264_nvenc and falls back to CPU x264.
     NVENC_MODE: str = os.getenv("STOCKPILE_NVENC", "auto").strip().lower()
     NVENC_PRESET: str = os.getenv("STOCKPILE_NVENC_PRESET", "p4")
     NVENC_CQ: int = int(os.getenv("STOCKPILE_NVENC_CQ", str(VIDEO_CRF)))
