@@ -926,7 +926,7 @@ async def rebalance_job_timeline(job_id: str):
     db.save_job(job)
     return {
         "status": "success",
-        "message": f"Timeline rebalanced: {len(rebalanced_shots)} cuts distributed across full {total_dur:.1f}s",
+        "message": f"Timeline validated: {len(rebalanced_shots)} existing cuts retained across {total_dur:.1f}s",
         "shots_count": len(rebalanced_shots),
         "coverage_percentage": cov_pct,
         "shots": job.edit_plan["shots"],
