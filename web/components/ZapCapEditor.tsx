@@ -311,13 +311,23 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setSaveStatus("Saved");
-        setTimeout(() => setSaveStatus(null), 2000);
-        if (onSettingsUpdated) {
-          onSettingsUpdated(data.render_settings);
+      if (!res.ok) {
+        let message = "Failed to save";
+        try {
+          const body = await res.json();
+          if (body?.detail) message = String(body.detail);
+        } catch {
+          // Keep the generic failure message when the backend did not return JSON.
         }
+        setSaveStatus(message);
+        return;
+      }
+
+      const data = await res.json();
+      setSaveStatus("Saved");
+      setTimeout(() => setSaveStatus(null), 2000);
+      if (onSettingsUpdated) {
+        onSettingsUpdated(data.render_settings);
       }
     } catch {
       setSaveStatus("Failed to save");
