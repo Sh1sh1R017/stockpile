@@ -78,6 +78,10 @@ jobs:
             echo '- Proposition-level relevance must beat broad topic similarity.'
             echo '- Consider a bounded top-N frame/OCR/vision inspection stage for visible unrelated text.'
             echo '- Any timing replacement must remain inside the approved interval or receive explicit re-approval.'
+            echo
+            echo '## REPO-WIDE AUDIT APPENDIX'
+            echo
+            cat GPT6_REPO_WIDE_AUDIT_APPENDIX.md
           } >> "$out"
 
       - name: Commit generated packet
