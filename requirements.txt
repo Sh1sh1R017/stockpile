@@ -17,3 +17,4 @@ ffmpeg-python
 numpy
 Pillow
 opencv-python-headless
+hypothesis
