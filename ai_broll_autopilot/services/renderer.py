@@ -163,6 +163,7 @@ class Renderer:
         if bgm_path and os.path.exists(bgm_path):
             bgm_stream_idx = audio_inputs_start + len(audio_sfx_list); cmd.extend(["-stream_loop", "-1", "-i", str(bgm_path)])
 
+        from ai_broll_autopilot.services.filtergraph_lint import assert_filtergraph_labels
         filtergraph, final_video, final_audio = render_timeline.build_filtergraph(
             shots=shots, audio_sfx_list=audio_sfx_list, ass_subtitles_path=ass_subtitles_path,
             bgm_stream_idx=bgm_stream_idx, bgm_volume=bgm_volume, ducking_enabled=ducking_enabled,
@@ -176,6 +177,10 @@ class Renderer:
             reference_card_width_ratio=reference_card_width_ratio, reference_card_height_ratio=reference_card_height_ratio,
             reference_card_radius=reference_card_radius,
             output_duration=float(edit_plan.get("target_duration") or 30.0),
+        )
+        assert_filtergraph_labels(
+            filtergraph,
+            final_labels={final_video, final_audio},
         )
         base_dur = None
         try:
