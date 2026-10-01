@@ -101,3 +101,39 @@ def test_invariants_reject_orphaned_sfx_targets():
     violations = collect_plan_invariant_violations(plan)
     assert any("does not exist" in item for item in violations)
     assert any("missing target_id" in item for item in violations)
+
+
+def test_super_director_cannot_create_or_retime_broll():
+    from ai_broll_autopilot.services.broll_super_director import BrollSuperDirector
+
+    director = BrollSuperDirector(api_key=None)
+    plan = {
+        "target_duration": 12.0,
+        "shots": [
+            {
+                "shot_id": "b1",
+                "start_time": 2.0,
+                "end_time": 3.2,
+                "duration": 1.2,
+                "asset_path": "b1.mp4",
+            }
+        ],
+    }
+    analysis = {
+        "model": "test",
+        "moments": [
+            {
+                "start": 6.0,
+                "end": 11.0,
+                "recommended_duration": 7.5,
+                "broll_priority": 100,
+                "search_queries": ["unrelated long hero"],
+            }
+        ],
+    }
+
+    result = director.apply_to_plan(plan, analysis, 12.0)
+    assert len(result["shots"]) == 1
+    assert result["shots"][0]["start_time"] == 2.0
+    assert result["shots"][0]["end_time"] == 3.2
+    assert result["shots"][0]["duration"] == 1.2
