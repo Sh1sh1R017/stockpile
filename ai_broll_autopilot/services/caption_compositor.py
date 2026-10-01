@@ -327,8 +327,23 @@ class CaptionCompositor:
         for ev in razor_events:
             if behind_subject_enabled and ev.emphasis == EmphasisLevel.HOOK and ev.layer == LayerMode.BEHIND_SUBJECT:
                 behind_events.append(ev)
-            else:
-                normal_events.append(ev)
+
+        # Do not render another caption underneath an active behind-subject hook.
+        # The opening treatment should read as one designed visual, not two
+        # overlapping subtitle systems.
+        behind_start = min((ev.start_time for ev in behind_events), default=None)
+        behind_end = max((ev.end_time for ev in behind_events), default=None)
+        for ev in razor_events:
+            if ev in behind_events:
+                continue
+            if (
+                behind_start is not None
+                and behind_end is not None
+                and ev.start_time < behind_end
+                and ev.end_time > behind_start
+            ):
+                continue
+            normal_events.append(ev)
 
         logger.info(
             "[CAPTION-COMPOSITOR] [ZapCap] Split events: %d normal/top, %d behind-subject.",
