@@ -13,7 +13,7 @@ PROFILES = [
             "Use a near-black canvas with one centered rounded-corner visual card; avoid full-bleed 9:16 imagery.",
             "Prefer literal, cinematic, archival, documentary, or stylized visual metaphors that communicate the spoken idea.",
             "Open immediately on a strong visual or phrase; do not reserve a mandatory clean talking-head intro.",
-            "Target approximately 85-95% visual coverage when suitable assets exist; use A-roll as punctuation or an intentional hero, not the default background.",
+            "Prioritize literal, relevant visuals when they materially strengthen the spoken idea; never add B-roll merely to increase coverage.",
             "Use a tight cadence: 0.45-0.85s micro cuts and 0.9-1.8s contextual holds. Hero holds may reach 2.0s only when the visual is exceptionally strong.",
             "Allow short visual bursts of 3+ related shots inside roughly 3.5s when the dialogue is listing, escalating, or reframing the idea.",
             "Do not cut on a fixed timer. Cut on phrase boundaries, semantic shifts, reactions, reveals, object changes, or a new visual metaphor.",
