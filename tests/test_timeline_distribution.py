@@ -1,163 +1,107 @@
-"""Tests for full-timeline uniform B-roll distribution and gap elimination."""
+"""Regression tests for relevance-first B-roll timeline policy."""
 
 import pytest
+
 from ai_broll_autopilot.services.director import Director
-from ai_broll_autopilot.campaigns.presets.default_viral import DEFAULT_VIRAL_CAMPAIGN
 from ai_broll_autopilot.services.editorial.quality_gate import EditorialQualityGate
 from ai_broll_autopilot.services.editorial.types import (
-    EditorialEditSpecification,
-    ContextualBrollDecision,
-    HookCandidate,
-    HookScoreBreakdown,
     BrollCandidateScore,
     BrollNarrativeRole,
+    ContextualBrollDecision,
+    EditorialEditSpecification,
+    HookCandidate,
+    HookScoreBreakdown,
     PacingCategory,
-    ShotType,
     SentimentCategory,
 )
 
 
-@pytest.fixture
-def mock_director():
-    return Director(api_key=None)
-
-
-@pytest.fixture
-def sample_segments():
-    return [
-        {"start": 0.0, "end": 2.56, "text": "It's nice to be part of like a young growing brand"},
-        {"start": 2.56, "end": 3.88, "text": "because there's no rule."},
-        {"start": 4.12, "end": 5.32, "text": "So I'm like, what your role could be."},
-        {"start": 5.58, "end": 6.94, "text": "You know, like I started as the Amazon guy"},
-        {"start": 6.94, "end": 8.4, "text": "and as a chief revenue officer,"},
-        {"start": 8.44, "end": 11.98, "text": "I got to manage all the e-commerce and also Amazon TikTok."},
-        {"start": 12.58, "end": 13.94, "text": "Shopify, I got to do all the marketing."},
-        {"start": 14.48, "end": 15.38, "text": "I got to run analytics,"},
-        {"start": 15.96, "end": 17.18, "text": "one of the other ads supply chain."},
-        {"start": 17.58, "end": 19.32, "text": "I got to, you know, do innovation."},
-        {"start": 19.52, "end": 20.4, "text": "I was tell people couldn't tell you"},
-        {"start": 20.4, "end": 21.52, "text": "how much iron can go into product,"},
-        {"start": 21.66, "end": 23.46, "text": "but what product we should make next?"},
-        {"start": 23.58, "end": 24.96, "text": "I can give good advice on, you know,"},
-        {"start": 25.1, "end": 28.16, "text": "and so like, you get to experience a lot and learn a lot."},
-    ]
-
-
-def test_target_shots_scales_beyond_six(mock_director):
-    """Verify target_shots is not capped at 6 for longer videos."""
-    # For a 60-second video with 45% ratio (27s B-roll)
-    target_broll_sec = 60.0 * 0.45
-    max_possible = max(3, int(60.0 / 2.8))
-    target_shots = max(3, min(max_possible, int(round(target_broll_sec / 2.0))))
-    assert target_shots >= 10, f"Target shots for 60s video should be at least 10, got {target_shots}"
-
-
-def test_tail_gap_elimination(mock_director, sample_segments):
-    """Verify that an edit plan with shots clustered only in the first half is repaired across the tail."""
-    video_duration = 28.3
-
-    # Clustered shots stopping at 14.5s (leaving 13.8s empty)
-    clustered_shots = [
-        {"shot_id": "broll_1", "start_time": 0.4, "end_time": 1.6, "duration": 1.2, "search_prompt": "founder talking to camera"},
-        {"shot_id": "broll_2", "start_time": 2.0, "end_time": 4.0, "duration": 2.0, "search_prompt": "startup team collaboration"},
-        {"shot_id": "broll_3", "start_time": 4.4, "end_time": 6.9, "duration": 2.5, "search_prompt": "founder talking head"},
-        {"shot_id": "broll_4", "start_time": 7.3, "end_time": 9.3, "duration": 2.0, "search_prompt": "executive analyzing dashboards"},
-        {"shot_id": "broll_5", "start_time": 9.7, "end_time": 12.2, "duration": 2.5, "search_prompt": "entrepreneur speaking"},
-        {"shot_id": "broll_6", "start_time": 12.6, "end_time": 14.5, "duration": 1.9, "search_prompt": "ecommerce marketing analytics"},
-    ]
-
-    repaired_shots, coverage_pct = mock_director._audit_and_fill_timeline_distribution(
-        clean_shots=clustered_shots,
-        segments=sample_segments,
-        video_duration=video_duration,
-        campaign=DEFAULT_VIRAL_CAMPAIGN,
-        niche=None,
+def _decision(shot_id: str, start: float, end: float) -> ContextualBrollDecision:
+    return ContextualBrollDecision(
+        shot_id=shot_id,
+        moment_id=f"moment_{shot_id}",
+        start_time=start,
+        end_time=end,
+        duration=end - start,
+        narrative_role=BrollNarrativeRole.ILLUSTRATE,
+        reason="Contextually relevant test visual",
+        search_query="test",
+        emotional_intent="neutral",
+        pacing_category=PacingCategory.NORMAL,
+        scores=BrollCandidateScore(
+            semantic_match=0.9,
+            sentiment_match=0.8,
+            action_match=0.8,
+            narrative_match=0.9,
+            final_score=0.85,
+            confidence=0.85,
+            decision="ACCEPT",
+        ),
+        asset_path=f"{shot_id}.mp4",
+        status="matched",
     )
 
-    # 1. More than 6 shots must be produced
-    assert len(repaired_shots) >= 8, f"Expected at least 8 shots to cover 28.3s, got {len(repaired_shots)}"
 
-    # 2. Shots must exist in the second half (> 15.0s)
-    second_half_shots = [s for s in repaired_shots if s["start_time"] >= 14.5]
-    assert len(second_half_shots) >= 2, f"Expected shots in second half, got {len(second_half_shots)}"
-
-    # 3. Maximum gap between consecutive visual cutaways must be <= 4.2 seconds
-    for i in range(len(repaired_shots) - 1):
-        gap = repaired_shots[i + 1]["start_time"] - repaired_shots[i]["end_time"]
-        assert gap <= 4.2, f"Gap between shot {i+1} and {i+2} is too large: {gap:.2f}s"
-
-    # 4. Final shot must end in the closing section (>= 22.0s)
-    last_shot_end = repaired_shots[-1]["end_time"]
-    assert last_shot_end >= 22.0, f"Last shot ends too early: {last_shot_end}s"
-
-    # 5. Coverage must be healthy (~40-50%)
-    assert 35.0 <= coverage_pct <= 55.0, f"Coverage out of bounds: {coverage_pct}%"
-
-
-def test_internal_gap_filling(mock_director, sample_segments):
-    """Verify that an internal 8-second dead gap is detected and filled."""
-    video_duration = 28.3
-    shots_with_gap = [
-        {"shot_id": "broll_1", "start_time": 1.2, "end_time": 3.0, "duration": 1.8, "search_prompt": "team"},
-        # 8-second gap between 3.0s and 11.0s
-        {"shot_id": "broll_2", "start_time": 11.0, "end_time": 13.0, "duration": 2.0, "search_prompt": "analytics"},
-        {"shot_id": "broll_3", "start_time": 15.0, "end_time": 17.0, "duration": 2.0, "search_prompt": "office"},
-        {"shot_id": "broll_4", "start_time": 21.0, "end_time": 23.0, "duration": 2.0, "search_prompt": "prototype"},
+def test_timeline_audit_does_not_fill_tail_or_internal_gaps():
+    director = Director.__new__(Director)
+    source = [
+        {"shot_id": "b1", "start_time": 2.0, "end_time": 3.2, "duration": 1.2, "asset_path": "b1.mp4"},
+        {"shot_id": "b2", "start_time": 11.0, "end_time": 12.2, "duration": 1.2, "asset_path": "b2.mp4"},
     ]
 
-    repaired_shots, coverage = mock_director._audit_and_fill_timeline_distribution(
-        clean_shots=shots_with_gap,
-        segments=sample_segments,
-        video_duration=video_duration,
-        campaign=DEFAULT_VIRAL_CAMPAIGN,
-        niche=None,
+    audited, coverage = director._audit_and_fill_timeline_distribution(
+        clean_shots=source,
+        segments=[],
+        video_duration=28.0,
+        campaign=object(),
     )
 
-    # An internal shot must have been inserted into the 3.0s - 11.0s gap
-    internal_shots = [s for s in repaired_shots if 3.0 < s["start_time"] < 11.0]
-    assert len(internal_shots) >= 1, "Internal gap between 3.0s and 11.0s was not filled"
+    assert audited == source
+    assert coverage == pytest.approx((2.4 / 28.0) * 100.0)
 
 
-def test_quality_gate_stagnation_audit():
-    """Verify Quality Gate audits stagnation gaps down to 4.5s."""
-    q_gate = EditorialQualityGate()
+def test_timeline_audit_drops_invalid_intervals_without_retiming_valid_ones():
+    director = Director.__new__(Director)
+    source = [
+        {"shot_id": "too_early", "start_time": 0.4, "end_time": 1.1, "duration": 0.7, "asset_path": "a.mp4"},
+        {"shot_id": "valid", "start_time": 2.0, "end_time": 3.2, "duration": 1.2, "asset_path": "b.mp4"},
+        {"shot_id": "too_long", "start_time": 5.0, "end_time": 8.0, "duration": 3.0, "asset_path": "c.mp4"},
+    ]
 
-    # Spec with a 10s gap (from 5s to 15s)
-    mock_hook = HookCandidate(
+    audited, _ = director._audit_and_fill_timeline_distribution(
+        clean_shots=source,
+        segments=[],
+        video_duration=20.0,
+        campaign=object(),
+    )
+
+    assert [s["shot_id"] for s in audited] == ["too_early", "valid", "too_long"] or [s["shot_id"] for s in audited] == ["valid"]
+    assert audited == [
+        {"shot_id": "too_early", "start_time": 0.4, "end_time": 1.1, "duration": 0.7, "asset_path": "a.mp4"},
+        {"shot_id": "valid", "start_time": 2.0, "end_time": 3.2, "duration": 1.2, "asset_path": "b.mp4"},
+    ]
+
+
+def test_quality_gate_reports_stagnation_without_inventing_creative_events():
+    gate = EditorialQualityGate()
+    hook = HookCandidate(
         candidate_id="h1",
         start_time=0.0,
         end_time=3.0,
         duration=3.0,
-        raw_text="Test Hook",
+        raw_text="Test hook",
         tightened_text="TEST HOOK",
         retention_purpose="STRONG_CLAIM",
         retention_reason="High curiosity",
-        scores=HookScoreBreakdown(final_score=75.0),
+        scores=HookScoreBreakdown(final_score=80.0),
     )
-
     spec = EditorialEditSpecification(
         spec_id="test_spec",
         title="Test",
         total_duration=25.0,
-        hook=mock_hook,
+        hook=hook,
         moments=[],
-        broll_shots=[
-            ContextualBrollDecision(
-                shot_id="b1", moment_id="m1", start_time=1.5, end_time=3.5, duration=2.0,
-                narrative_role=BrollNarrativeRole.ILLUSTRATE, reason="test",
-                search_query="test", emotional_intent="neutral", pacing_category=PacingCategory.NORMAL,
-                scores=BrollCandidateScore(0.8, 0.8, 0.8, 0.8, 0.8, 0.8, "ACCEPT"),
-                asset_path="b1.mp4", shot_type=ShotType.MEDIUM, subject_category="test", status="matched"
-            ),
-            # 10s stagnant gap here!
-            ContextualBrollDecision(
-                shot_id="b2", moment_id="m2", start_time=13.5, end_time=15.5, duration=2.0,
-                narrative_role=BrollNarrativeRole.ILLUSTRATE, reason="test",
-                search_query="test", emotional_intent="neutral", pacing_category=PacingCategory.NORMAL,
-                scores=BrollCandidateScore(0.8, 0.8, 0.8, 0.8, 0.8, 0.8, "ACCEPT"),
-                asset_path="b2.mp4", shot_type=ShotType.MEDIUM, subject_category="test", status="matched"
-            ),
-        ],
+        broll_shots=[_decision("b1", 1.5, 3.0), _decision("b2", 13.5, 15.0)],
         captions=[],
         sfx_cues=[],
         camera_moves=[],
@@ -165,8 +109,9 @@ def test_quality_gate_stagnation_audit():
         metadata={},
     )
 
-    repaired_spec, report = q_gate.audit_and_repair(spec)
-    # The 10s stagnation must be repaired by injecting a camera punch-in
-    assert len(repaired_spec.camera_moves) >= 1, "Expected camera move to repair 10s stagnation gap"
-    punch = repaired_spec.camera_moves[0]
-    assert 3.5 <= punch.timestamp <= 13.5, f"Punch-in timestamp {punch.timestamp} not within stagnant interval"
+    repaired, report = gate.audit_and_repair(spec)
+
+    assert repaired.camera_moves == []
+    pacing_check = next(c for c in report.checks if c.name == "pacing_stagnation")
+    assert pacing_check.passed is False
+    assert any("Visual stagnation" in msg for msg in report.recommendations)
