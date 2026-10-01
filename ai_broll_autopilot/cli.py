@@ -12,8 +12,8 @@ if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed optional failure: %s", exc)
 
 from rich.console import Console
 from rich.table import Table
@@ -599,3 +599,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+logger = logging.getLogger(__name__)
