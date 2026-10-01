@@ -109,14 +109,25 @@ class Director:
         target_broll_seconds = round(video_duration * target_broll_ratio, 1)
         target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
 
-        # The reference edit uses a handful of deliberate visual scenes rather than
-        # a constant stream of 0.5s cuts. Keep roughly one visual opportunity per
-        # 2.8s, while allowing a longer hero hold to carry the ending/payoff.
-        avg_cut_seconds = 2.8 if not getattr(style_profile, "reference_style", False) else 2.6
-        max_possible_shots = max(3, int(video_duration / avg_cut_seconds))
+        # The reference edit is denser than a normal podcast cut: it uses small
+        # visual bursts plus a few longer hero scenes. Give the Director enough
+        # shot slots to express those bursts without forcing equal spacing.
+        reference_mode = bool(getattr(style_profile, "reference_style", False))
+        avg_cut_seconds = 2.0 if reference_mode else 2.8
+        max_possible_shots = (
+            max(3, min(14, int(video_duration / avg_cut_seconds)))
+            if reference_mode
+            else max(3, int(video_duration / avg_cut_seconds))
+        )
         target_shots = max(
             3,
-            min(max_possible_shots, int(round(target_broll_seconds / (1.8 if getattr(style_profile, "reference_style", False) else 2.0))))
+            min(
+                max_possible_shots,
+                int(round(
+                    target_broll_seconds
+                    / (1.55 if reference_mode else 2.0)
+                )),
+            ),
         )
 
         # Partition video duration into 3 narrative acts for uniform timeline distribution
