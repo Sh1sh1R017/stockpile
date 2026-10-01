@@ -107,38 +107,10 @@ class BrollIntelligence:
         search_query = self._build_search_query(moment, narrative_role)
 
         if not available_assets:
-            variety_engine.record_placed_shot(
-                shot_id=f"shot_{moment.moment_id}",
-                shot_type=ShotType.MEDIUM,
-                subject_category=moment.semantic_topic or "editorial",
-                camera_movement="dynamic",
-                location="contextual",
-                semantic_theme=moment.semantic_topic,
+            logger.info(
+                f"Moment [{moment.moment_id}]: no candidate assets; retaining A-roll."
             )
-            return ContextualBrollDecision(
-                shot_id=f"broll_{moment.moment_id}",
-                moment_id=moment.moment_id,
-                start_time=shot_start,
-                end_time=shot_end,
-                duration=actual_duration,
-                narrative_role=narrative_role,
-                pacing_category=moment.pacing_requirement,
-                shot_type=ShotType.MEDIUM,
-                subject_category=moment.semantic_topic or "editorial",
-                search_query=search_query,
-                asset_path=None,
-                reason=reason,
-                emotional_intent=moment.sentiment.value if hasattr(moment.sentiment, "value") else str(moment.sentiment),
-                scores=BrollCandidateScore(
-                    semantic_match=0.85,
-                    sentiment_match=0.8,
-                    narrative_match=0.85,
-                    visual_quality=0.8,
-                    final_score=0.85,
-                    confidence=0.85,
-                    decision="ACCEPT",
-                ),
-            )
+            return None
 
         scored_candidates: List[Tuple[Dict[str, Any], BrollCandidateScore]] = []
         for asset in available_assets:
@@ -151,15 +123,31 @@ class BrollIntelligence:
             )
             scored_candidates.append((asset, score))
 
-        scored_candidates.sort(key=lambda x: x[1].final_score, reverse=True)
-        if not scored_candidates or not self._candidate_passes_gate(scored_candidates[0][1]):
-            best_score = scored_candidates[0][1].final_score if scored_candidates else 0.0
+        eligible_candidates = [
+            (asset, score)
+            for asset, score in scored_candidates
+            if self._candidate_passes_gate(score)
+            and (
+                asset.get("file_path")
+                or asset.get("asset_path")
+                or asset.get("path")
+            )
+        ]
+        if not eligible_candidates:
+            best_score = max(
+                (score.final_score for _, score in scored_candidates),
+                default=0.0,
+            )
             logger.info(
-                f"Moment [{moment.moment_id}]: best B-roll {best_score:.2f} failed relevance gate; retaining A-roll."
+                f"Moment [{moment.moment_id}]: no eligible B-roll candidate "
+                f"(best score {best_score:.2f}); retaining A-roll."
             )
             return None
 
-        best_asset, best_score = scored_candidates[0]
+        best_asset, best_score = max(
+            eligible_candidates,
+            key=lambda item: item[1].final_score,
+        )
         shot_type = self._infer_shot_type(best_asset)
         subject_category = best_asset.get("category", "general")
 
@@ -184,8 +172,8 @@ class BrollIntelligence:
             emotional_intent=f"Aligns with {moment.sentiment.value} emotional tone ({moment.emotional_intensity:.1f})",
             pacing_category=moment.pacing_requirement,
             scores=best_score,
-            asset_path=best_asset.get("file_path") or best_asset.get("asset_path"),
-            asset_name=Path(best_asset.get("file_path") or best_asset.get("asset_path") or "cutaway.mp4").name,
+            asset_path=best_asset.get("file_path") or best_asset.get("asset_path") or best_asset.get("path"),
+            asset_name=Path(best_asset.get("file_path") or best_asset.get("asset_path") or best_asset.get("path") or "cutaway.mp4").name,
             shot_type=shot_type,
             subject_category=subject_category,
             status="matched",
@@ -217,10 +205,14 @@ class BrollIntelligence:
         """Calculate contextual score; literal semantic fit dominates generic emotional resonance."""
         title = (asset.get("title") or asset.get("name") or "").lower()
         tags_raw = asset.get("tags") or []
-        tags_str = " ".join(tags_raw) if isinstance(tags_raw, list) else str(tags_raw)
-        prompt = (asset.get("prompt") or tags_str).lower()
+        if isinstance(tags_raw, str):
+            tags = [part.strip().lower() for part in re.split(r"[,;|]", tags_raw) if part.strip()]
+        else:
+            tags = [str(part).strip().lower() for part in tags_raw if part is not None and str(part).strip()]
+        tags_str = " ".join(tags)
+        prompt = str(asset.get("prompt") or "").lower()
         description = str(asset.get("description") or "").lower()
-        asset_text = f"{title} {prompt} {description}"
+        asset_text = f"{title} {tags_str} {prompt} {description}"
         moment_text = moment.text.lower()
 
         from ai_broll_autopilot.services.retrieval_engine import retrieval_engine
@@ -285,7 +277,8 @@ class BrollIntelligence:
         text_hits = sum(1 for term in self.TEXT_HEAVY_TERMS if term in asset_text)
         if text_heavy_flag:
             text_hits += 1
-        if text_hits and semantic_score < 0.78:
+        text_permission = bool(getattr(moment, "allows_text_heavy_broll", False))
+        if text_hits and not text_permission:
             quality_score *= 0.55
         if generic_hits and semantic_score < 0.72:
             quality_score *= 0.60
@@ -325,9 +318,9 @@ class BrollIntelligence:
         elif narrative_score < self.MIN_NARRATIVE_SCORE:
             decision = "RETAIN_A_ROLL"
             rejection_reason = "Visual does not clearly explain or reinforce the narrative beat"
-        elif text_hits and semantic_score < 0.78:
+        elif text_hits and not text_permission:
             decision = "RETAIN_A_ROLL"
-            rejection_reason = "Text-heavy/generic visual is not sufficiently tied to the spoken idea"
+            rejection_reason = "Text-heavy visual requires explicit editorial permission"
         elif generic_hits and semantic_score < 0.72:
             decision = "RETAIN_A_ROLL"
             rejection_reason = "Generic stock visual is too weakly related to the spoken idea"
