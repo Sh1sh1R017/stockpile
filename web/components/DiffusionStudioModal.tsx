@@ -60,7 +60,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
     if (!jobId) return;
     try {
       await fetch(
-        `http://127.0.0.1:8000/api/jobs/${encodeURIComponent(jobId)}/editorial-feedback`,
+        `/api/jobs/${encodeURIComponent(jobId)}/editorial-feedback`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -86,7 +86,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
     setCurrentTime(0);
     setIsPlaying(false);
 
-    fetch(`http://127.0.0.1:8000/api/jobs/${encodeURIComponent(jobId)}/diffusion-project`)
+    fetch(`/api/jobs/${encodeURIComponent(jobId)}/diffusion-project`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load Diffusion Studio composition`);
         return res.json();
