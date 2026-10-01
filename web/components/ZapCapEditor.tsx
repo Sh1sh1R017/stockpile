@@ -1093,7 +1093,7 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
                 <span>Download Master MP4</span>
               </a>
               <a
-                href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/openreel/project`}
+                href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/export/openreel`}
                 download={`${selectedJob.filename}.oreel`}
                 className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 border border-zinc-800"
               >
