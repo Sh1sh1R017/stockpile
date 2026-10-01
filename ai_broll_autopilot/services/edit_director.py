@@ -384,13 +384,11 @@ class EditDirectorService:
         }
 
         # -------------------------------------------------------------
-        # 8. Post-Render Visual QA Simulation
+        # 8. Post-Render Visual QA
         # -------------------------------------------------------------
-        from ai_broll_autopilot.services.visual_qa import visual_qa
-        qa_result = visual_qa.verify_rendered_video(
-            video_path=source_media.get("path", ""),
-            target_duration=clip_duration,
-        )
+        # Visual QA belongs after FFmpeg rendering. Planning-time QA on the raw
+        # source is both misleading and an unnecessary expensive probe.
+        qa_result = None
 
         plan = EditPlan(
             plan_id=plan_id,
@@ -414,7 +412,7 @@ class EditDirectorService:
             cadence_profile=cadence_profile,
             editorial_spec=spec.to_dict(),
             quality_report=quality_report.to_dict(),
-            visual_qa=qa_result.to_dict(),
+            visual_qa=None,
             review_items=[
                 {"type": "cut", "count": len(cuts_data)},
                 {"type": "shot", "count": len(shots_data)},
