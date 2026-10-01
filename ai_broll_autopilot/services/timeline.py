@@ -40,6 +40,7 @@ class TimelineEngine:
         reference_card_height_ratio: float = 0.574,
         reference_card_radius: int = 52,
         output_duration: float = None,
+        reference_focal_x: float = 0.5,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
         subject-aware typography and behind-subject captions, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
@@ -134,9 +135,11 @@ class TimelineEngine:
                 card_x = (self.width - card_w) // 2
                 card_y = (self.height - card_h) // 2
 
+                focal_x = max(0.0, min(1.0, float(reference_focal_x)))
+                crop_x = f"max(0,min(in_w-{card_w},(in_w-{card_w})*{focal_x:.4f}))"
                 reference_scale = (
                     f"scale={card_w}:{card_h}:force_original_aspect_ratio=increase,"
-                    f"crop={card_w}:{card_h},setsar=1,fps={self.fps},"
+                    f"crop={card_w}:{card_h}:{crop_x}:((in_h-{card_h})/2),setsar=1,fps={self.fps},"
                     f"eq=contrast=1.05:saturation=1.03:brightness=-0.01"
                 )
                 filters.append(f"[0:v]{reference_scale}[base_card]")
