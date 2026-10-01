@@ -96,9 +96,27 @@ class Matcher:
     ) -> Optional[Dict[str, Any]]:
         """Resolve a single B-roll shot concurrently."""
         shot_id = shot.get("shot_id", "shot")
-        prompt = shot.get("search_prompt") or shot.get("visceral_human_metaphor") or shot.get("emotional_core")
-        semantic_queries = shot.get("broll_search_queries") or shot.get("micro_prompts") or []
-        emotion = shot.get("emotion") or shot.get("emotional_core") or "neutral"
+        # Normalize the editorial intent once. Director currently emits
+        # search_prompt/micro_prompts, while newer plan producers may emit
+        # search_query/broll_search_queries. Never let the matcher erase it.
+        prompt = (
+            shot.get("search_prompt")
+            or shot.get("search_query")
+            or shot.get("visceral_human_metaphor")
+            or shot.get("emotional_core")
+            or shot.get("dialogue_trigger")
+            or shot.get("rationale")
+            or shot.get("dialogue_quote")
+        )
+        semantic_queries = (
+            shot.get("broll_search_queries")
+            or shot.get("search_queries")
+            or shot.get("micro_prompts")
+            or ([shot.get("search_query")] if shot.get("search_query") else [])
+        )
+        semantic_queries = [str(q).strip() for q in semantic_queries if str(q).strip()]
+        if prompt is not None:
+            prompt = str(prompt).strip()
         tone = shot.get("tone_of_voice") or "neutral"
         dialogue = shot.get("dialogue_quote") or ""
         evaluation_context = (
@@ -109,10 +127,37 @@ class Matcher:
             f"Dialogue: {dialogue}"
         )
         style = shot.get("style", "stockpile")
-        target_duration = shot.get("duration", 2.5)
+        target_duration = float(shot.get("duration", 2.5) or 2.5)
+        shot["search_query"] = semantic_queries[0] if semantic_queries else (prompt or "")
 
         logger.info(f"Resolving B-roll for [{shot_id}] ({target_duration}s): '{prompt}' (allow_memes={allow_memes})")
         asset_path = None
+
+        # A canonical asset selected upstream is authoritative. Verify it instead
+        # of throwing it away and doing a second, potentially unrelated search.
+        preselected_path = shot.get("asset_path")
+        if preselected_path and Path(preselected_path).exists():
+            if await self._asset_is_eligible(
+                str(preselected_path),
+                target_duration,
+                float(shot.get("speed") or 1.0),
+            ):
+                resolved = str(Path(preselected_path).resolve())
+                meta = await asyncio.to_thread(extract_media_metadata, Path(resolved))
+                shot["asset_path"] = resolved
+                shot["status"] = "matched"
+                shot["source_duration"] = float(meta.get("duration") or 0.0)
+                shot["width"] = int(meta.get("width") or 0)
+                shot["height"] = int(meta.get("height") or 0)
+                logger.info("Preserved preselected B-roll [%s]: %s", shot_id, resolved)
+                return shot
+            logger.warning("Preselected B-roll [%s] failed media eligibility; reacquiring from canonical intent.", shot_id)
+            shot.pop("asset_path", None)
+
+        if not prompt and not semantic_queries:
+            logger.warning("No usable B-roll intent for [%s]; preserving A-roll.", shot_id)
+            shot["status"] = "unmatched"
+            return None
 
         # 0. Check if shot is intentionally designated as a meme cutaway (only if allowed by niche/campaign)
         if not allow_memes:
@@ -159,21 +204,40 @@ class Matcher:
         # 1. Local-First: Search local cataloged B-Roll library
         try:
             from ai_broll_autopilot.services.broll_library import broll_library
-            local_query = semantic_queries[0] if semantic_queries else prompt
-            local_matches = broll_library.search_local(
-                query=local_query,
-                niche_id=niche_id,
-                min_duration=1.0,
-                limit=3
-            )
-            if local_matches:
-                chosen = local_matches[0]
+            local_queries = semantic_queries[:4] if semantic_queries else ([prompt] if prompt else [])
+            local_matches = []
+            seen_local_paths = set()
+            for local_query in local_queries:
+                matches = broll_library.search_local(
+                    query=local_query,
+                    niche_id=niche_id,
+                    min_duration=1.0,
+                    limit=4,
+                )
+                for match in matches:
+                    fp = str(Path(match["file_path"]).resolve())
+                    if fp not in seen_local_paths:
+                        seen_local_paths.add(fp)
+                        local_matches.append(match)
+
+            for chosen in local_matches:
                 matched_fp = Path(chosen["file_path"])
-                if matched_fp.exists():
-                    logger.info(f"Resolved [{shot_id}] from Local B-Roll Library: {matched_fp.name} ('{chosen.get('title')}' )")
-                    asset_path = str(matched_fp.resolve())
-                    if not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
-                        asset_path = None
+                if not matched_fp.exists():
+                    continue
+                candidate_path = str(matched_fp.resolve())
+                if await self._asset_is_eligible(
+                    candidate_path,
+                    target_duration,
+                    float(shot.get("speed") or 1.0),
+                ):
+                    logger.info(
+                        "Resolved [%s] from Local B-Roll Library: %s ('%s')",
+                        shot_id,
+                        matched_fp.name,
+                        chosen.get("title"),
+                    )
+                    asset_path = candidate_path
+                    break
         except Exception as le:
             logger.debug(f"Local B-roll library search error for [{shot_id}]: {le}")
 
