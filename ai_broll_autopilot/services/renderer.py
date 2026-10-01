@@ -162,6 +162,7 @@ class Renderer:
             reference_style=reference_style, reference_card_mask_idx=reference_card_mask_idx,
             reference_card_width_ratio=reference_card_width_ratio, reference_card_height_ratio=reference_card_height_ratio,
             reference_card_radius=reference_card_radius,
+            output_duration=float(edit_plan.get("target_duration") or 30.0),
         )
         base_dur = None
         try:
