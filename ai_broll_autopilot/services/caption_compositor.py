@@ -297,7 +297,7 @@ class CaptionCompositor:
             for start_idx in range(max(0, len(opening_events) - len(normalized_hook) + 1)):
                 candidate = opening_events[start_idx:start_idx + len(normalized_hook)]
                 candidate_words = [
-                    re.sub(r"[^ws]", "", ev.word.lower()).strip()
+                    re.sub(r"[^\w\s]", "", str(ev.word).lower()).strip()
                     for ev in candidate
                 ]
                 if candidate_words == normalized_hook:
@@ -624,7 +624,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 st = min(ev.start_time for ev in phrase_events)
                 et = max(ev.end_time for ev in phrase_events)
                 words = [
-                    (ev.word.strip().upper() if preset.uppercase else ev.word.strip())
+                    (
+                        re.sub(r"\s+", " ", str(ev.word).strip()).upper()
+                        if preset.uppercase
+                        else re.sub(r"\s+", " ", str(ev.word).strip())
+                    )
                     for ev in phrase_events
                 ]
                 if enable_emojis:
