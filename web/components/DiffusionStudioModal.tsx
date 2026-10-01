@@ -562,7 +562,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
                     </div>
 
                     <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800/80 font-mono text-[11px] text-zinc-200">
-                      "{editorialSpec?.hook?.tightened_text || "The moment that changed everything..."}"
+                      &quot;{editorialSpec?.hook?.tightened_text || "The moment that changed everything..."}&quot;
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 text-[10px]">
