@@ -14,12 +14,15 @@ from ai_broll_autopilot.services.watermark_scanner import watermark_scanner
 
 logger = logging.getLogger(__name__)
 
+_UNSET_API_KEY = object()
+
 
 class Reviewer:
     """Independent reviewer verifying rendered B-roll output and requesting repairs."""
 
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or Config.GEMINI_API_KEY
+    def __init__(self, api_key: Optional[str] = _UNSET_API_KEY, model_name: Optional[str] = None):
+        # Omitted api_key means "use configured key"; explicit None means offline.
+        self.api_key = Config.GEMINI_API_KEY if api_key is _UNSET_API_KEY else api_key
         self.model_name = model_name or Config.GEMINI_MODEL
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
