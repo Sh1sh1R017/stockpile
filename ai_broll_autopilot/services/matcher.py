@@ -170,8 +170,10 @@ class Matcher:
                 chosen = local_matches[0]
                 matched_fp = Path(chosen["file_path"])
                 if matched_fp.exists():
-                    logger.info(f"Resolved [{shot_id}] from Local B-Roll Library: {matched_fp.name} ('{chosen.get('title')}')")
+                    logger.info(f"Resolved [{shot_id}] from Local B-Roll Library: {matched_fp.name} ('{chosen.get('title')}' )")
                     asset_path = str(matched_fp.resolve())
+                    if not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
+                        asset_path = None
         except Exception as le:
             logger.debug(f"Local B-roll library search error for [{shot_id}]: {le}")
 
@@ -181,6 +183,8 @@ class Matcher:
             if cached and Path(cached["file_path"]).exists():
                 logger.info(f"Reusing cached B-roll asset for [{shot_id}]: {cached['file_path']}")
                 asset_path = cached["file_path"]
+                if not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
+                    asset_path = None
 
         # 3. Try Pexels royalty-free vertical footage if API key is provided
         if not asset_path and pexels_service.is_available():
