@@ -888,213 +888,80 @@ Return ONLY a valid JSON object matching this schema:
         campaign: Any,
         niche: Optional[Any] = None,
     ) -> Tuple[List[Dict[str, Any]], float]:
-        """Audit timeline for dead zones or front-loading and inject contextual shots across the full duration."""
-        if not clean_shots and not segments:
-            return clean_shots, 0.0
+        """Validate existing B-roll without inventing coverage or extending approved holds.
 
-        from ai_broll_autopilot.styles import style_registry
-        style_id = str(getattr(campaign, "editing_style", "") or "").strip()
-        style_profile = style_registry.get_style(style_id) if style_id else None
-        reference_style = bool(
-            getattr(style_profile, "reference_style", False)
-            or style_id in {"cinematic_social_editorial", "cinematic_editorial"}
-        )
+        This stage is deliberately non-creative. B-roll selection and timing are decided
+        upstream; this audit may discard invalid intervals, but it must never fill gaps,
+        expand a shot to hit a coverage quota, or rewrite an approved interval.
+        """
+        if not clean_shots:
+            return [], 0.0
 
-        min_speaker_gap = 0.05 if reference_style else 1.0
-        max_gap_allowed = (
-            float(getattr(style_profile, "max_continuous_aroll_seconds", 2.8))
-            if reference_style and style_profile
-            else 4.0
-        )
-        configured_max_clip = float(getattr(campaign, "max_cutaway_seconds", 2.5))
-        style_max_clip = (
-            float(getattr(style_profile, "hero_broll_max_duration", configured_max_clip))
-            if reference_style and style_profile
-            else configured_max_clip
-        )
-        max_clip = min(
-            8.0 if reference_style else float(Config.MAX_CLIP_DURATION_SECONDS),
-            style_max_clip,
-        )
-        min_clip = (
-            float(getattr(style_profile, "micro_broll_min_duration", 0.45))
-            if reference_style and style_profile
-            else 1.4
-        )
-        micro_max = (
-            float(getattr(style_profile, "micro_broll_max_duration", 0.85))
-            if reference_style and style_profile
-            else min_clip
-        )
-        standard_max = (
-            float(getattr(style_profile, "broll_max_duration", 2.2))
-            if reference_style and style_profile
-            else float(campaign.max_cutaway_seconds)
-        )
+        min_duration = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+        max_duration = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
 
-        # 1. Clean and space existing shots
-        sorted_shots = sorted(clean_shots, key=lambda s: float(s.get("start_time", 0.0)))
-        cleaned = []
+        cleaned: List[Dict[str, Any]] = []
         last_end = 0.0
 
-        for s in sorted_shots:
-            st = max(0.0 if reference_style else 0.8, float(s.get("start_time", 0.0)))
-            if st < last_end + min_speaker_gap:
-                st = last_end + min_speaker_gap
-            cadence_role = str(s.get("cadence_role", "")).lower().strip()
-            requested = float(s.get("duration", 1.5) or 1.5)
-            if reference_style and cadence_role == "micro":
-                local_min = min_clip
-                local_max = micro_max
-            elif reference_style and cadence_role == "hero":
-                local_min = float(getattr(style_profile, "hero_broll_min_duration", 3.0))
-                local_max = float(getattr(style_profile, "hero_broll_max_duration", 7.5))
-            else:
-                local_min = 0.85 if reference_style else min_clip
-                local_max = standard_max if reference_style else max_clip
-            dur = min(local_max, max(local_min, requested))
-            if st + dur > video_duration - 0.2:
-                dur = max(local_min, video_duration - 0.2 - st)
-            min_valid = min_clip if reference_style and cadence_role == "micro" else (0.8 if reference_style else 1.0)
-            if dur < min_valid or st >= video_duration - 0.5:
+        for source_shot in sorted(
+            clean_shots,
+            key=lambda shot: float(shot.get("start_time", 0.0)),
+        ):
+            shot = dict(source_shot)
+            try:
+                start = max(0.0, float(shot.get("start_time", 0.0)))
+                end = float(shot.get("end_time", start))
+                duration = float(shot.get("duration", end - start))
+            except (TypeError, ValueError):
+                logger.warning("Dropping malformed B-roll interval: %s", source_shot)
                 continue
-            et = round(st + dur, 2)
-            s["start_time"] = round(st, 2)
-            s["end_time"] = et
-            s["duration"] = round(et - st, 2)
-            cleaned.append(s)
-            last_end = et
 
-        # 2. Open on a meaningful visual in reference mode instead of forcing
-        # a talking-head intro.
-        opening_threshold = 1.0 if reference_style else 4.5
-        if segments and (not cleaned or cleaned[0]["start_time"] > opening_threshold):
-            early_segs = (
-                [s for s in segments if s.get("start", 0.0) >= 0.0 and s.get("end", 0.0) <= 4.2]
-                if reference_style
-                else [s for s in segments if s.get("start", 0.0) >= 0.8 and s.get("end", 0.0) <= 4.2]
-            )
-            if early_segs:
-                seg = early_segs[0]
-                ins_st = 0.0 if reference_style else 1.2
-                ins_dur = min(max_clip, max(min_clip, 2.0))
-                new_s = self._generate_contextual_shot_for_segment(seg, 1, ins_st, ins_dur, campaign, niche)
-                cleaned.insert(0, new_s)
-                if len(cleaned) > 1 and cleaned[1]["start_time"] < new_s["end_time"] + min_speaker_gap:
-                    cleaned[1]["start_time"] = round(new_s["end_time"] + min_speaker_gap, 2)
-                    cleaned[1]["end_time"] = round(cleaned[1]["start_time"] + cleaned[1]["duration"], 2)
-
-        # 3. Check internal gaps between consecutive shots
-        i = 0
-        while i < len(cleaned) - 1:
-            gap_start = cleaned[i]["end_time"]
-            gap_end = cleaned[i + 1]["start_time"]
-            gap = gap_end - gap_start
-            if gap > max_gap_allowed and segments:
-                matching = [s for s in segments if s.get("end", 0.0) > gap_start and s.get("start", 0.0) < gap_end]
-                if matching:
-                    seg = matching[0]
-                    ins_st = round(gap_start + min_speaker_gap, 2)
-                    preferred_insert = 0.55 if reference_style and gap <= 1.4 else 1.6
-                    ins_min = min_clip if reference_style else min_clip
-                    ins_max = micro_max if reference_style and gap <= 1.4 else (standard_max if reference_style else max_clip)
-                    ins_dur = min(ins_max, max(ins_min, preferred_insert, round(gap - (2 * min_speaker_gap), 2)))
-                    if ins_dur >= ins_min and ins_st + ins_dur <= gap_end - 0.2:
-                        new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, ins_st, ins_dur, campaign, niche)
-                        if reference_style and gap <= 1.4:
-                            new_s["cadence_role"] = "micro"
-                        cleaned.insert(i + 1, new_s)
-                        i += 1
-            i += 1
-
-        # 4. Check TAIL GAP (from last shot to video_duration) - GUARANTEES SECOND HALF IS COVERED
-        last_end = cleaned[-1]["end_time"] if cleaned else 1.0
-        tail_gap = video_duration - last_end
-        if tail_gap >= 3.8 and segments:
-            tail_segs = [s for s in segments if s.get("end", 0.0) > last_end + 0.2]
-            if tail_segs:
-                num_tail_shots = max(1, int(round((tail_gap - 0.8) / 3.4)))
-                step = max(1, len(tail_segs) // num_tail_shots)
-                cur_t = round(last_end + min_speaker_gap, 2)
-                for k in range(num_tail_shots):
-                    seg_idx = min(len(tail_segs) - 1, k * step)
-                    seg = tail_segs[seg_idx]
-                    rem_time = video_duration - 0.8 - cur_t
-                    if rem_time < min_clip:
-                        break
-                    shot_dur = min(max_clip, max(min_clip, round(min(2.0, rem_time), 2)))
-                    new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, cur_t, shot_dur, campaign, niche)
-                    cleaned.append(new_s)
-                    cur_t = round(new_s["end_time"] + min_speaker_gap, 2)
-
-        # 5. Re-sort & Re-index shots sequentially
-        cleaned = sorted(cleaned, key=lambda s: float(s.get("start_time", 0.0)))
-        for idx, s in enumerate(cleaned):
-            s["shot_id"] = f"broll_{idx+1}"
-
-        # 6. Reference coverage balancing: expand useful visuals before trimming.
-        style_ratio = getattr(style_profile, "broll_target_ratio", None)
-        target_ratio = (
-            float(style_ratio)
-            if reference_style and style_ratio is not None
-            else (niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio)
-        )
-        target_broll_sec = video_duration * target_ratio
-        total_broll = sum(float(s["duration"]) for s in cleaned)
-
-        if reference_style and cleaned and total_broll < target_broll_sec:
-            hero_cap = float(getattr(style_profile, "hero_broll_max_duration", 7.5))
-            standard_cap = float(getattr(style_profile, "broll_max_duration", 2.2))
-            for _ in range(4):
-                if total_broll >= target_broll_sec:
-                    break
-                changed = False
-                for idx, shot in enumerate(cleaned):
-                    start_time = float(shot["start_time"])
-                    current = float(shot["duration"])
-                    impact = float(shot.get("impact_score", 0.0) or 0.0)
-                    visual = float(shot.get("visualizability", 0.0) or 0.0)
-                    cap = hero_cap if impact >= 85 and visual >= 85 else standard_cap
-                    next_start = (
-                        float(cleaned[idx + 1]["start_time"])
-                        if idx + 1 < len(cleaned)
-                        else video_duration
-                    )
-                    room = max(0.0, next_start - start_time - 0.08)
-                    desired = min(
-                        cap,
-                        room,
-                        current + max(0.0, target_broll_sec - total_broll),
-                    )
-                    if desired > current + 0.05:
-                        shot["duration"] = round(desired, 2)
-                        shot["end_time"] = round(start_time + desired, 2)
-                        total_broll = sum(float(s["duration"]) for s in cleaned)
-                        changed = True
-                        if total_broll >= target_broll_sec:
-                            break
-                if not changed:
-                    break
-
-        if total_broll > target_broll_sec and cleaned:
-            scale = target_broll_sec / total_broll
-            for s in cleaned:
-                role = str(s.get("cadence_role", "standard")).lower().strip()
-                floor = (
-                    float(getattr(style_profile, "micro_broll_min_duration", 0.45))
-                    if reference_style and role == "micro"
-                    else float(getattr(style_profile, "hero_broll_min_duration", 3.0))
-                    if reference_style and role == "hero"
-                    else float(getattr(style_profile, "broll_min_duration", 0.8))
-                    if reference_style
-                    else 1.3
+            # The interval is authoritative. Do not derive a new end from a
+            # source-media duration, coverage target, or following gap.
+            interval_duration = end - start
+            if abs(interval_duration - duration) > 0.05:
+                logger.warning(
+                    "Dropping inconsistent B-roll interval [%s]: start=%.2f end=%.2f duration=%.2f",
+                    shot.get("shot_id", "unknown"), start, end, duration,
                 )
-                scaled_dur = round(max(floor, s["duration"] * scale), 2)
-                s["duration"] = scaled_dur
-                s["end_time"] = round(s["start_time"] + scaled_dur, 2)
-            total_broll = sum(s["duration"] for s in cleaned)
+                continue
 
-        cov_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0.0
-        logger.info(f"Timeline audit completed: {len(cleaned)} shots spanning 0s to {cleaned[-1]['end_time'] if cleaned else 0}s (coverage: {cov_pct}%)")
-        return cleaned, cov_pct
+            if start < last_end:
+                logger.warning(
+                    "Dropping overlapping B-roll interval [%s] rather than shifting it.",
+                    shot.get("shot_id", "unknown"),
+                )
+                continue
 
+            if start >= video_duration or duration <= 0:
+                continue
+
+            if duration < min_duration or duration > max_duration:
+                logger.warning(
+                    "Dropping out-of-contract B-roll interval [%s] (%.2fs); "
+                    "QA will not extend or clamp approved holds.",
+                    shot.get("shot_id", "unknown"), duration,
+                )
+                continue
+
+            end = min(end, video_duration)
+            duration = round(end - start, 2)
+            if duration < min_duration:
+                continue
+
+            shot["start_time"] = round(start, 2)
+            shot["end_time"] = round(end, 2)
+            shot["duration"] = duration
+            cleaned.append(shot)
+            last_end = end
+
+        for idx, shot in enumerate(cleaned, 1):
+            shot["shot_id"] = shot.get("shot_id") or f"broll_{idx}"
+
+        total_broll = round(sum(float(shot["duration"]) for shot in cleaned), 2)
+        coverage_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0.0
+        logger.info(
+            "Timeline audit completed without coverage padding: %d shots, %.2fs B-roll (%.1f%% coverage)",
+            len(cleaned), total_broll, coverage_pct,
+        )
+        return cleaned, coverage_pct
