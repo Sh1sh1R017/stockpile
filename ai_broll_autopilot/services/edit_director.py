@@ -460,8 +460,7 @@ AVOID: {', '.join(niche.avoid)}
 VISUAL STYLE: {style.name}
 DEFAULT B-ROLL PACING: {style.broll_cut_pacing} (~{default_shot_dur}s per shot)
 TOTAL CLIP DURATION: {clip_duration:.1f}s
-MAX B-ROLL COVERAGE: {max_broll_ratio*100:.0f}% (~{max_broll_seconds:.1f}s total B-roll)
-TARGET NUMBER OF B-ROLL SHOTS: {target_shots}
+B-ROLL POLICY: use B-roll only when it materially reinforces the spoken idea; coverage is telemetry, never a quota.
 STYLE GUIDELINES:
 {chr(10).join(f"- {g}" for g in style.editorial_guidelines)}
 
