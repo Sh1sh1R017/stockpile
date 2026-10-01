@@ -939,7 +939,6 @@ Return ONLY a valid JSON object matching this schema:
                 continue
 
             role = str(shot.get("cadence_role", "") or "").lower().strip()
-            explicit_role = role in {"micro", "standard", "hero"}
             if reference_mode:
                 if role == "micro":
                     role_min = float(getattr(reference_style, "micro_broll_min_duration", 0.45))
@@ -1018,7 +1017,7 @@ Return ONLY a valid JSON object matching this schema:
                     desired_end = allowable_end
 
                 if desired_end > current_end and (
-                    role != "micro" or explicit_role_for_shot(shot)
+                    role != "micro" or was_explicit_role
                 ):
                     shot["end_time"] = round(desired_end, 2)
                     shot["duration"] = round(desired_end - st, 2)
