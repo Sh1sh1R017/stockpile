@@ -859,17 +859,37 @@ Return ONLY a valid JSON object matching this schema:
         campaign: Any,
         niche: Optional[Any] = None,
     ) -> Tuple[List[Dict[str, Any]], float]:
-        """Validate existing B-roll without inventing coverage or extending approved holds.
+        """Validate approved B-roll intervals, with an explicit reference-style cadence pass.
 
-        This stage is deliberately non-creative. B-roll selection and timing are decided
-        upstream; this audit may discard invalid intervals, but it must never fill gaps,
-        expand a shot to hit a coverage quota, or rewrite an approved interval.
+        Normal campaigns are strict: invalid intervals are dropped and approved timing
+        is never expanded. The reference cinematic treatment additionally permits
+        short-to-standard normalization and adjacent whitespace expansion because its
+        visual language depends on sustained, meaning-driven cutaway coverage.
         """
-        if not clean_shots:
+        if not clean_shots or video_duration <= 0:
             return [], 0.0
 
-        min_duration = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
-        max_duration = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
+        reference_mode = str(getattr(campaign, "editing_style", "") or "").lower() in {
+            "cinematic_social_editorial",
+            "cinematic_editorial",
+        }
+        if reference_mode:
+            from ai_broll_autopilot.styles import style_registry
+            reference_style = style_registry.get_style("cinematic_social_editorial")
+        else:
+            reference_style = None
+
+        default_min = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+        default_max = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
+        min_duration = (
+            float(getattr(reference_style, "micro_broll_min_duration", 0.45))
+            if reference_mode else default_min
+        )
+        max_duration = (
+            float(getattr(reference_style, "hero_broll_max_duration", 7.5))
+            if reference_mode else default_max
+        )
+        min_start = 0.0 if reference_mode else 1.2
 
         cleaned: List[Dict[str, Any]] = []
         last_end = 0.0
@@ -887,8 +907,6 @@ Return ONLY a valid JSON object matching this schema:
                 logger.warning("Dropping malformed B-roll interval: %s", source_shot)
                 continue
 
-            # The interval is authoritative. Do not derive a new end from a
-            # source-media duration, coverage target, or following gap.
             interval_duration = end - start
             if abs(interval_duration - duration) > 0.05:
                 logger.warning(
@@ -904,26 +922,41 @@ Return ONLY a valid JSON object matching this schema:
                 )
                 continue
 
-            if start < 1.2:
+            if start < min_start:
                 logger.warning(
-                    "Dropping B-roll interval [%s] before the 1.2s opening-face boundary.",
-                    shot.get("shot_id", "unknown"),
+                    "Dropping B-roll interval [%s] before the %ss opening boundary.",
+                    shot.get("shot_id", "unknown"), min_start,
                 )
                 continue
 
             if start >= video_duration or end > video_duration or duration <= 0:
                 continue
 
-            if duration < min_duration or duration > max_duration:
+            role = str(shot.get("cadence_role", "") or "").lower().strip()
+            explicit_role = role in {"micro", "standard", "hero"}
+            if reference_mode:
+                if role == "micro":
+                    role_min = float(getattr(reference_style, "micro_broll_min_duration", 0.45))
+                    role_max = float(getattr(reference_style, "micro_broll_max_duration", 0.85))
+                elif role == "hero":
+                    role_min = float(getattr(reference_style, "hero_broll_min_duration", 3.0))
+                    role_max = float(getattr(reference_style, "hero_broll_max_duration", 7.5))
+                else:
+                    role_min = float(getattr(reference_style, "broll_min_duration", 0.65))
+                    role_max = float(getattr(reference_style, "broll_max_duration", 2.2))
+            else:
+                role_min = min_duration
+                role_max = max_duration
+
+            if duration < role_min or duration > role_max:
                 logger.warning(
-                    "Dropping out-of-contract B-roll interval [%s] (%.2fs); "
-                    "QA will not extend or clamp approved holds.",
-                    shot.get("shot_id", "unknown"), duration,
+                    "Dropping out-of-contract B-roll interval [%s] (%.2fs, role=%s).",
+                    shot.get("shot_id", "unknown"), duration, role or "standard",
                 )
                 continue
 
             duration = round(end - start, 2)
-            if duration < min_duration:
+            if duration < role_min:
                 continue
 
             shot["start_time"] = round(start, 2)
@@ -932,13 +965,67 @@ Return ONLY a valid JSON object matching this schema:
             cleaned.append(shot)
             last_end = end
 
-        for idx, shot in enumerate(cleaned, 1):
-            shot["shot_id"] = shot.get("shot_id") or f"broll_{idx}"
+        if reference_mode and cleaned:
+            # Reference treatment: fill only the whitespace already bounded by
+            # approved starts. The final implicit shot can become a hero hold.
+            cleaned.sort(key=lambda s: float(s.get("start_time", 0.0)))
+            for i, shot in enumerate(cleaned):
+                st = float(shot["start_time"])
+                current_end = float(shot["end_time"])
+                next_start = (
+                    float(cleaned[i + 1]["start_time"])
+                    if i + 1 < len(cleaned) else float(video_duration)
+                )
+                role = str(shot.get("cadence_role", "") or "").lower()
+                if not role:
+                    role = "standard"
+                    shot["cadence_role"] = role
+
+                if i == len(cleaned) - 1 and not explicit_role_for_shot(shot):
+                    role = "hero"
+                    shot["cadence_role"] = "hero"
+
+                role_max = (
+                    float(getattr(reference_style, "hero_broll_max_duration", 7.5))
+                    if role == "hero"
+                    else float(getattr(reference_style, "micro_broll_max_duration", 0.85))
+                    if role == "micro"
+                    else float(getattr(reference_style, "broll_max_duration", 2.2))
+                )
+                if role == "hero":
+                    role_min = float(getattr(reference_style, "hero_broll_min_duration", 3.0))
+                    desired_end = min(video_duration, st + max(role_min, current_end - st))
+                else:
+                    role_min = float(getattr(reference_style, "micro_broll_min_duration", 0.45)) if role == "micro" else float(getattr(reference_style, "broll_min_duration", 0.65))
+                    desired_end = current_end
+
+                allowable_end = min(video_duration, next_start, st + role_max)
+                if allowable_end <= current_end:
+                    continue
+
+                # Expand existing contextual holds into adjacent whitespace, but
+                # never cross another approved shot or invent a new interval.
+                if role == "hero":
+                    desired_end = min(allowable_end, max(current_end, st + role_min))
+                else:
+                    desired_end = allowable_end
+
+                if desired_end > current_end and (
+                    role != "micro" or explicit_role_for_shot(shot)
+                ):
+                    shot["end_time"] = round(desired_end, 2)
+                    shot["duration"] = round(desired_end - st, 2)
+                last_end = float(shot["end_time"])
 
         total_broll = sum(float(shot["duration"]) for shot in cleaned)
         coverage_pct = (total_broll / video_duration) * 100 if video_duration > 0 else 0.0
         logger.info(
-            "Timeline audit completed without coverage padding: %d shots, %.4fs B-roll (%.4f%% coverage)",
-            len(cleaned), total_broll, coverage_pct,
+            "Timeline audit completed: %d shots, %.4fs B-roll (%.4f%% coverage, reference=%s)",
+            len(cleaned), total_broll, coverage_pct, reference_mode,
         )
         return cleaned, coverage_pct
+
+
+def explicit_role_for_shot(shot: Dict[str, Any]) -> bool:
+    """Return whether cadence_role was explicitly supplied by the Director."""
+    return bool(str(shot.get("cadence_role", "") or "").lower().strip())
