@@ -279,6 +279,15 @@ class ContextualBrollDecision:
     shot_type: ShotType = ShotType.MEDIUM
     subject_category: str = "general"
     status: Literal["planned", "matched", "retained_a_roll", "rejected"] = "planned"
+    approved_start_time: Optional[float] = None
+    approved_end_time: Optional[float] = None
+    adjustment_log: List[Dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.approved_start_time is None:
+            self.approved_start_time = float(self.start_time)
+        if self.approved_end_time is None:
+            self.approved_end_time = float(self.end_time)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
