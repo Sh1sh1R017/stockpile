@@ -152,7 +152,7 @@ export const InsertCutawayModal: React.FC<InsertCutawayModalProps> = ({
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-fuchsia-500"
                 >
                   <option value="ishowspeed_shock">⚡ IShowSpeed (Screaming Shock)</option>
-                  <option value="moms_kinda_homeless">🥺 My Mom's Kinda Homeless (Speed Fortnite)</option>
+                  <option value="moms_kinda_homeless">🥺 My Mom&apos;s Kinda Homeless (Speed Fortnite)</option>
                   <option value="not_your_personal_pornstar">🤬 Not Your Personal Pornstar! (Meltdown)</option>
                   <option value="caseoh_rage">🎙️ CaseOh (Headset Mic Rage)</option>
                   <option value="jynxzi_freakout">🎮 Jynxzi (Controller Disbelief)</option>
