@@ -369,6 +369,7 @@ def test_reference_edit_cadence_controls():
 
 
 def test_reference_edit_preserves_micro_broll_under_one_second():
+    from ai_broll_autopilot.campaigns import campaign_registry
     from ai_broll_autopilot.services.director import Director
 
     campaign = campaign_registry.get_campaign("default")
