@@ -236,19 +236,26 @@ class Matcher:
                 asset_path = None
 
         if asset_path and Path(asset_path).exists():
-            shot["asset_path"] = str(Path(asset_path).resolve())
+            asset_path = str(Path(asset_path).resolve())
+            meta = await asyncio.to_thread(extract_media_metadata, Path(asset_path))
+            shot["asset_path"] = asset_path
             shot["status"] = "matched"
+            shot["source_duration"] = float(meta.get("duration") or 0.0)
+            shot["width"] = int(meta.get("width") or 0)
+            shot["height"] = int(meta.get("height") or 0)
 
-            # Index asset in database and local catalog
+            # Persist actual media metadata, never the requested editorial interval.
             self.db.save_broll_asset(
                 asset_id=f"{shot_id}_{Path(asset_path).stem}",
-                file_path=str(Path(asset_path).resolve()),
+                file_path=asset_path,
                 title=Path(asset_path).name,
                 source=style,
                 prompt=prompt,
-                duration=target_duration,
+                duration=shot["source_duration"],
                 score=8,
                 niche_id=niche_id or "generic",
+                width=shot["width"],
+                height=shot["height"],
             )
             return shot
         else:
