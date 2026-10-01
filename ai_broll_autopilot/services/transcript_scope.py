@@ -15,13 +15,13 @@ def scope_segments(segments, clip_in, clip_out):
                 continue
             words.append({
                 **word,
-                "start": round(max(0.0, ws), 3),
-                "end": round(min(duration, we), 3),
+                "start": max(0.0, ws),
+                "end": min(duration, we),
             })
         out.append({
             **seg,
-            "start": max(0.0, round(st - clip_in, 3)),
-            "end": min(duration, round(et - clip_in, 3)),
+            "start": max(0.0, st - clip_in),
+            "end": min(duration, et - clip_in),
             "text": (seg.get("text") or "").strip(),
             "words": words,
         })
