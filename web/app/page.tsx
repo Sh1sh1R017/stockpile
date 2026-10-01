@@ -1165,7 +1165,7 @@ export default function StudioDashboard() {
             <div className="space-y-1">
               <h3 className="text-base font-bold text-white">Delete Project?</h3>
               <p className="text-xs text-zinc-400">
-                Are you sure you want to permanently delete <strong className="text-zinc-200">"{jobToDelete.name}"</strong>? This will remove the rendered video, audio, and cutaways.
+                Are you sure you want to permanently delete <strong className="text-zinc-200">&quot;{jobToDelete.name}&quot;</strong>? This will remove the rendered video, audio, and cutaways.
               </p>
             </div>
             <div className="flex items-center gap-3 pt-2">
@@ -1619,7 +1619,7 @@ export default function StudioDashboard() {
               <Clock className="w-3.5 h-3.5 animate-spin" />
               Pipeline In Progress
             </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">Editing "{selectedJob.filename}"</h2>
+            <h2 className="text-xl font-bold text-white tracking-tight">Editing &quot;{selectedJob.filename}&quot;</h2>
             <p className="text-xs text-zinc-400">Processing stages: Whisper Speech Analysis $\to$ Emotional Director $\to$ Stockpile B-Roll $\to$ Composition</p>
           </div>
 
@@ -2045,7 +2045,7 @@ export default function StudioDashboard() {
                 <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
                 <h4 className="text-sm font-bold text-amber-200">No B-Roll Cutaways Overlayed</h4>
                 <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                  This run did not generate visual cutaways. Click "+ Process New Clip" above to upload a video, or select another project from the switcher.
+                  This run did not generate visual cutaways. Click &quot;+ Process New Clip&quot; above to upload a video, or select another project from the switcher.
                 </p>
               </div>
             )}
