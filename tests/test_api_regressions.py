@@ -65,7 +65,7 @@ def test_subtitle_engine_honors_custom_colors_and_y_position(tmp_path: Path) -> 
         subtitle_y_percent=84,
     )
     content = out.read_text(encoding="utf-8")
-    assert "84" not in content  # y-percent is converted to an ASS margin.
+    assert ",307,1" in content  # 84% from the top -> 16% bottom margin on a 1920px canvas.
     assert "&H00563412&" in content  # #123456 -> ASS BGR.
     assert "&H00EFCDAB&" in content  # #ABCDEF -> ASS BGR.
     assert ",2," in content  # bottom-center alignment for a lower caption position.
