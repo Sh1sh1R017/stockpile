@@ -64,6 +64,18 @@ def collect_plan_invariant_violations(
             for key in TIME_KEYS:
                 if key in item:
                     check_time(f"{collection_name}[{index}].{key}", item[key])
+            if "duration" in item:
+                try:
+                    item_duration = float(item["duration"])
+                    start_key = next(
+                        (key for key in ("start_time", "timestamp", "time", "start") if key in item),
+                        None,
+                    )
+                    if start_key is not None:
+                        end_value = float(item[start_key]) + item_duration
+                        check_time(f"{collection_name}[{index}].end_from_duration", end_value)
+                except (TypeError, ValueError):
+                    violations.append(f"{collection_name}[{index}].duration: non-numeric duration")
 
     audio = plan.get("audio_cues", plan.get("sfx_cues", []))
     audio_items = []
