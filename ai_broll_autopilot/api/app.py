@@ -1888,11 +1888,22 @@ async def upload_custom_shot_clip(job_id: str, shot_id: str, file: UploadFile = 
 
     work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
     work_dir.mkdir(parents=True, exist_ok=True)
-    raw_custom = work_dir / f"raw_custom_{shot_id}_{file.filename}"
-    out_file = work_dir / f"{shot_id}_custom.mp4"
+    original_name = Path(file.filename or "").name
+    allowed_extensions = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+    if not original_name or Path(original_name).suffix.lower() not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Unsupported video file type")
 
+    raw_custom = work_dir / f"raw_custom_{shot_id}_{original_name}"
+    out_file = work_dir / f"{shot_id}_custom.mp4"
+    max_bytes = int(getattr(Config, "MAX_UPLOAD_SIZE_MB", 500)) * 1024 * 1024
+    written = 0
     with open(raw_custom, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        while chunk := await file.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                raw_custom.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Uploaded video exceeds size limit")
+            buffer.write(chunk)
 
     target_dur = float(target_shot.get("duration") or (target_shot.get("end_time", 3.0) - target_shot.get("start_time", 0.0)))
     cmd = [
