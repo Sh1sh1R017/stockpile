@@ -49,7 +49,7 @@ class Director:
 
         logger.info(
             f"AI Director analyzing {len(segments)} segments for video length {video_duration:.1f}s "
-            f"under campaign '{campaign.id}' (Target B-Roll: {campaign.max_broll_ratio*100:.0f}%)"
+            f"under campaign '{campaign.id}' (relevance-first visual planning)"
         )
 
         # Format segments for Director prompt
@@ -61,7 +61,6 @@ class Director:
         from ai_broll_autopilot.services.learning import feedback_engine
         learned_rules = feedback_engine.get_learned_instructions(full_transcript)
 
-        import math
         chosen_hook = custom_hook
 
         # Resolve active niche profile
@@ -215,13 +214,13 @@ MANDATORY DIRECTING OBJECTIVES:
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT (DIVIDED INTO 3 ACTS):
-=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — At most {quota_act1} optional visual opportunity slot(s) ===
+=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — Optional context window ===
 {act1_txt}
 
-=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — At most {quota_act2} optional visual opportunity slot(s) ===
+=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — Optional context window ===
 {act2_txt}
 
-=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — At most {quota_act3} optional visual opportunity slot(s) ===
+=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — Optional context window ===
 {act3_txt}
 
 {learned_rules}
