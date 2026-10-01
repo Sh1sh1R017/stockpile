@@ -62,7 +62,7 @@ class Renderer:
             logger.debug("Suppressed optional failure: %s", exc)
         return []
 
-    async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str, ass_subtitles_path: str = None, bgm_path: str = None, bgm_volume: float = 0.15, ducking_enabled: bool = True, upscale_hdr: bool = False, hdr_scale: float = 1.0, hdr_tone: str = "vivid", watermark_path: str = None, watermark_position: str = "bottom_safe", watermark_scale: float = 0.28, preserve_dialogue_only: bool = False, frame_overlay_path: str = None, viewport: tuple = None, behind_subject_ass_path: str = None, subject_matte_path: str = None, layout_mode: str = None) -> str:
+    async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str, ass_subtitles_path: str = None, bgm_path: str = None, bgm_volume: float = 0.15, ducking_enabled: bool = True, upscale_hdr: bool = False, hdr_scale: float = 1.0, hdr_tone: str = "vivid", watermark_path: str = None, watermark_position: str = "bottom_safe", watermark_scale: float = 0.28, preserve_dialogue_only: bool = False, frame_overlay_path: str = None, viewport: tuple = None, behind_subject_ass_path: str = None, subject_matte_path: str = None, layout_mode: str = None, source_start_time: float = 0.0, render_duration: float = None) -> str:
         """Render composite video. Optional fast mode uses a 720x1280 working canvas."""
         base_p = Path(base_video)
         out_p = Path(output_path)
@@ -121,7 +121,10 @@ class Renderer:
                         logger.warning(f"Subject isolation matte skipped: {e}. Falling back to normal compositing.")
 
         decode_args = self._cuda_decode_args() if fast_render else []
-        cmd = ["ffmpeg", "-y", *decode_args, "-i", str(base_p)]
+        cmd = ["ffmpeg", "-y", *decode_args]
+        if source_start_time and float(source_start_time) > 0:
+            cmd.extend(["-ss", f"{float(source_start_time):.3f}"])
+        cmd.extend(["-i", str(base_p)])
         for shot in shots:
             cmd.extend(["-stream_loop", "-1", "-i", str(shot["asset_path"])])
         layout_mode = layout_mode or edit_plan.get("layout_mode") or render_settings.get("layout_mode") or "single"
@@ -183,7 +186,8 @@ class Renderer:
         cmd.extend(["-filter_complex", filtergraph, "-map", f"[{final_video}]", "-map", f"[{final_audio}]"])
         cmd.extend(self._encoder_args())
         cmd.extend(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k" if fast_render else "192k", "-ar", "48000", "-ac", "2", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart"])
-        cmd.extend(["-t", f"{base_dur:.3f}"] if base_dur and base_dur > 0 else ["-shortest"])
+        effective_render_duration = float(render_duration) if render_duration is not None else base_dur
+        cmd.extend(["-t", f"{effective_render_duration:.3f}"] if effective_render_duration and effective_render_duration > 0 else ["-shortest"])
         cmd.extend(["-v", "warning", str(out_p)])
         encoder = "NVENC" if "h264_nvenc" in self._encoder_args() else "x264"
         logger.info(f"Executing FFmpeg render ({render_width}x{render_height}, fast={fast_render}, {len(shots)} overlays, {len(audio_sfx_list)} SFX, decoder={'NVDEC' if decode_args else 'software'}, encoder={encoder})")
