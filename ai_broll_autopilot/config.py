@@ -48,10 +48,9 @@ class Config:
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
 
-    # Fast render path. A 720x1280 working master cuts the pixel workload to ~44%
-    # of 1080x1920 while preserving the same 9:16 composition. It is opt-in so
-    # existing high-resolution exports remain unchanged.
-    FAST_RENDER_ENABLED: bool = os.getenv("STOCKPILE_FAST_RENDER", "0").strip().lower() not in {"0", "false", "off"}
+    # Fast 9:16 render profile for low-VRAM/local machines. Default ON for
+    # responsive Stockpile renders; set STOCKPILE_FAST_RENDER=0 for 1080x1920.
+    FAST_RENDER_ENABLED: bool = os.getenv("STOCKPILE_FAST_RENDER", "1").strip().lower() not in {"0", "false", "off"}
     FAST_RENDER_WIDTH: int = int(os.getenv("STOCKPILE_FAST_RENDER_WIDTH", "720"))
     FAST_RENDER_HEIGHT: int = int(os.getenv("STOCKPILE_FAST_RENDER_HEIGHT", "1280"))
 
