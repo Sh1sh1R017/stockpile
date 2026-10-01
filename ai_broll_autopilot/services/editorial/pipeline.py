@@ -181,7 +181,7 @@ class EditorialIntelligencePipeline:
                 captions.append(
                     EditorialCaptionSpec(
                         caption_id=f"cap_stat_{m.moment_id}",
-                        text=f"{m.entities[0].upper()} IMPACT",
+                        text=m.text.strip()[:80],
                         start_time=round(m.start_time + 0.2, 2),
                         duration=1.8,
                         position="center",
