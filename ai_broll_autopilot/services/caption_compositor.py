@@ -328,8 +328,8 @@ class CaptionCompositor:
                     ev.fill_color = (custom_colors or {}).get("second", "#FFE600")
                     ev.accent_color = (custom_colors or {}).get("second", "#FFE600")
                     ev.font_size_scale = max(ev.font_size_scale, 1.22)
-                    if behind_subject_enabled:
-                        ev.layer = LayerMode.BEHIND_SUBJECT
+                    # Preserve the layer explicitly provided by the EditPlan.
+                    # Only a complete contiguous hook phrase is auto-promoted.
                     remaining.remove(clean_w)
 
             if edit_plan is not None and any(
