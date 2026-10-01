@@ -50,8 +50,8 @@ DEFAULT_VIRAL_CAMPAIGN = CampaignConfig(
 
     rules_checklist=[
         "Open on the strongest visual beat; do not require a clean A-roll intro.",
-        "Target high visual coverage so the short feels like a cinematic story montage rather than a talking-head clip with occasional filler.",
-        "Mix 0.8–2.2s cutaways with occasional 3–8s hero visuals when one shot carries the narrative payoff.",
+        "Use relevant cutaways to create visual progression; do not treat B-roll coverage as a quota or add filler visuals.",
+        "Mix concise 0.65–1.8s cutaways; let the spoken A-roll carry sustained narrative beats instead of creating long B-roll holds.",
         "Use literal archival/documentary/cinematic visuals that match the spoken idea, tone, and consequence.",
         "Use large sentence-aware center captions, normally 2–4 words visible at a time, with restrained pale-green emphasis.",
         "Avoid generic meme filler, neon effects, constant zooms, flashy transitions, and automatic whoosh-on-every-cut behavior.",

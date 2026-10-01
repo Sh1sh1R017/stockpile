@@ -211,6 +211,7 @@ class EditorialMoment:
     recommended_duration: float = 3.5
     visual_processing_load: float = 0.5
     energy_level: float = 0.5        # 0.0 to 1.0
+    allows_text_heavy_broll: bool = False
     edit_intent: Optional[EditIntent] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -233,6 +234,7 @@ class EditorialMoment:
             "recommended_duration": round(self.recommended_duration, 2),
             "visual_processing_load": round(self.visual_processing_load, 2),
             "energy_level": round(self.energy_level, 2),
+            "allows_text_heavy_broll": self.allows_text_heavy_broll,
             "edit_intent": self.edit_intent.to_dict() if self.edit_intent else None,
         }
 
@@ -277,6 +279,15 @@ class ContextualBrollDecision:
     shot_type: ShotType = ShotType.MEDIUM
     subject_category: str = "general"
     status: Literal["planned", "matched", "retained_a_roll", "rejected"] = "planned"
+    approved_start_time: Optional[float] = None
+    approved_end_time: Optional[float] = None
+    adjustment_log: List[Dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.approved_start_time is None:
+            self.approved_start_time = float(self.start_time)
+        if self.approved_end_time is None:
+            self.approved_end_time = float(self.end_time)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -294,8 +305,15 @@ class ContextualBrollDecision:
             "subject_category": self.subject_category,
             "confidence": round(self.scores.confidence, 2),
             "final_score": round(self.scores.final_score, 2),
+            "semantic_match": round(self.scores.semantic_match, 2),
+            "narrative_match": round(self.scores.narrative_match, 2),
+            "decision": self.scores.decision,
+            "rejection_reason": self.scores.rejection_reason,
             "status": self.status,
             "asset_path": self.asset_path,
+            "approved_start_time": round(float(self.approved_start_time), 3) if self.approved_start_time is not None else None,
+            "approved_end_time": round(float(self.approved_end_time), 3) if self.approved_end_time is not None else None,
+            "adjustment_log": list(self.adjustment_log),
         }
 
 

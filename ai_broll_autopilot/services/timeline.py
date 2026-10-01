@@ -39,6 +39,8 @@ class TimelineEngine:
         reference_card_width_ratio: float = 0.944,
         reference_card_height_ratio: float = 0.574,
         reference_card_radius: int = 52,
+        output_duration: float = None,
+        reference_focal_x: float = 0.5,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
         subject-aware typography and behind-subject captions, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
@@ -51,8 +53,15 @@ class TimelineEngine:
         active_broll_intervals = []
 
         reference_mask_labels = []
+        active_shot_indices = [
+            int(shot.get("_input_idx", i))
+            for i, shot in enumerate(shots, start=1)
+            if shot.get("asset_path")
+        ]
         if reference_style and reference_card_mask_idx is not None:
-            reference_mask_labels = [f"ref_mask_{i}" for i in range(len(shots) + 1)]
+            reference_mask_labels = ["ref_mask_0"] + [
+                f"ref_mask_{i}" for i in active_shot_indices
+            ]
             filters.append(
                 f"[{reference_card_mask_idx}:v]fps={self.fps},format=gray,"
                 f"split={len(reference_mask_labels)}"
@@ -89,7 +98,8 @@ class TimelineEngine:
                 end_t = float(shot["end_time"])
                 active_broll_intervals.append((start_t, end_t))
                 speed = float(shot.get("speed") or 1.0)
-                broll_stream = f"[{idx}:v]"
+                input_idx = int(shot.get("_input_idx", idx))
+                broll_stream = f"[{input_idx}:v]"
                 scaled_broll = f"broll_after_{idx}"
                 next_after = f"after_layer_{idx}"
                 filters.append(
@@ -125,15 +135,17 @@ class TimelineEngine:
                 card_x = (self.width - card_w) // 2
                 card_y = (self.height - card_h) // 2
 
+                focal_x = max(0.0, min(1.0, float(reference_focal_x)))
+                crop_x = f"max(0,min(in_w-{card_w},(in_w-{card_w})*{focal_x:.4f}))"
                 reference_scale = (
                     f"scale={card_w}:{card_h}:force_original_aspect_ratio=increase,"
-                    f"crop={card_w}:{card_h},setsar=1,fps={self.fps},"
+                    f"crop={card_w}:{card_h}:{crop_x}:((in_h-{card_h})/2),setsar=1,fps={self.fps},"
                     f"eq=contrast=1.05:saturation=1.03:brightness=-0.01"
                 )
                 filters.append(f"[0:v]{reference_scale}[base_card]")
                 filters.append("[base_card][ref_mask_0]alphamerge[base_card_rounded]")
                 filters.append(
-                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d=300[reference_canvas]"
+                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d={max(1.0, float(output_duration or 30.0)):.3f}[reference_canvas]"
                 )
                 filters.append(
                     f"[reference_canvas][base_card_rounded]overlay={card_x}:{card_y}:eof_action=pass[base]"
@@ -162,7 +174,15 @@ class TimelineEngine:
                 current_layer = "base"
 
             # If subject matte compositing is enabled, split base into background and subject foreground source
-            if subject_matte_stream_idx is not None and not reference_style:
+            uses_subject_source = (
+                subject_matte_stream_idx is not None
+                and not reference_style
+                and (
+                    (behind_subject_text and behind_subject_text.get("text") and not behind_subject_ass_path)
+                    or (behind_subject_ass_path and __import__("os").path.exists(behind_subject_ass_path))
+                )
+            )
+            if uses_subject_source:
                 filters.append("[base]split=2[base_bg][subject_src]")
                 current_layer = "base_bg"
 
@@ -170,7 +190,14 @@ class TimelineEngine:
         # 1b. Backward-Compatible Subject-Aware Layered Text Overlay
         # -------------------------------------------------------------
         if behind_subject_text and behind_subject_text.get("text") and not behind_subject_ass_path:
-            raw_text = behind_subject_text.get("text", "").replace("'", "")
+            raw_text = (
+                str(behind_subject_text.get("text", ""))
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace(":", "\\:")
+                .replace("%", "\\%")
+                .replace(",", "\\,")
+            )
             t_start = float(behind_subject_text.get("start_time", 0.5))
             t_dur = float(behind_subject_text.get("duration", 2.5))
             t_end = t_start + t_dur
@@ -180,8 +207,13 @@ class TimelineEngine:
             if font_color.startswith("#"):
                 font_color = "0x" + font_color[1:]
 
+            from ai_broll_autopilot.config import Config
+            font_path = str(getattr(Config, "FONT_PATH", "") or "")
+            if font_path:
+                font_path = font_path.replace("\\", "\\\\").replace(":", "\\:")
+            fontfile_opt = f":fontfile='{font_path}'" if font_path else ""
             drawtext_flt = (
-                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}:"
+                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}{fontfile_opt}:"
                 f"bordercolor=black:borderw=5:x=(w-text_w)/2:y={int(self.height * pos_y)}:"
                 f"enable='between(t,{t_start:.2f},{t_end:.2f})'"
             )
@@ -209,8 +241,9 @@ class TimelineEngine:
                 if not shot.get("asset_path"):
                     continue
 
-                broll_stream = f"[{idx}:v]"
-                scaled_broll = f"broll_{idx}"
+                input_idx = int(shot.get("_input_idx", idx))
+                broll_stream = f"[{input_idx}:v]"
+                scaled_broll = f"broll_{input_idx}"
                 next_layer = f"layer_{idx}"
 
                 start_t = float(shot["start_time"])
@@ -232,13 +265,19 @@ class TimelineEngine:
                     type_in = "cut"
 
                 # Snappy fast-paced transitions (0.18s max)
-                dur_in = min(0.20, trans.get("duration_in", 0.18))
-                dur_out = min(0.20, trans.get("duration_out", 0.18))
+                dur_in = max(0.0, min(0.20, float(trans.get("duration_in", 0.18) or 0.0)))
+                dur_out = max(0.0, min(0.20, float(trans.get("duration_out", 0.18) or 0.0)))
+                if type_in in {"slide_left", "slide_right"} and dur_in <= 0.0:
+                    type_in = "cut"
+                if type_in != "cut":
+                    dur_in = max(0.001, dur_in)
+                if type_in == "dissolve":
+                    dur_out = max(0.001, dur_out)
 
                 # Apply transition effects with high-velocity speed acceleration
                 if reference_style:
-                    reference_card_label = f"broll_ref_card_{idx}"
-                    mask_label = reference_mask_labels[idx] if idx < len(reference_mask_labels) else None
+                    reference_card_label = f"broll_ref_card_{input_idx}"
+                    mask_label = f"ref_mask_{input_idx}" if input_idx in active_shot_indices else None
                     filters.append(
                         f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
                         f"{scale_and_pad},setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
@@ -392,8 +431,13 @@ class TimelineEngine:
         # 4. Multi-Track Audio Mixing (Dialogue + SFX + BGM Ducking)
         # -------------------------------------------------------------
         final_audio_layer = "final_a"
+        filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[base_a_raw]")
+        need_ducking = bgm_stream_idx is not None and ducking_enabled
+        if need_ducking:
+            filters.append("[base_a_raw]asplit=2[base_a][base_a_sc]")
+        else:
+            filters.append("[base_a_raw]anull[base_a]")
         mix_streams = ["[base_a]"]
-        filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[base_a]")
 
         # 4a. Transition stingers & Foley SFX
         if audio_sfx_list:
@@ -437,7 +481,7 @@ class TimelineEngine:
                     f"volume={vol_val:.2f}[bgm_pre]"
                 )
                 filters.append(
-                    f"[bgm_pre][base_a]sidechaincompress=threshold=0.07:ratio=5:attack=40:release=350[bgm_ducked]"
+                    f"[bgm_pre][base_a_sc]sidechaincompress=threshold=0.07:ratio=5:attack=40:release=350[bgm_ducked]"
                 )
                 mix_streams.append("[bgm_ducked]")
             else:

@@ -12,3 +12,9 @@ fastapi
 uvicorn
 python-multipart
 httpx
+requests
+ffmpeg-python
+numpy
+Pillow
+opencv-python-headless
+hypothesis

@@ -11,6 +11,8 @@ from ai_broll_autopilot.config import Config
 
 logger = logging.getLogger(__name__)
 
+_UNSET_API_KEY = object()
+
 
 def clean_json_string(text: str) -> str:
     """Clean markdown markers and trailing noise from model responses."""
@@ -27,10 +29,11 @@ def clean_json_string(text: str) -> str:
 class Director:
     """Creative Director engine using Gemini to plan visual B-roll sequences."""
 
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or Config.GEMINI_API_KEY
+    def __init__(self, api_key: Optional[str] = _UNSET_API_KEY, model_name: Optional[str] = None):
+        # Omitted api_key means "use configured key"; explicit None means offline.
+        self.api_key = Config.GEMINI_API_KEY if api_key is _UNSET_API_KEY else api_key
         self.model_name = model_name or Config.GEMINI_MODEL
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
     async def create_edit_plan(
         self,
@@ -47,7 +50,7 @@ class Director:
 
         logger.info(
             f"AI Director analyzing {len(segments)} segments for video length {video_duration:.1f}s "
-            f"under campaign '{campaign.id}' (Target B-Roll: {campaign.max_broll_ratio*100:.0f}%)"
+            f"under campaign '{campaign.id}' (relevance-first visual planning)"
         )
 
         # Format segments for Director prompt
@@ -59,7 +62,6 @@ class Director:
         from ai_broll_autopilot.services.learning import feedback_engine
         learned_rules = feedback_engine.get_learned_instructions(full_transcript)
 
-        import math
         chosen_hook = custom_hook
 
         # Resolve active niche profile
@@ -97,34 +99,23 @@ class Director:
         )
         style_profile = style_registry.get_style(style_id)
 
-        # Target calculations: a reference style can intentionally override the
-        # generic niche's conservative B-roll ratio.
-        style_broll_ratio = getattr(style_profile, "broll_target_ratio", None)
-        target_broll_ratio = (
-            float(style_broll_ratio)
-            if style_broll_ratio is not None
-            else (niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio)
+        # Relevance-first planning: visual coverage is telemetry, not a quota.
+        # Give the Director a bounded opportunity budget without requiring all slots
+        # to be used. Each slot must still earn its place semantically.
+        reference_mode = bool(getattr(style_profile, "reference_style", False))
+        max_visual_slots = (
+            max(2, min(14, int(video_duration / (1.45 if reference_mode else 2.0))))
+            if video_duration > 0
+            else 0
         )
-
-        target_broll_seconds = round(video_duration * target_broll_ratio, 1)
-        target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-
-        # The reference edit uses a handful of deliberate visual scenes rather than
-        # a constant stream of 0.5s cuts. Keep roughly one visual opportunity per
-        # 2.8s, while allowing a longer hero hold to carry the ending/payoff.
-        avg_cut_seconds = 2.8 if not getattr(style_profile, "reference_style", False) else 2.6
-        max_possible_shots = max(3, int(video_duration / avg_cut_seconds))
-        target_shots = max(
-            3,
-            min(max_possible_shots, int(round(target_broll_seconds / (1.8 if getattr(style_profile, "reference_style", False) else 2.0))))
-        )
+        max_visual_slots = min(max_visual_slots, len(segments)) if segments else 0
 
         # Partition video duration into 3 narrative acts for uniform timeline distribution
         t_act1 = round(video_duration * 0.33, 1)
         t_act2 = round(video_duration * 0.66, 1)
-        quota_act1 = max(1, target_shots // 3)
-        quota_act2 = max(1, target_shots // 3)
-        quota_act3 = max(1, target_shots - quota_act1 - quota_act2)
+        quota_act1 = max(0, max_visual_slots // 3)
+        quota_act2 = max(0, max_visual_slots // 3)
+        quota_act3 = max(0, max_visual_slots - quota_act1 - quota_act2)
 
         # Segment grouping by act for explicit LLM awareness
         act1_segs = []
@@ -176,16 +167,23 @@ RELEVANT VISUAL THEMES: {niche_keywords_hint}
 MANDATORY DIRECTING OBJECTIVES:
 1. RHYTHMIC EDITING, NOT A MECHANICAL GRID:
    - Total Video Duration: {video_duration:.2f} seconds.
-   - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
-   - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
-   - Generate EXACTLY {target_shots} contextual cutaways, but do NOT force equal spacing.
+   - B-ROLL COVERAGE IS NOT A TARGET. There is no required percentage or minimum number of cutaways.
+   - You may use up to {max_visual_slots} contextual cutaways only when each one materially reinforces the spoken idea.
+   - Do NOT fill unused visual slots and do NOT force equal spacing.
    - Build the sequence around the speech: setup -> literal context -> reaction/consequence -> narrative hold -> payoff.
-   - For the reference treatment, favor 0.8-2.2s micro cutaways and permit occasional 3-8s hero holds when one visual can carry a whole thought or payoff.
-   - Do not manufacture lots of tiny cuts just to hit a shot count.
-   - When the reference treatment is active, the first visual can be B-roll immediately; a mandatory A-roll intro is NOT required.
-   - Keep the speaker visible only where it strengthens authenticity, timing, or an emotional beat.
-   - Avoid large digital zooms; use only restrained emphasis around important words.
-   - Do not fire an SFX on every cut. Use sound accents for meaningful transitions/reveals only.
+   - REFERENCE CADENCE:
+     • MICRO burst: 0.45-0.85s. Use for a short phrase, list, escalation, object swap, reaction, or rapid visual punctuation.
+     • STANDARD hold: 0.90-2.20s. Use for the main contextual idea.
+     • HERO moments are still short: use the same 0.65-1.8s render contract; create emphasis through a stronger visual, not a long hold.
+     • A reference-style short should usually contain 2-4 micro/standard visual changes inside a larger semantic beat, then return to speaker footage.
+   - Cut on meaning, phrase boundaries, visual reveals, reaction changes, or a change in visual metaphor — NEVER on a metronome.
+   - Keep adjacent micro shots closely related to the same spoken idea; use them as a visual montage, not unrelated stock spam.
+   - The first 1-2 seconds may be B-roll immediately when the opening words have a concrete visual metaphor.
+   - Keep the speaker visible only where it strengthens authenticity, timing, or an intentional return beat.
+   - Use restrained punch-ins only; NEVER solve pacing by zooming the same source repeatedly.
+   - Use a maximum of 1-2 abstract/title-card visual moments for a short unless the story explicitly becomes conceptual.
+   - For REFERENCE-STYLE TEXT, output up to 4 semantic emphasis callouts: a meaningful noun/phrase such as a concept, location, value, person, or consequence. These are editorial typography, not duplicate subtitles.
+   - Do not fire an SFX on every cut. Use sound accents for meaningful reveals/typographic entrances only.
 
 2. REFERENCE VISUAL LANGUAGE:
    - {style_profile.name}: {style_profile.description}
@@ -217,13 +215,13 @@ MANDATORY DIRECTING OBJECTIVES:
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT (DIVIDED INTO 3 ACTS):
-=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — Place {quota_act1} cut(s) here ===
+=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — Optional context window ===
 {act1_txt}
 
-=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — Place {quota_act2} cut(s) here ===
+=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — Optional context window ===
 {act2_txt}
 
-=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — Place {quota_act3} cut(s) here ===
+=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — Optional context window ===
 {act3_txt}
 
 {learned_rules}
@@ -239,6 +237,7 @@ Return ONLY a valid JSON object matching this schema:
       "start_time": 1.2,
       "end_time": 3.2,
       "duration": 2.0,
+      "cadence_role": "micro|standard|hero",
       "style": "stockpile",
       "dialogue_quote": "Exact spoken line from transcript",
       "emotional_core": "Underlying human meaning, not the visual itself",
@@ -256,6 +255,20 @@ Return ONLY a valid JSON object matching this schema:
       "search_prompt": "Best concrete stock-search query",
       "overlay_type": "cutaway",
       "narrative_reason": "Why this exact visible action communicates the spoken line"
+    }}
+  ],
+  "text_emphasis_graphics": [
+    {{
+      "graphic_id": "emphasis_1",
+      "primary_text": "ONE",
+      "secondary_text": "",
+      "start_time": 1.0,
+      "duration": 1.4,
+      "position": {{ "x_percent": 50, "y_percent": 58 }},
+      "graphic_type": "semantic_callout",
+      "animation_in": "pop_spring",
+      "accent_color": "{style_profile.highlight_color}",
+      "reason": "Why this phrase deserves visual emphasis"
     }}
   ]
 }}"""
@@ -297,9 +310,8 @@ Return ONLY a valid JSON object matching this schema:
             clean_shots = []
             last_end = 0.0
             reference_editing = bool(getattr(style_profile, "reference_style", False))
-            configured_max_dur = float(Config.MAX_CLIP_DURATION_SECONDS)
-            hero_max_dur = float(getattr(style_profile, "hero_broll_max_duration", configured_max_dur))
-            max_dur = max(configured_max_dur, hero_max_dur) if reference_editing else configured_max_dur
+            configured_max_dur = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", Config.MAX_CLIP_DURATION_SECONDS))
+            max_dur = configured_max_dur
 
             for shot in plan_data.get("shots", []):
                 # Strictly filter out any A-roll / speaker shots
@@ -320,22 +332,45 @@ Return ONLY a valid JSON object matching this schema:
                 if not campaign.allow_ai_broll or style not in ("stockpile", "collage", "meme"):
                     style = "stockpile"
 
-                # Reference edits use two timing scales: short punctuation and rare
-                # long hero holds. Other styles retain the campaign ceiling.
-                style_max_cut = (
-                    hero_max_dur
-                    if reference_editing
-                    else float(campaign.max_cutaway_seconds)
-                )
-                max_clip = min(style_max_cut, max_dur)
-                min_clip = 0.8 if reference_editing else 1.2
-                duration = min(max_clip, max(min_clip, float(shot.get("duration", 2.0))))
+                # Reference edits intentionally use three timing scales so a
+                # semantic burst can contain sub-second visual punctuation without
+                # turning the entire short into a rapid-fire montage.
+                requested_role = str(
+                    shot.get("cadence_role", shot.get("visual_role", ""))
+                ).lower().strip()
+                requested_duration = float(shot.get("duration", 1.5) or 1.5)
+                if reference_editing:
+                    if requested_role not in {"micro", "standard", "hero"}:
+                        requested_role = (
+                            "hero"
+                            if requested_duration >= float(getattr(style_profile, "hero_broll_min_duration", 3.0))
+                            else "micro"
+                            if requested_duration <= float(getattr(style_profile, "micro_broll_max_duration", 0.85))
+                            else "standard"
+                        )
+                    min_clip = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+                    max_clip = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
+                else:
+                    requested_role = "standard"
+                    min_clip = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+                    max_clip = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
+                max_clip = min(max_clip, max_dur)
+                duration = min(max_clip, max(min_clip, requested_duration))
                 if style == "meme":
-                    duration = min(2.0, max(1.3, duration))
+                    duration = min(
+                        float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8)),
+                        max(float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65)), duration),
+                    )
                 end = min(video_duration, start + duration)
                 duration = round(end - start, 2)
 
-                if duration < 1.0:
+                min_valid_duration = (
+                    float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+                    if reference_editing and requested_role == "micro"
+                    else float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65)) if reference_editing
+                    else 1.0
+                )
+                if duration < min_valid_duration:
                     continue
 
                 # Extract and clean micro_prompts (3-5 rapid cuts)
@@ -371,6 +406,7 @@ Return ONLY a valid JSON object matching this schema:
                     "micro_prompts": clean_micro[:5],
                     "search_prompt": base_prompt,
                     "overlay_type": "cutaway",
+                    "cadence_role": requested_role,
                     "narrative_reason": shot.get("narrative_reason", "Narrative reinforcement"),
                 }
                 if style == "meme":
@@ -425,8 +461,82 @@ Return ONLY a valid JSON object matching this schema:
             )
             total_broll_time = round(sum(s["duration"] for s in clean_shots), 2)
 
-            # Preserve or detect Level 3 typographic emphasis graphics
+            # Normalize semantic callouts into deliberate editorial graphics.
+            # These are separate from word-by-word captions and are capped so the
+            # reference treatment never becomes an always-on text wall.
             emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
+            if reference_editing:
+                normalized_graphics = []
+                seen_graphic_text = set()
+                max_graphics = int(getattr(style_profile, "semantic_callout_max", 4))
+                min_graphic_duration = float(
+                    getattr(style_profile, "semantic_callout_min_duration", 0.7)
+                )
+                max_graphic_duration = float(
+                    getattr(style_profile, "semantic_callout_max_duration", 2.8)
+                )
+                for graphic in emphasis_graphics if isinstance(emphasis_graphics, list) else []:
+                    if len(normalized_graphics) >= max_graphics or not isinstance(graphic, dict):
+                        break
+                    primary = str(
+                        graphic.get("primary_text")
+                        or graphic.get("text")
+                        or ""
+                    ).strip()
+                    if not primary:
+                        continue
+                    normalized_key = re.sub(r"\s+", " ", primary.lower())
+                    if normalized_key in seen_graphic_text:
+                        continue
+                    # Semantic callouts should be compact; long prose remains in captions.
+                    if len(primary.split()) > 6:
+                        continue
+
+                    try:
+                        graph_start = max(0.0, float(graphic.get("start_time", 0.0)))
+                        graph_duration = max(
+                            min_graphic_duration,
+                            min(
+                                max_graphic_duration,
+                                float(graphic.get("duration", 1.2) or 1.2),
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if graph_start >= video_duration:
+                        continue
+                    graph_duration = min(graph_duration, video_duration - graph_start)
+                    if graph_duration < min_graphic_duration:
+                        continue
+
+                    normalized = {
+                        "graphic_id": str(
+                            graphic.get(
+                                "graphic_id",
+                                f"semantic_{len(normalized_graphics)+1}",
+                            )
+                        ),
+                        "primary_text": primary,
+                        "secondary_text": str(graphic.get("secondary_text", "") or "").strip(),
+                        "start_time": round(graph_start, 2),
+                        "duration": round(graph_duration, 2),
+                        "position": graphic.get(
+                            "position",
+                            {"x_percent": 50, "y_percent": getattr(style_profile, "caption_y_percent", 58.0)},
+                        ),
+                        "graphic_type": "semantic_callout",
+                        "animation_in": graphic.get("animation_in", "pop_spring"),
+                        "accent_color": graphic.get("accent_color", style_profile.highlight_color),
+                        "reason": graphic.get(
+                            "reason",
+                            "Semantic phrase deserves dedicated visual emphasis.",
+                        ),
+                    }
+                    normalized_graphics.append(normalized)
+                    seen_graphic_text.add(normalized_key)
+                emphasis_graphics = normalized_graphics
+            else:
+                emphasis_graphics = emphasis_graphics if isinstance(emphasis_graphics, list) else []
 
             plan_result = {
                 "total_duration": video_duration,
@@ -743,6 +853,7 @@ Return ONLY a valid JSON object matching this schema:
             "micro_prompts": [prompt, f"{prompt} close up", f"{prompt} hands", f"{prompt} action"],
             "search_prompt": prompt,
             "overlay_type": "cutaway",
+            "cadence_role": "standard",
             "narrative_reason": f"Contextual reinforcement of: {seg.get('text', '')[:45]}",
         }
 
@@ -754,177 +865,168 @@ Return ONLY a valid JSON object matching this schema:
         campaign: Any,
         niche: Optional[Any] = None,
     ) -> Tuple[List[Dict[str, Any]], float]:
-        """Audit timeline for dead zones or front-loading and inject contextual shots across the full duration."""
-        if not clean_shots and not segments:
-            return clean_shots, 0.0
+        """Validate approved B-roll intervals, with an explicit reference-style cadence pass.
 
-        from ai_broll_autopilot.styles import style_registry
-        style_id = str(getattr(campaign, "editing_style", "") or "").strip()
-        style_profile = style_registry.get_style(style_id) if style_id else None
-        reference_style = bool(
-            getattr(style_profile, "reference_style", False)
-            or style_id in {"cinematic_social_editorial", "cinematic_editorial"}
-        )
+        Normal campaigns are strict: invalid intervals are dropped and approved timing
+        is never expanded. The reference cinematic treatment additionally permits
+        short-to-standard normalization and adjacent whitespace expansion because its
+        visual language depends on sustained, meaning-driven cutaway coverage.
+        """
+        if not clean_shots or video_duration <= 0:
+            return [], 0.0
 
-        min_speaker_gap = 0.15 if reference_style else 1.0
-        max_gap_allowed = (
-            float(getattr(style_profile, "max_continuous_aroll_seconds", 3.5))
-            if reference_style and style_profile
-            else 4.0
-        )
-        configured_max_clip = float(getattr(campaign, "max_cutaway_seconds", 2.5))
-        style_max_clip = (
-            float(getattr(style_profile, "hero_broll_max_duration", configured_max_clip))
-            if reference_style and style_profile
-            else configured_max_clip
-        )
-        max_clip = min(
-            8.0 if reference_style else float(Config.MAX_CLIP_DURATION_SECONDS),
-            style_max_clip,
-        )
-        min_clip = (
-            float(getattr(style_profile, "broll_min_duration", 0.8))
-            if reference_style and style_profile
-            else 1.4
-        )
+        reference_mode = str(getattr(campaign, "editing_style", "") or "").lower() in {
+            "cinematic_social_editorial",
+            "cinematic_editorial",
+        }
+        if reference_mode:
+            from ai_broll_autopilot.styles import style_registry
+            reference_style = style_registry.get_style("cinematic_social_editorial")
+        else:
+            reference_style = None
 
-        # 1. Clean and space existing shots
-        sorted_shots = sorted(clean_shots, key=lambda s: float(s.get("start_time", 0.0)))
-        cleaned = []
+        default_min = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
+        default_max = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
+        min_duration = (
+            float(getattr(reference_style, "micro_broll_min_duration", 0.45))
+            if reference_mode else default_min
+        )
+        max_duration = (
+            float(getattr(reference_style, "hero_broll_max_duration", 7.5))
+            if reference_mode else default_max
+        )
+        min_start = 0.0 if reference_mode else 1.2
+
+        cleaned: List[Dict[str, Any]] = []
         last_end = 0.0
 
-        for s in sorted_shots:
-            st = max(0.0 if reference_style else 0.8, float(s.get("start_time", 0.0)))
-            if st < last_end + min_speaker_gap:
-                st = last_end + min_speaker_gap
-            dur = min(max_clip, max(min_clip, float(s.get("duration", 2.0))))
-            if st + dur > video_duration - 0.5:
-                dur = max(min_clip, video_duration - 0.5 - st)
-            if dur < 1.0 or st >= video_duration - 1.0:
+        for source_shot in sorted(
+            clean_shots,
+            key=lambda shot: float(shot.get("start_time", 0.0)),
+        ):
+            shot = dict(source_shot)
+            try:
+                start = max(0.0, float(shot.get("start_time", 0.0)))
+                end = float(shot.get("end_time", start))
+                duration = float(shot.get("duration", end - start))
+            except (TypeError, ValueError):
+                logger.warning("Dropping malformed B-roll interval: %s", source_shot)
                 continue
-            et = round(st + dur, 2)
-            s["start_time"] = round(st, 2)
-            s["end_time"] = et
-            s["duration"] = round(et - st, 2)
-            cleaned.append(s)
-            last_end = et
 
-        # 2. Open on a meaningful visual in reference mode instead of forcing
-        # a talking-head intro.
-        opening_threshold = 1.0 if reference_style else 4.5
-        if segments and (not cleaned or cleaned[0]["start_time"] > opening_threshold):
-            early_segs = (
-                [s for s in segments if s.get("start", 0.0) >= 0.0 and s.get("end", 0.0) <= 4.2]
-                if reference_style
-                else [s for s in segments if s.get("start", 0.0) >= 0.8 and s.get("end", 0.0) <= 4.2]
-            )
-            if early_segs:
-                seg = early_segs[0]
-                ins_st = 0.0 if reference_style else 1.2
-                ins_dur = min(max_clip, max(min_clip, 2.0))
-                new_s = self._generate_contextual_shot_for_segment(seg, 1, ins_st, ins_dur, campaign, niche)
-                cleaned.insert(0, new_s)
-                if len(cleaned) > 1 and cleaned[1]["start_time"] < new_s["end_time"] + min_speaker_gap:
-                    cleaned[1]["start_time"] = round(new_s["end_time"] + min_speaker_gap, 2)
-                    cleaned[1]["end_time"] = round(cleaned[1]["start_time"] + cleaned[1]["duration"], 2)
+            interval_duration = end - start
+            if abs(interval_duration - duration) > 0.05:
+                logger.warning(
+                    "Dropping inconsistent B-roll interval [%s]: start=%.2f end=%.2f duration=%.2f",
+                    shot.get("shot_id", "unknown"), start, end, duration,
+                )
+                continue
 
-        # 3. Check internal gaps between consecutive shots
-        i = 0
-        while i < len(cleaned) - 1:
-            gap_start = cleaned[i]["end_time"]
-            gap_end = cleaned[i + 1]["start_time"]
-            gap = gap_end - gap_start
-            if gap > max_gap_allowed and segments:
-                matching = [s for s in segments if s.get("end", 0.0) > gap_start and s.get("start", 0.0) < gap_end]
-                if matching:
-                    seg = matching[0]
-                    ins_st = round(gap_start + min_speaker_gap, 2)
-                    ins_dur = min(max_clip, max(min_clip, round(gap - (2 * min_speaker_gap), 2)))
-                    if ins_dur >= min_clip and ins_st + ins_dur <= gap_end - 0.5:
-                        new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, ins_st, ins_dur, campaign, niche)
-                        cleaned.insert(i + 1, new_s)
-                        i += 1
-            i += 1
+            if start < last_end:
+                logger.warning(
+                    "Dropping overlapping B-roll interval [%s] rather than shifting it.",
+                    shot.get("shot_id", "unknown"),
+                )
+                continue
 
-        # 4. Check TAIL GAP (from last shot to video_duration) - GUARANTEES SECOND HALF IS COVERED
-        last_end = cleaned[-1]["end_time"] if cleaned else 1.0
-        tail_gap = video_duration - last_end
-        if tail_gap >= 3.8 and segments:
-            tail_segs = [s for s in segments if s.get("end", 0.0) > last_end + 0.2]
-            if tail_segs:
-                num_tail_shots = max(1, int(round((tail_gap - 0.8) / 3.4)))
-                step = max(1, len(tail_segs) // num_tail_shots)
-                cur_t = round(last_end + min_speaker_gap, 2)
-                for k in range(num_tail_shots):
-                    seg_idx = min(len(tail_segs) - 1, k * step)
-                    seg = tail_segs[seg_idx]
-                    rem_time = video_duration - 0.8 - cur_t
-                    if rem_time < min_clip:
-                        break
-                    shot_dur = min(max_clip, max(min_clip, round(min(2.0, rem_time), 2)))
-                    new_s = self._generate_contextual_shot_for_segment(seg, len(cleaned) + 1, cur_t, shot_dur, campaign, niche)
-                    cleaned.append(new_s)
-                    cur_t = round(new_s["end_time"] + min_speaker_gap, 2)
+            if start < min_start:
+                logger.warning(
+                    "Dropping B-roll interval [%s] before the %ss opening boundary.",
+                    shot.get("shot_id", "unknown"), min_start,
+                )
+                continue
 
-        # 5. Re-sort & Re-index shots sequentially
-        cleaned = sorted(cleaned, key=lambda s: float(s.get("start_time", 0.0)))
-        for idx, s in enumerate(cleaned):
-            s["shot_id"] = f"broll_{idx+1}"
+            if start >= video_duration or end > video_duration or duration <= 0:
+                continue
 
-        # 6. Reference coverage balancing: expand useful visuals before trimming.
-        style_ratio = getattr(style_profile, "broll_target_ratio", None)
-        target_ratio = (
-            float(style_ratio)
-            if reference_style and style_ratio is not None
-            else (niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio)
+            role = str(shot.get("cadence_role", "") or "").lower().strip()
+            if reference_mode:
+                if role == "micro":
+                    role_min = float(getattr(reference_style, "micro_broll_min_duration", 0.45))
+                    role_max = float(getattr(reference_style, "micro_broll_max_duration", 0.85))
+                elif role == "hero":
+                    role_min = float(getattr(reference_style, "hero_broll_min_duration", 3.0))
+                    role_max = float(getattr(reference_style, "hero_broll_max_duration", 7.5))
+                else:
+                    role_min = float(getattr(reference_style, "broll_min_duration", 0.65))
+                    role_max = float(getattr(reference_style, "broll_max_duration", 2.2))
+            else:
+                role_min = min_duration
+                role_max = max_duration
+
+            if duration < role_min or duration > role_max:
+                logger.warning(
+                    "Dropping out-of-contract B-roll interval [%s] (%.2fs, role=%s).",
+                    shot.get("shot_id", "unknown"), duration, role or "standard",
+                )
+                continue
+
+            duration = round(end - start, 2)
+            if duration < role_min:
+                continue
+
+            shot["start_time"] = round(start, 2)
+            shot["end_time"] = round(end, 2)
+            shot["duration"] = duration
+            cleaned.append(shot)
+            last_end = end
+
+        if reference_mode and cleaned:
+            # Reference treatment: fill only the whitespace already bounded by
+            # approved starts. The final implicit shot can become a hero hold.
+            cleaned.sort(key=lambda s: float(s.get("start_time", 0.0)))
+            for i, shot in enumerate(cleaned):
+                st = float(shot["start_time"])
+                current_end = float(shot["end_time"])
+                next_start = (
+                    float(cleaned[i + 1]["start_time"])
+                    if i + 1 < len(cleaned) else float(video_duration)
+                )
+                role = str(shot.get("cadence_role", "") or "").lower()
+                was_explicit_role = role in {"micro", "standard", "hero"}
+                if not role:
+                    role = "standard"
+                    shot["cadence_role"] = role
+
+                if i == len(cleaned) - 1 and not was_explicit_role:
+                    role = "hero"
+                    shot["cadence_role"] = "hero"
+
+                role_max = (
+                    float(getattr(reference_style, "hero_broll_max_duration", 7.5))
+                    if role == "hero"
+                    else float(getattr(reference_style, "micro_broll_max_duration", 0.85))
+                    if role == "micro"
+                    else float(getattr(reference_style, "broll_max_duration", 2.2))
+                )
+                if role == "hero":
+                    role_min = float(getattr(reference_style, "hero_broll_min_duration", 3.0))
+                    desired_end = min(video_duration, st + max(role_min, current_end - st))
+                else:
+                    role_min = float(getattr(reference_style, "micro_broll_min_duration", 0.45)) if role == "micro" else float(getattr(reference_style, "broll_min_duration", 0.65))
+                    desired_end = current_end
+
+                allowable_end = min(video_duration, next_start, st + role_max)
+                if allowable_end <= current_end:
+                    continue
+
+                # Expand existing contextual holds into adjacent whitespace, but
+                # never cross another approved shot or invent a new interval.
+                if role == "hero":
+                    desired_end = min(allowable_end, max(current_end, st + role_min))
+                else:
+                    desired_end = allowable_end
+
+                if desired_end > current_end and (
+                    role != "micro" or was_explicit_role
+                ):
+                    shot["end_time"] = round(desired_end, 2)
+                    shot["duration"] = round(desired_end - st, 2)
+                last_end = float(shot["end_time"])
+
+        total_broll = sum(float(shot["duration"]) for shot in cleaned)
+        coverage_pct = (total_broll / video_duration) * 100 if video_duration > 0 else 0.0
+        logger.info(
+            "Timeline audit completed: %d shots, %.4fs B-roll (%.4f%% coverage, reference=%s)",
+            len(cleaned), total_broll, coverage_pct, reference_mode,
         )
-        target_broll_sec = video_duration * target_ratio
-        total_broll = sum(float(s["duration"]) for s in cleaned)
-
-        if reference_style and cleaned and total_broll < target_broll_sec:
-            hero_cap = float(getattr(style_profile, "hero_broll_max_duration", 7.5))
-            standard_cap = float(getattr(style_profile, "broll_max_duration", 2.2))
-            for _ in range(4):
-                if total_broll >= target_broll_sec:
-                    break
-                changed = False
-                for idx, shot in enumerate(cleaned):
-                    start_time = float(shot["start_time"])
-                    current = float(shot["duration"])
-                    impact = float(shot.get("impact_score", 0.0) or 0.0)
-                    visual = float(shot.get("visualizability", 0.0) or 0.0)
-                    cap = hero_cap if impact >= 85 and visual >= 85 else standard_cap
-                    next_start = (
-                        float(cleaned[idx + 1]["start_time"])
-                        if idx + 1 < len(cleaned)
-                        else video_duration
-                    )
-                    room = max(0.0, next_start - start_time - 0.08)
-                    desired = min(
-                        cap,
-                        room,
-                        current + max(0.0, target_broll_sec - total_broll),
-                    )
-                    if desired > current + 0.05:
-                        shot["duration"] = round(desired, 2)
-                        shot["end_time"] = round(start_time + desired, 2)
-                        total_broll = sum(float(s["duration"]) for s in cleaned)
-                        changed = True
-                        if total_broll >= target_broll_sec:
-                            break
-                if not changed:
-                    break
-
-        if total_broll > target_broll_sec and cleaned:
-            scale = target_broll_sec / total_broll
-            floor = float(getattr(style_profile, "broll_min_duration", 0.8)) if reference_style else 1.3
-            for s in cleaned:
-                scaled_dur = round(max(floor, s["duration"] * scale), 2)
-                s["duration"] = scaled_dur
-                s["end_time"] = round(s["start_time"] + scaled_dur, 2)
-            total_broll = sum(s["duration"] for s in cleaned)
-
-        cov_pct = round((total_broll / video_duration) * 100, 1) if video_duration > 0 else 0.0
-        logger.info(f"Timeline audit completed: {len(cleaned)} shots spanning 0s to {cleaned[-1]['end_time'] if cleaned else 0}s (coverage: {cov_pct}%)")
-        return cleaned, cov_pct
-
+        return cleaned, coverage_pct

@@ -221,7 +221,7 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
   const [thirdColor, setThirdColor] = useState<string>("#00FF66");
   const [yPercent, setYPercent] = useState<number>(84);
   const [enableEmojis, setEnableEmojis] = useState<boolean>(true);
-  const [behindSubject, setBehindSubject] = useState<boolean>(false);
+  const [behindSubject, setBehindSubject] = useState<boolean>(true);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
 
   // Audio / BGM State
@@ -243,7 +243,11 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
     setSubtitlesEnabled(settings.subtitles_enabled !== false);
     setWordsPerBeat(Number(settings.words_per_beat) || 3);
     setAnimation(settings.caption_motion || "pop");
-    setBehindSubject(Boolean(settings.subtitles_behind_subject));
+    setBehindSubject(
+      settings.subtitles_behind_subject === undefined
+        ? true
+        : Boolean(settings.subtitles_behind_subject)
+    );
     setEnableEmojis(settings.enable_emojis !== false);
     if (settings.subtitle_y_percent !== undefined) {
       setYPercent(Number(settings.subtitle_y_percent));
@@ -311,13 +315,23 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setSaveStatus("Saved");
-        setTimeout(() => setSaveStatus(null), 2000);
-        if (onSettingsUpdated) {
-          onSettingsUpdated(data.render_settings);
+      if (!res.ok) {
+        let message = "Failed to save";
+        try {
+          const body = await res.json();
+          if (body?.detail) message = String(body.detail);
+        } catch {
+          // Keep the generic failure message when the backend did not return JSON.
         }
+        setSaveStatus(message);
+        return;
+      }
+
+      const data = await res.json();
+      setSaveStatus("Saved");
+      setTimeout(() => setSaveStatus(null), 2000);
+      if (onSettingsUpdated) {
+        onSettingsUpdated(data.render_settings);
       }
     } catch {
       setSaveStatus("Failed to save");
@@ -812,7 +826,7 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
                 </span>
               </span>
               <p className="text-[10px] text-purple-300/80">
-                Large emphasis punchlines appear physically behind the speaker's torso while the foreground subject stays in front.
+                Large emphasis punchlines appear physically behind the speaker&apos;s torso while the foreground subject stays in front.
               </p>
             </div>
             <button
@@ -1079,7 +1093,7 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
                 <span>Download Master MP4</span>
               </a>
               <a
-                href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/openreel/project`}
+                href={`/api/jobs/${encodeURIComponent(selectedJob.job_id)}/export/openreel`}
                 download={`${selectedJob.filename}.oreel`}
                 className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 border border-zinc-800"
               >

@@ -24,9 +24,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ai_broll_autopilot.config import Config
+from ai_broll_autopilot.api.path_safety import safe_join, validate_external_url
 from ai_broll_autopilot.core.database import Database
 from ai_broll_autopilot.core.job import Job, JobState
-from ai_broll_autopilot.orchestrator import Orchestrator
+from ai_broll_autopilot.orchestrator import Orchestrator, get_video_duration
 from ai_broll_autopilot.services.learning import FeedbackLearningEngine
 from ai_broll_autopilot.services.drive_sync import drive_sync_service
 from ai_broll_autopilot.services.pexels import pexels_service
@@ -59,12 +60,18 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Enable CORS for Next.js web frontend and OpenReel editor
+_cors_default = "http://localhost:3000,http://127.0.0.1:3000"
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("STOCKPILE_CORS_ORIGINS", _cors_default).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all for development and flexible Azure deployment
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
     expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "ETag"],
 )
 
@@ -141,12 +148,24 @@ class JobSettingsRequest(BaseModel):
     subtitles_enabled: Optional[bool] = Field(None, description="Toggle kinetic subtitles on/off")
     subtitle_style: Optional[str] = Field(None, description="Subtitle style: hormozi, beast, clean")
     subtitle_position: Optional[str] = Field(None, description="Subtitle position: bottom, center, top")
-    subtitles_behind_subject: Optional[bool] = Field(None, description="Place kinetic captions behind the detected foreground subject")
+    subtitle_y_percent: Optional[float] = Field(
+        None, ge=0.0, le=100.0, description="Caption vertical position as percent from top"
+    )
+    preset: Optional[str] = Field(None, description="Caption preset key")
+    words_per_beat: Optional[int] = Field(None, ge=1, le=12, description="Visible caption words per beat")
+    caption_motion: Optional[str] = Field(None, description="Caption motion profile")
+    custom_colors: Optional[Dict[str, str]] = Field(None, description="Caption colors: main, second, third")
+    enable_emojis: Optional[bool] = Field(None, description="Allow emoji rendering in captions")
+    subtitles_behind_subject: Optional[bool] = Field(
+        None, description="Place kinetic captions behind the detected foreground subject"
+    )
     bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
-    bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
+    bgm_volume: Optional[float] = Field(None, ge=0.0, le=1.0, description="BGM volume 0.0 to 1.0")
     bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
     hdr_upscale_enabled: Optional[bool] = Field(None, description="Toggle SDR2HDR upscale & HDR10 output")
-    hdr_output_scale: Optional[float] = Field(None, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)")
+    hdr_output_scale: Optional[float] = Field(
+        None, ge=1.0, le=2.0, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)"
+    )
     hdr_tone: Optional[str] = Field(None, description="HDR tone: vivid or reference")
 
 
@@ -255,8 +274,8 @@ async def get_job_detail(job_id: str):
         if survey_path.exists():
             try:
                 survey_data = json.loads(survey_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed optional failure: %s", exc)
 
     # Enhance edit_plan shots with direct B-roll video preview URLs
     enhanced_edit_plan = None
@@ -448,34 +467,59 @@ async def get_job_broll_thumb(job_id: str, shot_id: str):
     )
 
 
+SFX_ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg"}
+
+def _safe_sfx_path(root: Path, candidate: Path) -> Optional[Path]:
+    """Resolve a catalog/local SFX path and refuse anything outside the SFX root."""
+    root_resolved = root.resolve()
+    try:
+        # Catalog entries may be stored as either absolute paths or filenames relative
+        # to the SFX root. Never resolve a relative catalog path from process CWD.
+        candidate_path = candidate if candidate.is_absolute() else root_resolved / candidate
+        resolved = candidate_path.resolve()
+        resolved.relative_to(root_resolved)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file() or resolved.suffix.lower() not in SFX_ALLOWED_EXTENSIONS:
+        return None
+    return resolved
+
+
 @app.get("/api/sfx/{filename}")
 async def get_sfx_audio(filename: str):
-    """Serve individual SFX from the 189 unified sound effect library."""
-    import urllib.parse
-    clean_fn = urllib.parse.unquote(filename).strip()
+    """Serve individual SFX from the unified sound effect library."""
+    clean_fn = filename.strip()
+    if not clean_fn or Path(clean_fn).name != clean_fn or "/" in clean_fn or "\\" in clean_fn:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if Path(clean_fn).suffix.lower() not in SFX_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported SFX format")
 
-    # 1. Check local split_sfx
-    sfx_path = Config.OUTPUT_DIR / "split_sfx" / clean_fn
-    if sfx_path.exists() and sfx_path.is_file():
-        media_type = "audio/wav" if clean_fn.lower().endswith(".wav") else "audio/mpeg"
-        return FileResponse(path=str(sfx_path), media_type=media_type, filename=clean_fn)
+    sfx_root = (Config.OUTPUT_DIR / "split_sfx").resolve()
 
-    # 2. Check catalog for exact or case-insensitive filename or path
-    catalog_path = Config.OUTPUT_DIR / "split_sfx" / "sfx_catalog.json"
+    # 1. Check the local split_sfx directory.
+    local_path = _safe_sfx_path(sfx_root, sfx_root / clean_fn)
+    if local_path:
+        media_type = "audio/wav" if local_path.suffix.lower() == ".wav" else "audio/mpeg"
+        return FileResponse(path=str(local_path), media_type=media_type, filename=local_path.name)
+
+    # 2. Check the catalog, but never trust an arbitrary catalog path outside sfx_root.
+    catalog_path = sfx_root / "sfx_catalog.json"
     if catalog_path.exists():
         try:
             with open(catalog_path, "r", encoding="utf-8") as f:
                 catalog = json.load(f)
-                for item in catalog:
-                    item_file = item.get("file", "")
-                    item_name = Path(item.get("path", "")).name
-                    if clean_fn.lower() in (item_file.lower(), item_name.lower()):
-                        item_p = Path(item["path"])
-                        if item_p.exists():
-                            media_type = "audio/wav" if item_p.suffix.lower() == ".wav" else "audio/mpeg"
-                            return FileResponse(path=str(item_p), media_type=media_type, filename=item_p.name)
-        except Exception as e:
-            logger.warning(f"Error checking catalog for {filename}: {e}")
+            wanted = clean_fn.lower()
+            for item in catalog:
+                item_file = str(item.get("file", ""))
+                item_name = Path(str(item.get("path", ""))).name
+                if wanted not in {item_file.lower(), item_name.lower()}:
+                    continue
+                item_path = _safe_sfx_path(sfx_root, Path(str(item.get("path", ""))))
+                if item_path:
+                    media_type = "audio/wav" if item_path.suffix.lower() == ".wav" else "audio/mpeg"
+                    return FileResponse(path=str(item_path), media_type=media_type, filename=item_path.name)
+        except Exception as exc:
+            logger.warning("Error checking SFX catalog for %s: %s", filename, exc)
 
     raise HTTPException(status_code=404, detail=f"SFX file '{filename}' not found")
 
@@ -575,8 +619,8 @@ async def get_job_openreel_project(job_id: str, mode: Optional[str] = None):
                 pdata.get("format", {}).get("duration")
                 or source_duration
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed optional failure: %s", exc)
 
     plan_obj = EditPlan(
         plan_id=plan_dict.get("plan_id", f"plan_{job.job_id}"),
@@ -880,7 +924,7 @@ async def get_job_editor_project(job_id: str, engine: Optional[str] = None):
 
 @app.post("/api/jobs/{job_id}/rebalance")
 async def rebalance_job_timeline(job_id: str):
-    """Audit and rebalance B-roll cutaway distribution across the entire timeline to eliminate gaps."""
+    """Validate existing B-roll distribution without filling gaps or adding shots."""
     clean_job_id = job_id
     while "%" in clean_job_id:
         unquoted = urllib.parse.unquote(clean_job_id)
@@ -893,8 +937,6 @@ async def rebalance_job_timeline(job_id: str):
 
     from ai_broll_autopilot.services.director import Director
     from ai_broll_autopilot.campaigns import campaign_registry
-    from ai_broll_autopilot.services.matcher import Matcher
-
     campaign = campaign_registry.get_campaign(job.campaign_id)
     director = Director(api_key=None)
 
@@ -914,17 +956,12 @@ async def rebalance_job_timeline(job_id: str):
     job.edit_plan["broll_coverage_seconds"] = round(sum(s["duration"] for s in rebalanced_shots), 2)
     job.edit_plan["broll_coverage_percentage"] = cov_pct
 
-    # Resolve any newly added shots that lack asset_path
-    work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    matcher = Matcher(db)
-    resolved_plan = await matcher.resolve_shots(job.edit_plan, work_dir)
-    job.edit_plan = resolved_plan
-
+    # The rebalance endpoint is validation-only. Never acquire or insert new
+    # B-roll as a side effect of a timeline audit.
     db.save_job(job)
     return {
         "status": "success",
-        "message": f"Timeline rebalanced: {len(rebalanced_shots)} cuts distributed across full {total_dur:.1f}s",
+        "message": f"Timeline validated: {len(rebalanced_shots)} existing cuts retained across {total_dur:.1f}s",
         "shots_count": len(rebalanced_shots),
         "coverage_percentage": cov_pct,
         "shots": job.edit_plan["shots"],
@@ -1085,8 +1122,8 @@ async def get_job_asset(job_id: str, asset_name: str):
                         cmd = ["ffmpeg", "-y", "-ss", str(st), "-i", str(final_cand), "-t", str(dur), "-c", "copy", str(target)]
                         try:
                             subprocess.run(cmd, capture_output=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Suppressed optional failure: %s", exc)
                         break
 
         if target.exists():
@@ -1113,6 +1150,32 @@ async def get_job_asset(job_id: str, asset_name: str):
         return FileResponse(path=str(target), media_type=_infer_mime(clean_name), filename=clean_name, content_disposition_type="inline")
 
     raise HTTPException(status_code=404, detail=f"Asset '{asset_name}' not found for job {job_id}")
+
+
+@app.get("/api/jobs/{job_id}/subtitles/ass")
+async def download_job_ass_subtitles(job_id: str):
+    """Download the canonical compiled ASS subtitle layer for a rendered job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    workspace = Config.OUTPUT_DIR / "workspace" / job.job_id
+    # The canonical compositor writes subtitles_normal.ass when a separate
+    # behind-subject layer exists, otherwise subtitles_kinetic.ass.
+    candidates = (
+        workspace / "subtitles_normal.ass",
+        workspace / "subtitles_kinetic.ass",
+    )
+    ass_path = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if ass_path is None:
+        raise HTTPException(status_code=404, detail="Compiled ASS subtitles not found")
+
+    clean_name = Path(job.source_filename).stem
+    return FileResponse(
+        path=str(ass_path),
+        media_type="text/plain; charset=utf-8",
+        filename=f"{clean_name}.ass",
+    )
 
 
 @app.get("/api/jobs/{job_id}/export/openreel")
@@ -1215,8 +1278,8 @@ async def clear_all_jobs_endpoint():
             if item.is_dir():
                 try:
                     shutil.rmtree(item)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed optional failure: %s", exc)
     return {"status": "cleared", "message": "All projects cleared successfully"}
 
 
@@ -1229,19 +1292,32 @@ async def upload_video(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    ext = Path(file.filename).suffix.lower()
+    original_name = Path(file.filename).name
+    ext = Path(original_name).suffix.lower()
     if ext not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}:
         raise HTTPException(status_code=400, detail=f"Unsupported video format: {ext}")
 
-    target_file = Config.INPUT_DIR / file.filename
-    # Avoid overwriting directly with duplicate name
+    target_file = Config.INPUT_DIR / original_name
+    # Avoid overwriting directly with duplicate name.
     if target_file.exists():
-        stem = Path(file.filename).stem
+        stem = Path(original_name).stem
         target_file = Config.INPUT_DIR / f"{stem}_{int(asyncio.get_event_loop().time())}{ext}"
 
-    # Write file chunk by chunk
-    with open(target_file, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    max_bytes = int(getattr(Config, "MAX_UPLOAD_SIZE_MB", 500)) * 1024 * 1024
+    written = 0
+    try:
+        with open(target_file, "wb") as buffer:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    target_file.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="Uploaded video exceeds size limit")
+                buffer.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        target_file.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {exc}")
 
     logger.info(f"Uploaded file saved to: {target_file} (Campaign: {campaign_id})")
 
@@ -1263,6 +1339,14 @@ async def import_youtube_video(req: YouTubeJobRequest):
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="YouTube URL is required")
+    try:
+        url = validate_external_url(
+            url,
+            allowed_hosts={"youtube.com", "youtu.be"},
+            require_https=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     target_campaign = req.campaign_id or "default"
     logger.info(f"Importing YouTube video from URL: {url} (Campaign: {target_campaign})")
@@ -1829,7 +1913,17 @@ async def swap_shot_stock_footage(job_id: str, shot_id: str, req: StockSwapReque
 
     new_asset = None
     if req.download_url:
-        new_asset = await pexels_service.download_candidate(req.download_url, out_file, duration=target_dur)
+        try:
+            safe_download_url = validate_external_url(
+                req.download_url,
+                allowed_hosts={"pexels.com"},
+                require_https=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        new_asset = await pexels_service.download_candidate(
+            safe_download_url, out_file, duration=target_dur
+        )
     elif req.prompt:
         new_asset = await pexels_service.search_and_download(req.prompt, out_file, duration=target_dur, orientation="portrait")
 
@@ -1861,11 +1955,22 @@ async def upload_custom_shot_clip(job_id: str, shot_id: str, file: UploadFile = 
 
     work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id / "broll"
     work_dir.mkdir(parents=True, exist_ok=True)
-    raw_custom = work_dir / f"raw_custom_{shot_id}_{file.filename}"
-    out_file = work_dir / f"{shot_id}_custom.mp4"
+    original_name = Path(file.filename or "").name
+    allowed_extensions = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+    if not original_name or Path(original_name).suffix.lower() not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Unsupported video file type")
 
+    raw_custom = work_dir / f"raw_custom_{shot_id}_{original_name}"
+    out_file = work_dir / f"{shot_id}_custom.mp4"
+    max_bytes = int(getattr(Config, "MAX_UPLOAD_SIZE_MB", 500)) * 1024 * 1024
+    written = 0
     with open(raw_custom, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        while chunk := await file.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                raw_custom.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Uploaded video exceeds size limit")
+            buffer.write(chunk)
 
     target_dur = float(target_shot.get("duration") or (target_shot.get("end_time", 3.0) - target_shot.get("start_time", 0.0)))
     cmd = [
@@ -2028,7 +2133,7 @@ async def get_bgm_track_audio(track_id: str):
 
 @app.post("/api/jobs/{job_id}/settings")
 async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
-    """Update subtitle formatting and background music settings for a job."""
+    """Update all render-affecting caption, audio, and HDR settings for a job."""
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2037,35 +2142,54 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
         job.edit_plan = {"shots": []}
 
     settings = job.edit_plan.get("render_settings", {})
-    if req.subtitles_enabled is not None:
-        settings["subtitles_enabled"] = req.subtitles_enabled
-    if req.subtitle_style is not None:
-        settings["subtitle_style"] = req.subtitle_style
-    if req.subtitle_position is not None:
-        settings["subtitle_position"] = req.subtitle_position
+    render_affecting_change = False
+
+    scalar_fields = {
+        "subtitles_enabled": req.subtitles_enabled,
+        "subtitle_style": req.subtitle_style,
+        "subtitle_position": req.subtitle_position,
+        "subtitle_y_percent": req.subtitle_y_percent,
+        "preset": req.preset,
+        "words_per_beat": req.words_per_beat,
+        "caption_motion": req.caption_motion,
+        "enable_emojis": req.enable_emojis,
+        "bgm_volume": req.bgm_volume,
+        "bgm_ducking": req.bgm_ducking,
+        "hdr_upscale_enabled": req.hdr_upscale_enabled,
+        "hdr_output_scale": req.hdr_output_scale,
+        "hdr_tone": req.hdr_tone,
+    }
+    for key, value in scalar_fields.items():
+        if value is not None:
+            settings[key] = value
+            render_affecting_change = True
+
+    if req.custom_colors is not None:
+        settings["custom_colors"] = req.custom_colors
+        render_affecting_change = True
+
     if req.subtitles_behind_subject is not None:
         settings["subtitles_behind_subject"] = req.subtitles_behind_subject
         for subtitle in job.edit_plan.get("subtitles", []):
             subtitle["behind_subject"] = req.subtitles_behind_subject
-        job.edit_plan["render_stale"] = True
-        job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
+        render_affecting_change = True
+
     if req.bgm_track_id is not None:
         settings["bgm_track_id"] = req.bgm_track_id if req.bgm_track_id != "none" else None
-    if req.bgm_volume is not None:
-        settings["bgm_volume"] = req.bgm_volume
-    if req.bgm_ducking is not None:
-        settings["bgm_ducking"] = req.bgm_ducking
+        render_affecting_change = True
 
-    if req.hdr_upscale_enabled is not None:
-        settings["hdr_upscale_enabled"] = req.hdr_upscale_enabled
-    if req.hdr_output_scale is not None:
-        settings["hdr_output_scale"] = req.hdr_output_scale
-    if req.hdr_tone is not None:
-        settings["hdr_tone"] = req.hdr_tone
+    if render_affecting_change:
+        job.edit_plan["render_stale"] = True
+        job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
 
     job.edit_plan["render_settings"] = settings
     db.save_job(job)
-    return {"status": "success", "render_settings": settings}
+    return {
+        "status": "success",
+        "render_settings": settings,
+        "render_stale": bool(job.edit_plan.get("render_stale", False)),
+        "edit_revision": int(job.edit_plan.get("edit_revision", 0)),
+    }
 
 
 async def _execute_rerender_job(job_id: str):
@@ -2080,6 +2204,8 @@ async def _execute_rerender_job(job_id: str):
     renderer = Renderer()
     trans_engine = TransitionEngine()
     bgm_engine = BGMEngine()
+    from ai_broll_autopilot.services.meme_engine import MemeEngine
+    meme_engine = MemeEngine()
 
     work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -2178,12 +2304,12 @@ async def _execute_rerender_job(job_id: str):
         cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_dest), "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
         try:
             await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed optional failure: %s", exc)
 
         job.edit_plan["render_stale"] = False
-        rev = int(job.edit_plan.get("last_render_revision", 0)) + 1
-        job.edit_plan["last_render_revision"] = rev
+        edit_revision = max(1, int(job.edit_plan.get("edit_revision", 1)))
+        job.edit_plan["last_render_revision"] = edit_revision
         db.save_job(job)
         return {
             "status": "success",
@@ -2252,7 +2378,7 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
 
     hdr_out = work_dir / f"rendered_{Path(job.source_filename).stem}_hdr10.mp4"
 
-    hdr_tasks[job_id] = {
+    hdr_state = {
         "status": "converting",
         "progress": 0.0,
         "processed_frames": 0,
@@ -2264,18 +2390,39 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
         "started_at": time.time(),
         "metadata": None,
     }
+    hdr_tasks[job_id] = dict(hdr_state)
+    job.edit_plan = job.edit_plan or {}
+    job.edit_plan["hdr_task"] = dict(hdr_state)
+    db.save_job(job)
 
     def _run_hdr_job():
         try:
             from ai_broll_autopilot.services.sdr2hdr_service import SDR2HDREngine
             engine = SDR2HDREngine()
 
+            last_persisted_pct = -5.0
+
             def _on_progress(processed, total, fps):
+                nonlocal last_persisted_pct
                 pct = round((processed / max(total, 1)) * 100, 1)
                 hdr_tasks[job_id]["progress"] = pct
                 hdr_tasks[job_id]["processed_frames"] = processed
                 hdr_tasks[job_id]["total_frames"] = total
                 hdr_tasks[job_id]["fps"] = round(fps, 2)
+                if pct - last_persisted_pct >= 5.0:
+                    last_persisted_pct = pct
+                    j = db.get_job(job_id)
+                    if j:
+                        j.edit_plan = j.edit_plan or {}
+                        task_state = j.edit_plan.setdefault("hdr_task", dict(hdr_state))
+                        task_state.update({
+                            "status": "converting",
+                            "progress": pct,
+                            "processed_frames": processed,
+                            "total_frames": total,
+                            "fps": round(fps, 2),
+                        })
+                        db.save_job(j)
 
             res = engine.convert_and_upscale(
                 input_path=str(candidate_video),
@@ -2292,11 +2439,18 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
             hdr_tasks[job_id]["progress"] = 100.0
             hdr_tasks[job_id]["metadata"] = res.get("metadata", {})
 
-            # Persist HDR info into job edit_plan
             j = db.get_job(job_id)
             if j:
-                if not j.edit_plan:
-                    j.edit_plan = {}
+                j.edit_plan = j.edit_plan or {}
+                j.edit_plan["hdr_task"] = {
+                    **j.edit_plan.get("hdr_task", hdr_state),
+                    "status": "completed",
+                    "progress": 100.0,
+                    "metadata": res.get("metadata", {}),
+                    "completed_at": time.time(),
+                    "output_path": str(hdr_out),
+                    "output_url": f"/api/jobs/{job_id}/hdr-video",
+                }
                 j.edit_plan["hdr_output"] = {
                     "path": str(hdr_out),
                     "url": f"/api/jobs/{job_id}/hdr-video",
@@ -2308,6 +2462,16 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
             logger.error(f"SDR2HDR upscale failed for job {job_id}: {e}")
             hdr_tasks[job_id]["status"] = "error"
             hdr_tasks[job_id]["error"] = str(e)
+            j = db.get_job(job_id)
+            if j:
+                j.edit_plan = j.edit_plan or {}
+                j.edit_plan["hdr_task"] = {
+                    **j.edit_plan.get("hdr_task", hdr_state),
+                    "status": "error",
+                    "error": str(e),
+                    "failed_at": time.time(),
+                }
+                db.save_job(j)
 
     background_tasks.add_task(_run_hdr_job)
     return {"status": "started", "job_id": job_id, "output_url": f"/api/jobs/{job_id}/hdr-video"}
@@ -2320,8 +2484,14 @@ async def get_job_hdr_status(job_id: str):
     if task:
         return task
 
-    # Check if already completed and persisted
+    # Cross-worker fallback: task state is persisted in the job edit plan.
     job = db.get_job(job_id)
+    if job and job.edit_plan and job.edit_plan.get("hdr_task"):
+        persisted_task = dict(job.edit_plan["hdr_task"])
+        if persisted_task.get("status") != "completed" or not job.edit_plan.get("hdr_output"):
+            return persisted_task
+
+    # Check if already completed and persisted
     if job and job.edit_plan and "hdr_output" in job.edit_plan:
         hdr_info = job.edit_plan["hdr_output"]
         p = Path(hdr_info.get("path", ""))
@@ -2840,7 +3010,14 @@ async def export_openreel_endpoint(req: ExportOpenReelRequest):
         audio_cues=p_data.get("audio_cues", {}),
     )
 
-    out_folder = Path(req.output_folder) if req.output_folder else (Config.OUTPUT_DIR / "openreel_projects" / plan.plan_id)
+    try:
+        out_folder = (
+            safe_join(Config.OUTPUT_DIR, req.output_folder)
+            if req.output_folder
+            else Config.OUTPUT_DIR / "openreel_projects" / plan.plan_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     files = openreel_adapter.export_project_files(
         edit_plan=plan,
         output_dir=out_folder,
@@ -2875,7 +3052,10 @@ async def get_library_endpoint(niche_id: Optional[str] = None, limit: int = 50):
 @app.post("/api/library/index")
 async def index_library_endpoint(req: LibraryIndexRequest):
     """Index video files from a local directory into the B-roll library."""
-    p = Path(req.directory_path)
+    try:
+        p = safe_join(Config.PROJECT_ROOT, req.directory_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=400, detail="Directory not found")
     count = broll_library.index_directory(p, niche_id=req.niche_id, tags=req.tags)

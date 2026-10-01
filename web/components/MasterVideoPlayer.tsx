@@ -59,7 +59,9 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
   // Localized playhead time & player state
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [showLiveCaptions, setShowLiveCaptions] = useState<boolean>(true);
+  // The master video already contains the rendered caption layers. A second live
+  // DOM overlay must never be enabled by default or it creates duplicate captions.
+  const [showLiveCaptions, setShowLiveCaptions] = useState<boolean>(false);
   const [zoomLevel, setZoomLevel] = useState<"fit" | "1.5x" | "2x">("fit");
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
@@ -205,7 +207,7 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {selectedJob.edit_plan?.subtitles_behind_subject && (
+          {(renderSettings.subtitles_behind_subject ?? selectedJob.edit_plan?.subtitles_behind_subject) && (
             <span className="text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
               <Sparkles className="w-3 h-3 text-purple-300" />
               Behind-Speaker Hook
@@ -264,7 +266,7 @@ export const MasterVideoPlayer: React.FC<MasterVideoPlayerProps> = ({
             }`}
           >
             <Type className="w-3 h-3" />
-            <span>Overlay: {showLiveCaptions ? "ON" : "OFF"}</span>
+            <span>Caption Preview: {showLiveCaptions ? "ON" : "OFF"}</span>
           </button>
         </div>
 

@@ -19,11 +19,7 @@ class Renderer:
     """Renders composite video using FFmpeg multi-input complex filtergraphs."""
 
     def __init__(self):
-        self.timeline = TimelineEngine(
-            target_width=Config.TARGET_WIDTH,
-            target_height=Config.TARGET_HEIGHT,
-            target_fps=Config.TARGET_FPS
-        )
+        self.timeline = TimelineEngine(target_width=Config.TARGET_WIDTH, target_height=Config.TARGET_HEIGHT, target_fps=Config.TARGET_FPS)
 
     @staticmethod
     def _ensure_reference_card_mask(output_path: Path, width: int, height: int, width_ratio: float = 0.944, height_ratio: float = 0.574, radius: int = 52) -> Path:
@@ -40,21 +36,13 @@ class Renderer:
 
     @staticmethod
     def _encoder_args() -> List[str]:
-        """Return the fastest safe hardware encoder available for this host.
-
-        NVENC is opt-in/auto via config. A probe prevents broken FFmpeg builds from
-        failing the entire render; CPU x264 remains the compatibility fallback.
-        """
         mode = Config.NVENC_MODE
         if mode not in {"0", "1", "auto", "true", "false", "on", "off"}:
             mode = "auto"
         if mode in {"0", "false", "off"}:
             return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(Config.VIDEO_CRF), "-threads", "0"]
         try:
-            probe = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
-                capture_output=True, text=True, timeout=5,
-            )
+            probe = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=5)
             nvenc_available = "h264_nvenc" in (probe.stdout or "")
         except Exception:
             nvenc_available = False
@@ -64,15 +52,43 @@ class Renderer:
             return ["-c:v", "h264_nvenc", "-preset", Config.NVENC_PRESET, "-rc", "vbr", "-cq", str(Config.NVENC_CQ), "-b:v", "0"]
         return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(Config.VIDEO_CRF), "-threads", "0"]
 
-    async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str, ass_subtitles_path: str = None, bgm_path: str = None, bgm_volume: float = 0.15, ducking_enabled: bool = True, upscale_hdr: bool = False, hdr_scale: float = 1.0, hdr_tone: str = "vivid", watermark_path: str = None, watermark_position: str = "bottom_safe", watermark_scale: float = 0.28, preserve_dialogue_only: bool = False, frame_overlay_path: str = None, viewport: tuple = None, behind_subject_ass_path: str = None, subject_matte_path: str = None, layout_mode: str = None) -> str:
-        """Render the composite video with B-roll, captions, SFX and editorial layers."""
+    @classmethod
+    def _cuda_decode_args(cls) -> List[str]:
+        if not hasattr(cls, "_cuda_supported"):
+            cls._cuda_supported = False
+            try:
+                probe = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-y", "-hwaccel", "cuda", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04", "-f", "null", "-"],
+                    capture_output=True,
+                    timeout=3
+                )
+                if probe.returncode == 0:
+                    cls._cuda_supported = True
+            except Exception as exc:
+                logger.debug("Suppressed CUDA hwaccel probe failure: %s", exc)
+        return ["-hwaccel", "cuda"] if cls._cuda_supported else []
+
+    async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str, ass_subtitles_path: str = None, bgm_path: str = None, bgm_volume: float = 0.15, ducking_enabled: bool = True, upscale_hdr: bool = False, hdr_scale: float = 1.0, hdr_tone: str = "vivid", watermark_path: str = None, watermark_position: str = "bottom_safe", watermark_scale: float = 0.28, preserve_dialogue_only: bool = False, frame_overlay_path: str = None, viewport: tuple = None, behind_subject_ass_path: str = None, subject_matte_path: str = None, layout_mode: str = None, source_start_time: float = 0.0, render_duration: float = None) -> str:
+        """Render composite video. Optional fast mode uses a 720x1280 working canvas."""
         base_p = Path(base_video)
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
+        render_settings = edit_plan.get("render_settings", {}) if isinstance(edit_plan.get("render_settings", {}), dict) else {}
+        fast_render = bool(render_settings.get("fast_render", Config.FAST_RENDER_ENABLED))
+        render_width = Config.FAST_RENDER_WIDTH if fast_render else Config.TARGET_WIDTH
+        render_height = Config.FAST_RENDER_HEIGHT if fast_render else Config.TARGET_HEIGHT
+        render_timeline = TimelineEngine(target_width=render_width, target_height=render_height, target_fps=Config.TARGET_FPS)
+
         style_data = edit_plan.get("style") if isinstance(edit_plan.get("style"), dict) else {}
         editing_style = str(edit_plan.get("editing_style") or style_data.get("id") or "")
         reference_style = bool(edit_plan.get("reference_editing") or style_data.get("reference_style") or editing_style in {"cinematic_social_editorial", "cinematic_editorial"})
-        shots = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
+        shots = [
+            {**shot, "_input_idx": idx}
+            for idx, shot in enumerate(
+                (s for s in edit_plan.get("shots", []) if s.get("asset_path")),
+                start=1,
+            )
+        ]
         audio_sfx_list: List[Dict[str, Any]] = []
         for shot in shots:
             start_t = float(shot.get("start_time", 0.0))
@@ -90,6 +106,7 @@ class Renderer:
             impact_path = item.get("sfx_path") if reference_style else item.get("sfx_path", "assets/sfx/impact.mp3")
             if impact_path and os.path.exists(impact_path):
                 audio_sfx_list.append({"path": impact_path, "start_time": max(0.0, float(item.get("start_time", 0.0))), "volume": item.get("sfx_volume", 0.22), "type": "graphic_impact"})
+
         behind_subject_overlay = next((ov for ov in edit_plan.get("text_overlays", []) if ov.get("behind_subject") or ov.get("behindSubject")), None)
         has_behind_subtitles = bool(behind_subject_ass_path and os.path.exists(behind_subject_ass_path)) or any(s.get("behind_subject") or s.get("behindSubject") for s in edit_plan.get("subtitles", []))
         if not subject_matte_path or not os.path.exists(subject_matte_path):
@@ -103,19 +120,38 @@ class Renderer:
                         from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
                         st = 0.0 if has_behind_subtitles else float(behind_subject_overlay.get("start_time", 0.0))
                         dur = None if has_behind_subtitles else float(behind_subject_overlay.get("duration", 2.5))
-                        m_path = subject_isolation_service.create_subject_matte_clip(video_path=str(base_p), output_matte_path=str(matte_file), start_time=st, duration=dur, target_width=Config.TARGET_WIDTH, target_height=Config.TARGET_HEIGHT)
+                        m_path = subject_isolation_service.create_subject_matte_clip(video_path=str(base_p), output_matte_path=str(matte_file), start_time=st, duration=dur, target_width=render_width, target_height=render_height)
                         if m_path and os.path.exists(m_path):
                             subject_matte_path = m_path
                     except Exception as e:
                         logger.warning(f"Subject isolation matte skipped: {e}. Falling back to normal compositing.")
-        cmd = ["ffmpeg", "-y", "-i", str(base_p)]
+
+        decode_args = self._cuda_decode_args() if fast_render else []
+        cmd = ["ffmpeg", "-y", *decode_args]
+        if source_start_time and float(source_start_time) > 0:
+            cmd.extend(["-ss", f"{float(source_start_time):.3f}"])
+        cmd.extend(["-i", str(base_p)])
         for shot in shots:
             cmd.extend(["-stream_loop", "-1", "-i", str(shot["asset_path"])])
-        layout_mode = layout_mode or edit_plan.get("layout_mode") or edit_plan.get("render_settings", {}).get("layout_mode") or "single"
+        layout_mode = layout_mode or edit_plan.get("layout_mode") or render_settings.get("layout_mode") or "single"
         reference_card_mask_idx = None
         reference_card_width_ratio = float(style_data.get("visual_container_width_ratio", 0.944))
         reference_card_height_ratio = float(style_data.get("visual_container_height_ratio", 0.574))
         reference_card_radius = int(style_data.get("visual_container_radius", 52))
+        reference_focal_x = 0.5
+        if reference_style:
+            try:
+                from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+                layout = subject_isolation_service.analyze_subject_layout(
+                    str(base_p),
+                    sample_time=min(1.0, max(0.0, float(edit_plan.get("target_duration") or 1.0) * 0.25)),
+                )
+                reference_focal_x = max(
+                    0.0,
+                    min(1.0, float(layout.get("center_x", 0.5) or 0.5)),
+                )
+            except Exception as exc:
+                logger.debug("Could not determine speaker focal point; using center crop: %s", exc)
         current_input_idx = 1 + len(shots)
         frame_overlay_stream_idx = None
         if frame_overlay_path and os.path.exists(frame_overlay_path):
@@ -124,7 +160,7 @@ class Renderer:
         if watermark_path and os.path.exists(watermark_path):
             watermark_stream_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(watermark_path)]); current_input_idx += 1
         if reference_style:
-            mask_path = self._ensure_reference_card_mask(out_p.parent / "reference_card_mask.png", self.timeline.width, self.timeline.height, width_ratio=reference_card_width_ratio, height_ratio=reference_card_height_ratio, radius=reference_card_radius)
+            mask_path = self._ensure_reference_card_mask(out_p.parent / f"reference_card_mask_{render_width}x{render_height}.png", render_width, render_height, width_ratio=reference_card_width_ratio, height_ratio=reference_card_height_ratio, radius=reference_card_radius)
             reference_card_mask_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(mask_path)]); current_input_idx += 1
         subject_matte_stream_idx = None
         if subject_matte_path and os.path.exists(subject_matte_path):
@@ -136,13 +172,37 @@ class Renderer:
             cyber_grid_backdrop_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(bg_p)]); current_input_idx += 1
             cyber_grid_mask_before_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(mb_p)]); current_input_idx += 1
             cyber_grid_mask_after_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(ma_p)]); current_input_idx += 1
-        audio_inputs_start = current_input_idx
+        broll_max_input_idx = max(
+            [0] + [int(shot.get("_input_idx", 0)) for shot in shots]
+        )
+        audio_inputs_start = max(current_input_idx, broll_max_input_idx + 1)
+        current_input_idx = audio_inputs_start
         for sfx in audio_sfx_list:
             cmd.extend(["-i", str(sfx["path"])])
         bgm_stream_idx = None
         if bgm_path and os.path.exists(bgm_path):
             bgm_stream_idx = audio_inputs_start + len(audio_sfx_list); cmd.extend(["-stream_loop", "-1", "-i", str(bgm_path)])
-        filtergraph, final_video, final_audio = self.timeline.build_filtergraph(shots=shots, audio_sfx_list=audio_sfx_list, ass_subtitles_path=ass_subtitles_path, bgm_stream_idx=bgm_stream_idx, bgm_volume=bgm_volume, ducking_enabled=ducking_enabled, watermark_stream_idx=watermark_stream_idx, watermark_position=watermark_position, watermark_scale=watermark_scale, frame_overlay_stream_idx=frame_overlay_stream_idx, viewport=viewport, behind_subject_text=behind_subject_overlay, subject_matte_stream_idx=subject_matte_stream_idx, behind_subject_ass_path=behind_subject_ass_path, layout_mode=layout_mode, cyber_grid_backdrop_idx=cyber_grid_backdrop_idx, cyber_grid_mask_before_idx=cyber_grid_mask_before_idx, cyber_grid_mask_after_idx=cyber_grid_mask_after_idx, reference_style=reference_style, reference_card_mask_idx=reference_card_mask_idx, reference_card_width_ratio=reference_card_width_ratio, reference_card_height_ratio=reference_card_height_ratio, reference_card_radius=reference_card_radius)
+
+        from ai_broll_autopilot.services.filtergraph_lint import assert_filtergraph_labels
+        filtergraph, final_video, final_audio = render_timeline.build_filtergraph(
+            shots=shots, audio_sfx_list=audio_sfx_list, ass_subtitles_path=ass_subtitles_path,
+            bgm_stream_idx=bgm_stream_idx, bgm_volume=bgm_volume, ducking_enabled=ducking_enabled,
+            watermark_stream_idx=watermark_stream_idx, watermark_position=watermark_position,
+            watermark_scale=watermark_scale, frame_overlay_stream_idx=frame_overlay_stream_idx,
+            viewport=viewport, behind_subject_text=behind_subject_overlay,
+            subject_matte_stream_idx=subject_matte_stream_idx, behind_subject_ass_path=behind_subject_ass_path,
+            layout_mode=layout_mode, cyber_grid_backdrop_idx=cyber_grid_backdrop_idx,
+            cyber_grid_mask_before_idx=cyber_grid_mask_before_idx, cyber_grid_mask_after_idx=cyber_grid_mask_after_idx,
+            reference_style=reference_style, reference_card_mask_idx=reference_card_mask_idx,
+            reference_card_width_ratio=reference_card_width_ratio, reference_card_height_ratio=reference_card_height_ratio,
+            reference_card_radius=reference_card_radius,
+            reference_focal_x=reference_focal_x,
+            output_duration=float(edit_plan.get("target_duration") or 30.0),
+        )
+        assert_filtergraph_labels(
+            filtergraph,
+            final_labels={final_video, final_audio},
+        )
         base_dur = None
         try:
             probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(base_p)]
@@ -151,10 +211,12 @@ class Renderer:
             logger.warning(f"Could not probe base video duration: {e}")
         cmd.extend(["-filter_complex", filtergraph, "-map", f"[{final_video}]", "-map", f"[{final_audio}]"])
         cmd.extend(self._encoder_args())
-        cmd.extend(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart"])
-        cmd.extend(["-t", f"{base_dur:.3f}"] if base_dur and base_dur > 0 else ["-shortest"])
+        cmd.extend(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k" if fast_render else "192k", "-ar", "48000", "-ac", "2", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart"])
+        effective_render_duration = float(render_duration) if render_duration is not None else base_dur
+        cmd.extend(["-t", f"{effective_render_duration:.3f}"] if effective_render_duration and effective_render_duration > 0 else ["-shortest"])
         cmd.extend(["-v", "warning", str(out_p)])
-        logger.info(f"Executing FFmpeg render ({len(shots)} overlays, {len(audio_sfx_list)} SFX, encoder={'NVENC' if 'h264_nvenc' in self._encoder_args() else 'x264'})")
+        encoder = "NVENC" if "h264_nvenc" in self._encoder_args() else "x264"
+        logger.info(f"Executing FFmpeg render ({render_width}x{render_height}, fast={fast_render}, {len(shots)} overlays, {len(audio_sfx_list)} SFX, decoder={'NVDEC' if decode_args else 'software'}, encoder={encoder})")
         res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
         if res.returncode != 0:
             logger.error(f"FFmpeg rendering error: {res.stderr}")
@@ -180,9 +242,13 @@ class Renderer:
 
     async def _normalize_single_video(self, base_p: Path, out_p: Path) -> str:
         """Fallback normalization if no B-roll was inserted."""
-        cmd = ["ffmpeg", "-y", "-i", str(base_p), "-vf", f"scale={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1"]
+        fast = Config.FAST_RENDER_ENABLED
+        width = Config.FAST_RENDER_WIDTH if fast else Config.TARGET_WIDTH
+        height = Config.FAST_RENDER_HEIGHT if fast else Config.TARGET_HEIGHT
+        decode_args = self._cuda_decode_args() if fast else []
+        cmd = ["ffmpeg", "-y", *decode_args, "-i", str(base_p), "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"]
         cmd.extend(self._encoder_args())
-        cmd.extend(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-v", "warning", str(out_p)])
+        cmd.extend(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k" if fast else "192k", "-ar", "48000", "-ac", "2", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-v", "warning", str(out_p)])
         proc = await asyncio.create_subprocess_exec(*cmd)
         await proc.wait()
         from ai_broll_autopilot.services.media_validator import media_validator

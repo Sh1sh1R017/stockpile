@@ -180,11 +180,11 @@ export const CuratedMomentsModal: React.FC<CuratedMomentsModalProps> = ({
                         </div>
 
                         <div className="text-xs font-bold text-zinc-100 group-hover:text-emerald-300 transition-colors">
-                          "{m.screen_hook}"
+                          &quot;{m.screen_hook}&quot;
                         </div>
 
                         <p className="text-[11px] text-zinc-400 italic">
-                          "{m.post_caption}"
+                          &quot;{m.post_caption}&quot;
                         </p>
 
                         {m.broll_theme && (
@@ -300,10 +300,10 @@ export const CuratedMomentsModal: React.FC<CuratedMomentsModalProps> = ({
               <div className="bg-rose-950/20 border border-rose-500/30 rounded-2xl p-4 space-y-2">
                 <h4 className="text-xs font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4 text-rose-400" />
-                  Instant Rejections ("The No List")
+                  Instant Rejections (&quot;The No List&quot;)
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] text-zinc-300">
-                  <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Reposting MPJ's socials</div>
+                  <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Reposting MPJ&apos;s socials</div>
                   <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Phonk or BGM music</div>
                   <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ AI video / avatars</div>
                   <div className="bg-zinc-950/60 rounded-lg p-2 border border-zinc-800">❌ Aura / glow / skull edits</div>

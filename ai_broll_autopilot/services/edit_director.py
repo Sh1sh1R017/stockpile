@@ -16,6 +16,7 @@ from google import genai
 from google.genai import types
 
 from ai_broll_autopilot.config import Config
+from ai_broll_autopilot.services.transcript_scope import scope_segments
 from ai_broll_autopilot.niches import niche_registry, NicheProfile
 from ai_broll_autopilot.styles import style_registry, StyleProfile
 from ai_broll_autopilot.services.clip_detector import ClipCandidate
@@ -169,6 +170,8 @@ class EditDirectorService:
             except Exception as e:
                 logger.warning(f"Could not initialize GenAI client: {e}")
 
+
+
     async def plan_edit(
         self,
         source_media: Dict[str, Any],
@@ -207,19 +210,8 @@ class EditDirectorService:
 
         clip_duration = max(1.0, clip_out - clip_in)
 
-        # 2. Filter Transcript Segments for this Clip Interval
-        clip_segments = []
-        for s in transcript_segments:
-            seg_start = s.get("start", 0.0)
-            seg_end = s.get("end", 0.0)
-            if seg_end > clip_in and seg_start < clip_out:
-                # Normalize segment relative to clip start (0.0s)
-                clip_segments.append({
-                    "start": max(0.0, round(seg_start - clip_in, 2)),
-                    "end": min(clip_duration, round(seg_end - clip_in, 2)),
-                    "text": s.get("text", "").strip(),
-                    "words": s.get("words", []),
-                })
+        # 2. Scope transcript segments and word timestamps to the clip.
+        clip_segments = scope_segments(transcript_segments, clip_in, clip_out)
 
         # 3. Resolve Niche and Style Profiles
         niche = niche_registry.get_profile(niche_id)
@@ -231,7 +223,10 @@ class EditDirectorService:
         # 4. Cuts-First Retention Analysis
         # -------------------------------------------------------------
         from ai_broll_autopilot.services.retention_engine import retention_engine
-        is_podcast = (niche_id == "clean_podcast" or "podcast" in style_id.lower())
+        is_podcast = (
+            str(getattr(niche, "id", niche_id) or "").lower() == "clean_podcast"
+            or "podcast" in str(getattr(style, "id", style_id) or "").lower()
+        )
         detected_cuts = retention_engine.analyze_and_detect_cuts(
             transcript_segments=clip_segments,
             video_duration=clip_duration,
@@ -261,9 +256,10 @@ class EditDirectorService:
         available_assets = []
         try:
             from ai_broll_autopilot.core.database import db
-            available_assets = db.list_broll_assets(niche_id=niche_id, limit=60)
-        except Exception:
-            pass
+            available_assets = db.list_broll_assets(niche_id=getattr(niche, "id", niche_id), limit=60)
+        except Exception as exc:
+            logger.warning("B-roll asset lookup failed; retaining A-roll: %s", exc)
+            available_assets = []
 
         spec, quality_report = editorial_pipeline.process(
             source_media=source_media,
@@ -292,12 +288,54 @@ class EditDirectorService:
                 "narrative_role": s.narrative_role.value,
                 "emotional_intent": s.emotional_intent,
                 "confidence": s.scores.confidence,
+                "final_score": s.scores.final_score,
+                "semantic_match": s.scores.semantic_match,
+                "narrative_match": s.scores.narrative_match,
+                "decision": s.scores.decision,
+                "rejection_reason": s.scores.rejection_reason,
+                "status": s.status,
                 "pacing_category": s.pacing_category.value,
                 "shot_type": s.shot_type.value,
                 "asset_path": s.asset_path,
             }
             for s in spec.broll_shots
         ]
+
+        if not shots_data and getattr(spec, "moments", None):
+            # Keep unresolved high-value visual opportunities in the canonical
+            # plan. These are requests for asset acquisition, not fake matches.
+            unresolved = [
+                m for m in spec.moments
+                if float(getattr(m, "visual_opportunity", 0.0) or 0.0) >= 0.55
+                and float(getattr(m, "duration", 0.0) or 0.0) >= 0.65
+                and getattr(m, "narrative_role", None) is not None
+            ]
+            for idx_m, moment in enumerate(unresolved[:8], start=1):
+                m_start = round(float(moment.start_time), 2)
+                m_end = round(min(float(moment.end_time), m_start + 1.6), 2)
+                shots_data.append({
+                    "shot_id": f"planned_broll_{idx_m}",
+                    "start_time": m_start,
+                    "end_time": m_end,
+                    "duration": round(max(0.65, m_end - m_start), 2),
+                    "category": "unresolved",
+                    "search_query": " ".join(list(getattr(moment, "entities", []) or [])[:2]) or str(getattr(moment, "semantic_topic", "") or "contextual scene"),
+                    "dialogue_trigger": str(getattr(moment, "text", "") or ""),
+                    "rationale": "High-visual-opportunity contextual B-roll request; local asset not resolved during planning.",
+                    "narrative_role": str(getattr(getattr(moment, "narrative_role", None), "value", "ILLUSTRATE")),
+                    "emotional_intent": str(getattr(getattr(moment, "sentiment", None), "value", "neutral")),
+                    "confidence": round(float(getattr(moment, "visual_opportunity", 0.55) or 0.55), 3),
+                    "final_score": 0.0,
+                    "semantic_match": 0.0,
+                    "narrative_match": 0.0,
+                    "decision": "PLANNED_NO_ASSET",
+                    "rejection_reason": "No locally indexed B-roll asset was available during planning.",
+                    "status": "planned",
+                    "pacing_category": str(getattr(getattr(moment, "pacing_requirement", None), "value", "normal")),
+                    "shot_type": "medium",
+                    "asset_path": None,
+                })
+
 
         text_overlays_data = [
             {
@@ -382,13 +420,33 @@ class EditDirectorService:
         }
 
         # -------------------------------------------------------------
-        # 8. Post-Render Visual QA Simulation
+        # 8. Planning/Post-Render Visual QA
         # -------------------------------------------------------------
+        # Store an explicit pre-render state so the EditPlan never conflates
+        # "not rendered yet" with "QA missing".
         from ai_broll_autopilot.services.visual_qa import visual_qa
-        qa_result = visual_qa.verify_rendered_video(
-            video_path=source_media.get("path", ""),
-            target_duration=clip_duration,
-        )
+        source_path_str = str(source_media.get("path", "") or "").strip()
+        source_path_obj = Path(source_path_str) if source_path_str else None
+        if source_path_obj is not None and source_path_obj.exists():
+            qa_result = {
+                "status": "pending_render",
+                "passed": None,
+                "target_duration": round(clip_duration, 2),
+                "actual_duration": None,
+                "duration_difference": None,
+                "message": "Post-render Visual QA will run against the rendered master.",
+            }
+        else:
+            dry = visual_qa.verify_rendered_video(
+                video_path=source_path_str or "__missing_source__.mp4",
+                target_duration=clip_duration,
+                check_faststart=False,
+            )
+            qa_result = {
+                "status": "planning_dry_run",
+                **dry.to_dict(),
+                "message": "Source media is not present during planning; QA is a dry-run schema validation.",
+            }
 
         plan = EditPlan(
             plan_id=plan_id,
@@ -412,7 +470,7 @@ class EditDirectorService:
             cadence_profile=cadence_profile,
             editorial_spec=spec.to_dict(),
             quality_report=quality_report.to_dict(),
-            visual_qa=qa_result.to_dict(),
+            visual_qa=qa_result,
             review_items=[
                 {"type": "cut", "count": len(cuts_data)},
                 {"type": "shot", "count": len(shots_data)},
@@ -460,8 +518,7 @@ AVOID: {', '.join(niche.avoid)}
 VISUAL STYLE: {style.name}
 DEFAULT B-ROLL PACING: {style.broll_cut_pacing} (~{default_shot_dur}s per shot)
 TOTAL CLIP DURATION: {clip_duration:.1f}s
-MAX B-ROLL COVERAGE: {max_broll_ratio*100:.0f}% (~{max_broll_seconds:.1f}s total B-roll)
-TARGET NUMBER OF B-ROLL SHOTS: {target_shots}
+B-ROLL POLICY: use B-roll only when it materially reinforces the spoken idea; coverage is telemetry, never a quota.
 STYLE GUIDELINES:
 {chr(10).join(f"- {g}" for g in style.editorial_guidelines)}
 
@@ -720,7 +777,24 @@ Respond ONLY with valid JSON matching:
                     subtitle_index += 1
                     group = []
             if group:
-                subtitles.append(self._build_reference_subtitle_group(style, group, subtitle_index))
+                # Avoid a visually weak one-word tail. Rebalance the final
+                # singleton with the preceding beat while preserving word timing.
+                if len(group) == 1 and subtitles and len(subtitles[-1].get("words", [])) >= 3:
+                    previous_words = subtitles[-1]["words"]
+                    combined = previous_words + group
+                    first_len = max(2, min(group_size, len(combined) - 2))
+                    previous_group = combined[:first_len]
+                    final_group = combined[first_len:]
+                    subtitles[-1] = self._build_reference_subtitle_group(
+                        style, previous_group, len(subtitles)
+                    )
+                    subtitles.append(
+                        self._build_reference_subtitle_group(
+                            style, final_group, len(subtitles) + 1
+                        )
+                    )
+                else:
+                    subtitles.append(self._build_reference_subtitle_group(style, group, subtitle_index))
             return subtitles
 
         subtitles = []

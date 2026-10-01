@@ -188,8 +188,16 @@ class TestCaptionCompositorLayers:
             )
 
             assert behind_ass is not None
+            assert normal_ass is not None
             behind_content = Path(behind_ass).read_text(encoding="utf-8")
+            normal_content = Path(normal_ass).read_text(encoding="utf-8")
             assert "WRONG" in behind_content, "Hook word 'WRONG' must be in behind-subject layer"
+            assert "YOU" in behind_content
+            assert "WERE" in behind_content
+            assert behind_content.count("Dialogue: 2,") == 1, "Hook phrase should render as one grouped behind-subject layer"
+            assert "YOU" not in normal_content
+            assert "WERE" not in normal_content
+            assert "WRONG" not in normal_content
         asyncio.run(_run())
 
     def test_hook_text_not_silently_discarded_when_behind_disabled(self, temp_work_dir, dummy_video):

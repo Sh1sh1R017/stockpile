@@ -77,8 +77,8 @@ class MemeEngine:
         if font_path.exists():
             try:
                 return ImageFont.truetype(str(font_path), size)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed optional failure: %s", exc)
         return ImageFont.load_default()
 
     def find_template(self, query: str) -> Optional[Tuple[str, Path]]:

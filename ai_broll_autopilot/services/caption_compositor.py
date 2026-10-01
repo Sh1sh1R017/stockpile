@@ -110,10 +110,14 @@ class CaptionCompositor:
             logger.info("[CAPTION-COMPOSITOR] Subtitles disabled or no transcript segments.")
             return None, None, None
 
-        behind_subject_enabled = bool(
-            render_settings.get("subtitles_behind_subject", False)
-            or (edit_plan and edit_plan.get("subtitles_behind_subject", False))
-        )
+        if "subtitles_behind_subject" in render_settings:
+            behind_subject_enabled = bool(render_settings["subtitles_behind_subject"])
+        elif edit_plan and "subtitles_behind_subject" in edit_plan:
+            behind_subject_enabled = bool(edit_plan["subtitles_behind_subject"])
+        else:
+            # New jobs get the reference-style hook treatment by default. An
+            # explicit False from the editor still disables it.
+            behind_subject_enabled = True
 
         preset_key = render_settings.get("subtitle_style") or render_settings.get("preset") or style_preset or "hormozi"
         resolved_colors = custom_colors or render_settings.get("custom_colors") or (edit_plan.get("style", {}).get("colors"))
@@ -130,6 +134,7 @@ class CaptionCompositor:
             custom_colors=resolved_colors,
             enable_emojis=emojis_flag,
             words_per_beat=wpb,
+            hook_duration=hook_duration,
         )
 
         if razor_events:
@@ -174,6 +179,7 @@ class CaptionCompositor:
         custom_colors: Optional[Dict[str, str]] = None,
         enable_emojis: bool = True,
         words_per_beat: int = 3,
+        hook_duration: Optional[float] = None,
     ) -> List[CaptionEvent]:
         """Retrieve existing or compute canonical Razor CaptionEvents."""
         raw_razor = edit_plan.get("razor_captions", []) if edit_plan else []
@@ -261,23 +267,75 @@ class CaptionCompositor:
             if edit_plan is not None:
                 edit_plan["razor_captions"] = [e.to_edit_plan_entry() for e in events]
 
-        # Normalize external hook_text if provided
-        if hook_text and hook_text.strip():
-            hook_words = set(re.sub(r"[^\w\s]", "", hook_text.lower()).split())
-            for ev in events:
-                clean_w = re.sub(r"[^\w\s]", "", ev.word.lower())
-                if clean_w in hook_words:
+        # Normalize the canonical hook from the EditPlan. Use the same hook
+        # whether this function was called directly or through the orchestrator.
+        canonical_hook = (hook_text or (edit_plan or {}).get("hook_text") or "").strip()
+        if canonical_hook:
+            hook_words = [
+                re.sub(r"[^\w\s]", "", token.lower())
+                for token in canonical_hook.split()
+            ]
+            hook_words = [word for word in hook_words if word]
+            remaining = list(hook_words)
+
+            # Promote only the first matching occurrence during the opening beat.
+            # Later repetitions stay ordinary dialogue captions.
+            first_time = min((ev.start_time for ev in events), default=0.0)
+            effective_hook_duration = min(3.2, max(1.8, float(hook_duration or 3.2)))
+            hook_cutoff = first_time + effective_hook_duration
+
+            # Prefer a complete opening hook phrase when the canonical hook
+            # appears as a contiguous sequence. Promote the whole phrase to one
+            # behind-subject layer so the renderer receives a single coherent
+            # editorial object rather than isolated words.
+            opening_events = [
+                ev for ev in sorted(events, key=lambda item: item.start_time)
+                if ev.start_time <= hook_cutoff
+            ]
+            normalized_hook = [w for w in hook_words if w]
+            complete_match = None
+            for start_idx in range(max(0, len(opening_events) - len(normalized_hook) + 1)):
+                candidate = opening_events[start_idx:start_idx + len(normalized_hook)]
+                candidate_words = [
+                    re.sub(r"[^\w\s]", "", str(ev.word).lower()).strip()
+                    for ev in candidate
+                ]
+                if candidate_words == normalized_hook:
+                    complete_match = candidate
+                    break
+
+            if complete_match:
+                grouped_phrase_id = min((ev.phrase_id for ev in complete_match), default=0)
+                for ev in complete_match:
                     ev.emphasis = EmphasisLevel.HOOK
                     ev.semantic_type = "hook"
                     ev.font_weight = "Black"
-                    ev.fill_color = "#FFE600"
-                    ev.accent_color = "#FFE600"
-                    ev.font_size_scale = max(ev.font_size_scale, 1.25)
-                    # Promote to behind-subject if enabled and word is substantive
-                    if behind_subject_enabled and (
-                        ev.named_entity or ev.numeric_value or ev.action_word or len(clean_w) >= 4
-                    ):
+                    ev.fill_color = (custom_colors or {}).get("second", "#FFE600")
+                    ev.accent_color = (custom_colors or {}).get("second", "#FFE600")
+                    ev.font_size_scale = max(ev.font_size_scale, 1.22)
+                    if behind_subject_enabled:
                         ev.layer = LayerMode.BEHIND_SUBJECT
+                    ev.phrase_id = grouped_phrase_id
+                remaining = []
+            for ev in events:
+                if ev.start_time > hook_cutoff or not remaining:
+                    break
+                clean_w = re.sub(r"[^\w\s]", "", ev.word.lower())
+                if clean_w in remaining:
+                    ev.emphasis = EmphasisLevel.HOOK
+                    ev.semantic_type = "hook"
+                    ev.font_weight = "Black"
+                    ev.fill_color = (custom_colors or {}).get("second", "#FFE600")
+                    ev.accent_color = (custom_colors or {}).get("second", "#FFE600")
+                    ev.font_size_scale = max(ev.font_size_scale, 1.22)
+                    # Preserve the layer explicitly provided by the EditPlan.
+                    # Only a complete contiguous hook phrase is auto-promoted.
+                    remaining.remove(clean_w)
+
+            if edit_plan is not None and any(
+                ev.layer == LayerMode.BEHIND_SUBJECT for ev in events
+            ):
+                edit_plan["subtitles_behind_subject"] = True
 
         if edit_plan is not None and events:
             engine_sync = RazorCaptionEngine(max_group_size=words_per_beat, enable_behind_subject=behind_subject_enabled)
@@ -306,8 +364,23 @@ class CaptionCompositor:
         for ev in razor_events:
             if behind_subject_enabled and ev.emphasis == EmphasisLevel.HOOK and ev.layer == LayerMode.BEHIND_SUBJECT:
                 behind_events.append(ev)
-            else:
-                normal_events.append(ev)
+
+        # Do not render another caption underneath an active behind-subject hook.
+        # The opening treatment should read as one designed visual, not two
+        # overlapping subtitle systems.
+        behind_start = min((ev.start_time for ev in behind_events), default=None)
+        behind_end = max((ev.end_time for ev in behind_events), default=None)
+        for ev in razor_events:
+            if ev in behind_events:
+                continue
+            if (
+                behind_start is not None
+                and behind_end is not None
+                and ev.start_time < behind_end
+                and ev.end_time > behind_start
+            ):
+                continue
+            normal_events.append(ev)
 
         logger.info(
             "[CAPTION-COMPOSITOR] [ZapCap] Split events: %d normal/top, %d behind-subject.",
@@ -538,17 +611,47 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         dialogue_lines: List[str] = []
 
         if is_behind_layer:
-            # Behind layer: render hook events centered across speaker torso/shoulders
+            # The behind-subject hook is one editorial phrase, not a row of
+            # independent word captions. Group promoted words and render them
+            # at an explicit upper-torso position.
+            grouped: Dict[int, List[CaptionEvent]] = {}
             for ev in events:
-                st = format_ass_timestamp(ev.start_time)
-                et = format_ass_timestamp(ev.end_time)
-                word_text = ev.word.strip().upper() if preset.uppercase else ev.word.strip()
-                if ev.emoji and enable_emojis:
-                    word_text = f"{word_text} {ev.emoji}"
-                anim_tag = "{\\fscx100\\fscy100\\t(0,100,\\fscx120\\fscy120)\\t(100,200,\\fscx100\\fscy100)}"
+                grouped.setdefault(ev.phrase_id, []).append(ev)
+
+            for phrase_events in grouped.values():
+                if not phrase_events:
+                    continue
+                st = min(ev.start_time for ev in phrase_events)
+                et = max(ev.end_time for ev in phrase_events)
+                words = [
+                    (
+                        re.sub(r"\s+", " ", str(ev.word).strip()).upper()
+                        if preset.uppercase
+                        else re.sub(r"\s+", " ", str(ev.word).strip())
+                    )
+                    for ev in phrase_events
+                ]
+                if enable_emojis:
+                    words = [
+                        f"{word} {ev.emoji}" if ev.emoji else word
+                        for word, ev in zip(words, phrase_events)
+                    ]
+                phrase_text = " ".join(words).strip()
+
+                # MarginV does not move a middle-centered ASS event. Explicit
+                # position keeps the hook behind the speaker instead of dropping
+                # it at the frame's geometric center.
+                anim_tag = (
+                    "{\\an5\\pos(540,610)\\bord10\\shad4\\blur0"
+                    "\\fscx88\\fscy88"
+                    f"\\t(0,180,\\fscx108\\fscy108)"
+                    f"\\t(180,{max(220, int((et-st)*1000))},\\fscx100\\fscy100)}}"
+                )
                 color_tag = f"{{\\c{second_c_ass}}}"
-                line = f"Dialogue: 2,{st},{et},HookBehind,,0,0,0,,{anim_tag}{color_tag}{word_text}"
-                dialogue_lines.append(line)
+                dialogue_lines.append(
+                    f"Dialogue: 2,{format_ass_timestamp(st)},{format_ass_timestamp(et)},"
+                    f"HookBehind,,0,0,0,,{anim_tag}{color_tag}{phrase_text}"
+                )
         else:
             # Normal kinetic layer: group into short rhythmic beats with active word highlighting
             # Group events by phrase_id
@@ -582,7 +685,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
                     tokens: List[str] = []
                     for ev in beat_events:
-                        word_str = ev.word.strip().upper() if preset.uppercase else ev.word.strip()
+                        clean_word = re.sub(r"\s+", " ", str(ev.word).strip())
+                        word_str = clean_word.upper() if preset.uppercase else clean_word
                         if ev.emoji and enable_emojis:
                             word_str = f"{word_str} {ev.emoji}"
 
@@ -613,4 +717,3 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 # Global singleton instance
 caption_compositor = CaptionCompositor()
-

@@ -268,7 +268,21 @@ class DiffusionAdapter(EditorAdapter):
         # LAYER 3: Graphic Text Overlays & Hook Cards
         # -------------------------------------------------------------
         text_clips: List[Dict[str, Any]] = []
+        subtitle_texts = {
+            " ".join(str(s.get("text", "")).strip().lower().split())
+            for s in edit_plan.subtitles
+            if str(s.get("text", "")).strip()
+        }
         for i, ov in enumerate(edit_plan.text_overlays):
+            overlay_id = str(ov.get("id", f"text_ov_{i+1}"))
+            normalized_overlay_text = " ".join(
+                str(ov.get("text", "")).strip().lower().split()
+            )
+            # Hook/title text is already represented by the caption timeline.
+            # Keeping a second text clip creates the exact double-caption bug.
+            if overlay_id.startswith("cap_hook") or normalized_overlay_text in subtitle_texts:
+                continue
+
             pos_preset = ov.get("position", "center")
             if pos_preset in ["top", "hook"]:
                 pos_y = 0.28
