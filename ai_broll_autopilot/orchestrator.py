@@ -284,6 +284,8 @@ class Orchestrator:
             # 1. INGESTING
             self._update_state(job, JobState.INGESTING, progress=0.1, msg=f"Validating input for '{campaign.name}'")
             duration = get_video_duration(job.source_file)
+            # Keep the canonical source duration available to later export stages.
+            total_duration = duration
             logger.info(f"Input video duration: {duration:.2f}s")
 
             # 2. TRANSCRIBING
