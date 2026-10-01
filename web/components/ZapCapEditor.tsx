@@ -221,7 +221,7 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
   const [thirdColor, setThirdColor] = useState<string>("#00FF66");
   const [yPercent, setYPercent] = useState<number>(84);
   const [enableEmojis, setEnableEmojis] = useState<boolean>(true);
-  const [behindSubject, setBehindSubject] = useState<boolean>(false);
+  const [behindSubject, setBehindSubject] = useState<boolean>(true);
   const [subtitlesEnabled, setSubtitlesEnabled] = useState<boolean>(true);
 
   // Audio / BGM State
@@ -243,7 +243,11 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
     setSubtitlesEnabled(settings.subtitles_enabled !== false);
     setWordsPerBeat(Number(settings.words_per_beat) || 3);
     setAnimation(settings.caption_motion || "pop");
-    setBehindSubject(Boolean(settings.subtitles_behind_subject));
+    setBehindSubject(
+      settings.subtitles_behind_subject === undefined
+        ? true
+        : Boolean(settings.subtitles_behind_subject)
+    );
     setEnableEmojis(settings.enable_emojis !== false);
     if (settings.subtitle_y_percent !== undefined) {
       setYPercent(Number(settings.subtitle_y_percent));
