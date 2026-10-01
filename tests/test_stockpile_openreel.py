@@ -473,4 +473,4 @@ def test_reference_edit_builds_2_to_4_word_caption_beats():
 
     assert len(subtitles) == 3
     assert all(2 <= len(sub["words"]) <= 4 for sub in subtitles)
-    assert [sub["text"] for sub in subtitles] == ["The closer you", "are to the", "source"]
+    assert [sub["text"] for sub in subtitles] == ["The closer you", "are to", "the source"]
