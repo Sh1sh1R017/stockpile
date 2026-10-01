@@ -134,6 +134,7 @@ class CaptionCompositor:
             custom_colors=resolved_colors,
             enable_emojis=emojis_flag,
             words_per_beat=wpb,
+            hook_duration=hook_duration,
         )
 
         if razor_events:
@@ -178,6 +179,7 @@ class CaptionCompositor:
         custom_colors: Optional[Dict[str, str]] = None,
         enable_emojis: bool = True,
         words_per_beat: int = 3,
+        hook_duration: Optional[float] = None,
     ) -> List[CaptionEvent]:
         """Retrieve existing or compute canonical Razor CaptionEvents."""
         raw_razor = edit_plan.get("razor_captions", []) if edit_plan else []
@@ -279,7 +281,42 @@ class CaptionCompositor:
             # Promote only the first matching occurrence during the opening beat.
             # Later repetitions stay ordinary dialogue captions.
             first_time = min((ev.start_time for ev in events), default=0.0)
-            hook_cutoff = first_time + min(3.2, max(1.8, float(hook_duration or 3.2)))
+            effective_hook_duration = min(3.2, max(1.8, float(hook_duration or 3.2)))
+            hook_cutoff = first_time + effective_hook_duration
+
+            # Prefer a complete opening hook phrase when the canonical hook
+            # appears as a contiguous sequence. Promote the whole phrase to one
+            # behind-subject layer so the renderer receives a single coherent
+            # editorial object rather than isolated words.
+            opening_events = [
+                ev for ev in sorted(events, key=lambda item: item.start_time)
+                if ev.start_time <= hook_cutoff
+            ]
+            normalized_hook = [w for w in hook_words if w]
+            complete_match = None
+            for start_idx in range(max(0, len(opening_events) - len(normalized_hook) + 1)):
+                candidate = opening_events[start_idx:start_idx + len(normalized_hook)]
+                candidate_words = [
+                    re.sub(r"[^ws]", "", ev.word.lower()).strip()
+                    for ev in candidate
+                ]
+                if candidate_words == normalized_hook:
+                    complete_match = candidate
+                    break
+
+            if complete_match:
+                grouped_phrase_id = min((ev.phrase_id for ev in complete_match), default=0)
+                for ev in complete_match:
+                    ev.emphasis = EmphasisLevel.HOOK
+                    ev.semantic_type = "hook"
+                    ev.font_weight = "Black"
+                    ev.fill_color = (custom_colors or {}).get("second", "#FFE600")
+                    ev.accent_color = (custom_colors or {}).get("second", "#FFE600")
+                    ev.font_size_scale = max(ev.font_size_scale, 1.22)
+                    if behind_subject_enabled:
+                        ev.layer = LayerMode.BEHIND_SUBJECT
+                    ev.phrase_id = grouped_phrase_id
+                remaining = []
             for ev in events:
                 if ev.start_time > hook_cutoff or not remaining:
                     break
@@ -644,7 +681,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
                     tokens: List[str] = []
                     for ev in beat_events:
-                        word_str = ev.word.strip().upper() if preset.uppercase else ev.word.strip()
+                        clean_word = re.sub(r"\s+", " ", str(ev.word).strip())
+                        word_str = clean_word.upper() if preset.uppercase else clean_word
                         if ev.emoji and enable_emojis:
                             word_str = f"{word_str} {ev.emoji}"
 
@@ -675,4 +713,3 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 # Global singleton instance
 caption_compositor = CaptionCompositor()
-
