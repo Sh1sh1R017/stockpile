@@ -3,6 +3,7 @@
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.services.director import Director
 from ai_broll_autopilot.services.reviewer import Reviewer
+from ai_broll_autopilot.services.transcriber import Transcriber
 from ai_broll_autopilot.campaigns import campaign_registry
 
 
@@ -35,3 +36,8 @@ def test_source_ai_service_constructor_is_offline_safe_without_api_key():
 
     service = AIService(api_key=None)
     assert service.client is None
+
+
+def test_transcriber_constructor_does_not_download_whisper_model():
+    transcriber = Transcriber()
+    assert transcriber.model is None
