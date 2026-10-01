@@ -1,6 +1,7 @@
 """Database module managing SQLite persistence for AI B-Roll Autopilot."""
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -49,8 +50,8 @@ class Database:
             # Graceful migration for existing database instances
             try:
                 cursor.execute("ALTER TABLE jobs ADD COLUMN campaign_id TEXT DEFAULT 'default'")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed optional failure: %s", exc)
 
             # Performance indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)")
@@ -98,8 +99,8 @@ class Database:
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE broll_assets ADD COLUMN {col} {col_type}")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed optional failure: %s", exc)
 
             conn.commit()
 
@@ -402,3 +403,6 @@ class Database:
             repair_count=row["repair_count"],
             campaign_id=row["campaign_id"] if "campaign_id" in row.keys() and row["campaign_id"] else "default",
         )
+
+
+logger = logging.getLogger(__name__)
