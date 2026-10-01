@@ -211,7 +211,7 @@ export const ShotCard: React.FC<ShotCardProps> = React.memo(
                 {Object.entries(shot.meme_captions).map(([k, v]) => (
                   <div key={k} className="flex items-start gap-2">
                     <span className="text-fuchsia-400 shrink-0 font-semibold">{k}:</span>
-                    <span className="text-zinc-300">"{v}"</span>
+                    <span className="text-zinc-300">&quot;{v}&quot;</span>
                   </div>
                 ))}
               </div>
