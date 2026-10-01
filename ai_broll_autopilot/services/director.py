@@ -341,7 +341,13 @@ Return ONLY a valid JSON object matching this schema:
                 requested_duration = float(shot.get("duration", 1.5) or 1.5)
                 if reference_editing:
                     if requested_role not in {"micro", "standard", "hero"}:
-                        requested_role = "micro" if requested_duration <= 0.85 else "standard"
+                        requested_role = (
+                            "hero"
+                            if requested_duration >= float(getattr(style_profile, "hero_broll_min_duration", 3.0))
+                            else "micro"
+                            if requested_duration <= float(getattr(style_profile, "micro_broll_max_duration", 0.85))
+                            else "standard"
+                        )
                     min_clip = float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
                     max_clip = float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8))
                 else:
