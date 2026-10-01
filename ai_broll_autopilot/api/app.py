@@ -2226,8 +2226,8 @@ async def _execute_rerender_job(job_id: str):
             logger.debug("Suppressed optional failure: %s", exc)
 
         job.edit_plan["render_stale"] = False
-        rev = int(job.edit_plan.get("last_render_revision", 0)) + 1
-        job.edit_plan["last_render_revision"] = rev
+        edit_revision = max(1, int(job.edit_plan.get("edit_revision", 1)))
+        job.edit_plan["last_render_revision"] = edit_revision
         db.save_job(job)
         return {
             "status": "success",
