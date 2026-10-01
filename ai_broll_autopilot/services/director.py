@@ -1030,8 +1030,3 @@ Return ONLY a valid JSON object matching this schema:
             len(cleaned), total_broll, coverage_pct, reference_mode,
         )
         return cleaned, coverage_pct
-
-
-def explicit_role_for_shot(shot: Dict[str, Any]) -> bool:
-    """Return whether cadence_role was explicitly supplied by the Director."""
-    return bool(str(shot.get("cadence_role", "") or "").lower().strip())
