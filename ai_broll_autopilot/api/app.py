@@ -2296,7 +2296,7 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
 
     hdr_out = work_dir / f"rendered_{Path(job.source_filename).stem}_hdr10.mp4"
 
-    hdr_tasks[job_id] = {
+    hdr_state = {
         "status": "converting",
         "progress": 0.0,
         "processed_frames": 0,
@@ -2308,18 +2308,41 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
         "started_at": time.time(),
         "metadata": None,
     }
+    hdr_tasks[job_id] = dict(hdr_state)
+    job.edit_plan = job.edit_plan or {}
+    job.edit_plan["hdr_task"] = dict(hdr_state)
+    db.save_job(job)
+
+    def _run_hdr_job():
 
     def _run_hdr_job():
         try:
             from ai_broll_autopilot.services.sdr2hdr_service import SDR2HDREngine
             engine = SDR2HDREngine()
 
+            last_persisted_pct = -5.0
+
             def _on_progress(processed, total, fps):
+                nonlocal last_persisted_pct
                 pct = round((processed / max(total, 1)) * 100, 1)
                 hdr_tasks[job_id]["progress"] = pct
                 hdr_tasks[job_id]["processed_frames"] = processed
                 hdr_tasks[job_id]["total_frames"] = total
                 hdr_tasks[job_id]["fps"] = round(fps, 2)
+                if pct - last_persisted_pct >= 5.0:
+                    last_persisted_pct = pct
+                    j = db.get_job(job_id)
+                    if j:
+                        j.edit_plan = j.edit_plan or {}
+                        task_state = j.edit_plan.setdefault("hdr_task", dict(hdr_state))
+                        task_state.update({
+                            "status": "converting",
+                            "progress": pct,
+                            "processed_frames": processed,
+                            "total_frames": total,
+                            "fps": round(fps, 2),
+                        })
+                        db.save_job(j)
 
             res = engine.convert_and_upscale(
                 input_path=str(candidate_video),
@@ -2336,11 +2359,18 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
             hdr_tasks[job_id]["progress"] = 100.0
             hdr_tasks[job_id]["metadata"] = res.get("metadata", {})
 
-            # Persist HDR info into job edit_plan
             j = db.get_job(job_id)
             if j:
-                if not j.edit_plan:
-                    j.edit_plan = {}
+                j.edit_plan = j.edit_plan or {}
+                j.edit_plan["hdr_task"] = {
+                    **j.edit_plan.get("hdr_task", hdr_state),
+                    "status": "completed",
+                    "progress": 100.0,
+                    "metadata": res.get("metadata", {}),
+                    "completed_at": time.time(),
+                    "output_path": str(hdr_out),
+                    "output_url": f"/api/jobs/{job_id}/hdr-video",
+                }
                 j.edit_plan["hdr_output"] = {
                     "path": str(hdr_out),
                     "url": f"/api/jobs/{job_id}/hdr-video",
@@ -2352,6 +2382,16 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
             logger.error(f"SDR2HDR upscale failed for job {job_id}: {e}")
             hdr_tasks[job_id]["status"] = "error"
             hdr_tasks[job_id]["error"] = str(e)
+            j = db.get_job(job_id)
+            if j:
+                j.edit_plan = j.edit_plan or {}
+                j.edit_plan["hdr_task"] = {
+                    **j.edit_plan.get("hdr_task", hdr_state),
+                    "status": "error",
+                    "error": str(e),
+                    "failed_at": time.time(),
+                }
+                db.save_job(j)
 
     background_tasks.add_task(_run_hdr_job)
     return {"status": "started", "job_id": job_id, "output_url": f"/api/jobs/{job_id}/hdr-video"}
