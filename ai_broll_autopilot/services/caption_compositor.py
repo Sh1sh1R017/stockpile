@@ -277,10 +277,11 @@ class CaptionCompositor:
                     ev.fill_color = "#FFE600"
                     ev.accent_color = "#FFE600"
                     ev.font_size_scale = max(ev.font_size_scale, 1.25)
-                    # Promote to behind-subject if enabled and word is substantive
-                    if behind_subject_enabled and (
-                        ev.named_entity or ev.numeric_value or ev.action_word or len(clean_w) >= 4
-                    ):
+                    # The opening hook is one semantic typography treatment.
+                    # When behind-subject editing is enabled, remove every spoken
+                    # hook word from the normal caption layer so the hook cannot
+                    # render twice in two different positions.
+                    if behind_subject_enabled:
                         ev.layer = LayerMode.BEHIND_SUBJECT
 
         if edit_plan is not None and events:
