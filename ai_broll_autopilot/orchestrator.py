@@ -198,6 +198,7 @@ class Orchestrator:
             render_settings["subtitles_behind_subject"] = True
             if edit_plan is not None:
                 edit_plan["render_settings"] = render_settings
+                edit_plan["subtitles_behind_subject"] = True
 
         compositor = CaptionCompositor(
             target_width=Config.TARGET_WIDTH,
