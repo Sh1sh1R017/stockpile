@@ -164,7 +164,12 @@ class BrollSuperDirector:
             start = float(moment["start"])
             if not reference_style and start < 0.8 and video_duration > 3:
                 start = 0.8
-            if any(abs(start - x["start"]) < 1.0 for x in selected):
+            min_reference_spacing = (
+                float(style_data.get("micro_broll_min_duration", 0.45))
+                if reference_style
+                else 1.0
+            )
+            if any(abs(start - x["start"]) < min_reference_spacing * 0.6 for x in selected):
                 continue
             item = dict(moment)
             item["start"] = start
@@ -183,20 +188,38 @@ class BrollSuperDirector:
             moment = selected[idx]
             shot = dict(original)
             start = float(moment["start"])
-            moment_duration = float(moment.get("recommended_duration", 2.2) or 2.2)
-            # Reference edits mix short visual punctuation with occasional hero
-            # holds; other styles keep the original tighter cut ceiling.
-            duration_cap = hero_max_duration if (
-                reference_style
-                and float(moment.get("impact_score", 0) or 0) >= 85
-                and float(moment.get("visualizability", 0) or 0) >= 85
-            ) else 2.6
-            original_duration = float(shot.get("duration", 2.0) or 2.0)
+            moment_duration = float(moment.get("recommended_duration", 1.5) or 1.5)
+            cadence_role = str(
+                moment.get("cadence_role") or moment.get("visual_role") or ""
+            ).lower().strip()
             if reference_style:
-                duration = min(moment_duration, duration_cap)
+                if cadence_role not in {"micro", "standard", "hero"}:
+                    cadence_role = (
+                        "micro" if moment_duration <= 0.85
+                        else "hero" if moment_duration >= 3.0
+                        else "standard"
+                    )
+                if cadence_role == "micro":
+                    min_duration = float(style_data.get("micro_broll_min_duration", 0.45))
+                    duration_cap = float(style_data.get("micro_broll_max_duration", 0.85))
+                elif cadence_role == "hero":
+                    min_duration = float(style_data.get("hero_broll_min_duration", 3.0))
+                    duration_cap = hero_max_duration
+                else:
+                    min_duration = max(0.85, float(style_data.get("broll_min_duration", 0.8)))
+                    duration_cap = float(style_data.get("broll_max_duration", 2.2))
             else:
-                duration = min(original_duration, moment_duration, duration_cap)
-            duration = max(0.8 if reference_style else 1.2, duration)
+                cadence_role = "standard"
+                min_duration = 1.2
+                duration_cap = 2.6
+
+            original_duration = float(shot.get("duration", 2.0) or 2.0)
+            duration = (
+                min(moment_duration, duration_cap)
+                if reference_style
+                else min(original_duration, moment_duration, duration_cap)
+            )
+            duration = max(min_duration, duration)
             end = min(video_duration, start + duration)
             if end - start < 1.0:
                 continue
@@ -214,6 +237,7 @@ class BrollSuperDirector:
                 "impact_score": float(moment.get("impact_score", 0) or 0),
                 "visualizability": float(moment.get("visualizability", 0) or 0),
                 "broll_priority": float(moment.get("broll_priority", 0) or 0),
+                "cadence_role": cadence_role,
                 "visual_strategy": moment.get("visual_strategy", "literal contextual scene"),
                 "avoid_visuals": moment.get("avoid_visuals", []),
                 "broll_search_queries": moment.get("search_queries", [])[:6],
@@ -232,9 +256,19 @@ class BrollSuperDirector:
         cleaned: List[Dict[str, Any]] = []
         last_end = 0.0
         for shot in merged:
-            start = max(float(shot.get("start_time", 0)), last_end + 0.15)
+            cadence_role = str(shot.get("cadence_role", "standard")).lower().strip()
+            min_spacing = 0.03 if reference_style and cadence_role == "micro" else 0.05 if reference_style else 0.15
+            start = max(float(shot.get("start_time", 0)), last_end + min_spacing)
             end = min(video_duration, float(shot.get("end_time", start + 1.2)))
-            if end - start < 1.0:
+            min_valid_duration = (
+                float(style_data.get("micro_broll_min_duration", 0.45))
+                if reference_style and cadence_role == "micro"
+                else float(style_data.get("hero_broll_min_duration", 3.0))
+                if reference_style and cadence_role == "hero"
+                else 0.85 if reference_style
+                else 1.0
+            )
+            if end - start < min_valid_duration:
                 continue
             shot["start_time"] = round(start, 2)
             shot["end_time"] = round(end, 2)
@@ -257,12 +291,29 @@ class BrollSuperDirector:
                 if total_seconds >= target_seconds:
                     break
                 changed = False
-                for idx, shot in enumerate(cleaned):
+                ordered_indices = sorted(
+                    range(len(cleaned)),
+                    key=lambda i: (
+                        0 if str(cleaned[i].get("cadence_role", "standard")).lower().strip() == "hero" else
+                        1 if str(cleaned[i].get("cadence_role", "standard")).lower().strip() == "standard" else
+                        2
+                    )
+                )
+                for idx in ordered_indices:
+                    shot = cleaned[idx]
                     start_time = float(shot.get("start_time", 0.0))
                     current = float(shot.get("duration", 0.0))
                     impact = float(shot.get("impact_score", 0.0) or 0.0)
                     visual = float(shot.get("visualizability", 0.0) or 0.0)
-                    cap = hero_max_duration if impact >= 85 and visual >= 85 else standard_cap
+                    cadence_role = str(shot.get("cadence_role", "standard")).lower().strip()
+                    if cadence_role == "hero" and impact >= 75 and visual >= 75:
+                        cap = hero_max_duration
+                    elif cadence_role == "micro":
+                        # Preserve the reference's quick visual punctuation. Do not
+                        # inflate micro cuts merely to chase the coverage ratio.
+                        cap = float(style_data.get("micro_broll_max_duration", 0.85))
+                    else:
+                        cap = standard_cap
                     next_start = (
                         float(cleaned[idx + 1].get("start_time", video_duration))
                         if idx + 1 < len(cleaned)
@@ -346,11 +397,16 @@ REFERENCE EDITING MODE:
   coverage when the asset library can support it.
 - Do not leave long stretches of talking-head footage merely because the line is
   not an obvious "impact" moment.
-- Identify sequential visual beats across the full dialogue so the edit can feel
-  like a cinematic montage.
-- Use mixed timing: many 0.8-2.2s cutaways plus rare 3-8s hero holds.
-- A hero hold is appropriate when one strong visual can carry a complete thought,
-  reveal, consequence, or payoff.
+- Identify sequential visual beats across the full dialogue so the edit feels like
+  a designed cinematic montage rather than a slideshow of unrelated stock clips.
+- Use THREE timing roles:
+  1. micro = 0.45-0.85s visual punctuation,
+  2. standard = 0.90-2.20s contextual scene,
+  3. hero = 3.0-7.5s scene that carries a full thought/payoff.
+- A visual burst may contain 3-5 closely related micro/standard shots inside
+  roughly 3.5 seconds. Do NOT deduplicate these merely because they start close
+  together; they are intentionally separate angles of the same idea.
+- After a burst, prefer a return/settle into a longer hero or A-roll beat.
 - Start with a strong visual whenever possible; no mandatory talking-head intro.
 """
 
@@ -394,9 +450,13 @@ B-ROLL RULES:
 
 TIMING:
 - Anchor around the strongest phrase.
-- Typical opportunity is 0.8-3.0 seconds around the anchor dialogue.
+- In reference mode, deliberately choose 0.45-0.85s micro beats for fast visual lists,
+  phrase escalations, reactions, or object changes; use 0.9-2.2s for normal context and
+  3.0-7.5s only when a hero visual can carry the story.
 - B-roll may begin slightly before the key phrase for a natural cut.
-- Avoid overlapping moments unless they are distinct visual beats.
+- Related visual beats are allowed to start within the same 3.5s burst; timing should
+  follow phrase changes and visual reveals, not a one-second spacing rule.
+- Avoid redundant concepts, not close timestamps.
 
 RANK EACH MOMENT 0-100:
 impact_score = importance of the dialogue to the story
@@ -426,6 +486,7 @@ RETURN ONLY VALID JSON:
       "visualizability": 96,
       "broll_priority": 95,
       "best_for_broll": true,
+      "cadence_role": "micro",
       "visual_strategy": "show the human consequence of the line",
       "search_queries": [
         "employee packing office belongings",
