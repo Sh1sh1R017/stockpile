@@ -777,7 +777,24 @@ Respond ONLY with valid JSON matching:
                     subtitle_index += 1
                     group = []
             if group:
-                subtitles.append(self._build_reference_subtitle_group(style, group, subtitle_index))
+                # Avoid a visually weak one-word tail. Rebalance the final
+                # singleton with the preceding beat while preserving word timing.
+                if len(group) == 1 and subtitles and len(subtitles[-1].get("words", [])) >= 3:
+                    previous_words = subtitles[-1]["words"]
+                    combined = previous_words + group
+                    first_len = max(2, min(group_size, len(combined) - 2))
+                    previous_group = combined[:first_len]
+                    final_group = combined[first_len:]
+                    subtitles[-1] = self._build_reference_subtitle_group(
+                        style, previous_group, len(subtitles)
+                    )
+                    subtitles.append(
+                        self._build_reference_subtitle_group(
+                            style, final_group, len(subtitles) + 1
+                        )
+                    )
+                else:
+                    subtitles.append(self._build_reference_subtitle_group(style, group, subtitle_index))
             return subtitles
 
         subtitles = []
