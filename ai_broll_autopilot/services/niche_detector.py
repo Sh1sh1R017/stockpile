@@ -221,6 +221,14 @@ Respond ONLY with valid JSON matching this schema:
         profiles = niche_registry.list_profiles()
         scores: Dict[str, Dict[str, Any]] = {}
 
+        heuristic_aliases = {
+            "sports_basketball": {"court", "gym", "crossover", "crossovers", "dunk", "dunking", "tournament"},
+            "business_startup": {"founder", "fundraising", "pitch", "saas", "investor", "startup"},
+            "tech_ai": {"gpu", "cuda", "python", "neural", "inference", "datacenter"},
+            "gaming": {"boss", "shader", "fps", "multiplayer", "raid", "unreal"},
+            "comedy": {"comedian", "hilarious", "joke", "laugh", "laughter", "reaction"},
+        }
+
         for profile in profiles:
             if profile.id == "generic":
                 continue
@@ -240,6 +248,13 @@ Respond ONLY with valid JSON matching this schema:
                     count = full_text_lower.count(kw_lower)
                     score += count * 2
                     matched_keywords.append(kw)
+
+            for alias in heuristic_aliases.get(profile.id, set()):
+                if alias in words_in_text:
+                    count = full_text_lower.count(alias)
+                    score += count * 2
+                    if alias not in matched_keywords:
+                        matched_keywords.append(alias)
 
             # Match B-roll categories
             for cat in profile.broll_categories:
