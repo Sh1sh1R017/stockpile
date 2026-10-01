@@ -231,7 +231,7 @@ class EditDirectorService:
         # 4. Cuts-First Retention Analysis
         # -------------------------------------------------------------
         from ai_broll_autopilot.services.retention_engine import retention_engine
-        is_podcast = (niche_id == "clean_podcast" or "podcast" in style_id.lower())
+        is_podcast = (niche_id == "clean_podcast" or "podcast" in (style_id or "").lower())
         detected_cuts = retention_engine.analyze_and_detect_cuts(
             transcript_segments=clip_segments,
             video_duration=clip_duration,
@@ -292,6 +292,12 @@ class EditDirectorService:
                 "narrative_role": s.narrative_role.value,
                 "emotional_intent": s.emotional_intent,
                 "confidence": s.scores.confidence,
+                "final_score": s.scores.final_score,
+                "semantic_match": s.scores.semantic_match,
+                "narrative_match": s.scores.narrative_match,
+                "decision": s.scores.decision,
+                "rejection_reason": s.scores.rejection_reason,
+                "status": s.status,
                 "pacing_category": s.pacing_category.value,
                 "shot_type": s.shot_type.value,
                 "asset_path": s.asset_path,
