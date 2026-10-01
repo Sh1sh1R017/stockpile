@@ -215,7 +215,7 @@ class BrollIntelligence:
         asset_text = f"{title} {tags_str} {prompt} {description}"
         moment_text = moment.text.lower()
         def has_term(text: str, term: str) -> bool:
-            return re.search(r"(?<!\\w)" + re.escape(str(term).lower()) + r"(?!\\w)", text) is not None
+            return re.search(r"(?<!\w)" + re.escape(str(term).lower()) + r"(?!\w)", text) is not None
 
         # Hard media eligibility: never approve assets that cannot cover the
         # entire editorial interval at their intended playback speed.
