@@ -58,13 +58,13 @@ def collect_plan_invariant_violations(
         if t < -1e-6 or t > duration + 1e-6:
             violations.append(f"{owner}: time {t:.3f}s outside [0,{duration:.3f}]")
 
-    for collection_name in ("shots", "text_overlays", "graphics", "subtitles", "zooms", "camera_moves"):
+    for collection_name in ("shots", "broll_shots", "text_overlays", "graphics", "subtitles", "zooms", "camera_moves"):
         for index, item in enumerate(_items(plan.get(collection_name, []))):
             for key in TIME_KEYS:
                 if key in item:
                     check_time(f"{collection_name}[{index}].{key}", item[key])
 
-    audio = plan.get("audio_cues", {})
+    audio = plan.get("audio_cues", plan.get("sfx_cues", []))
     audio_items = []
     if isinstance(audio, dict):
         for value in audio.values():
@@ -77,7 +77,7 @@ def collect_plan_invariant_violations(
                 check_time(f"audio_cues[{index}].{key}", item[key])
 
     shots = [
-        shot for shot in _items(plan.get("shots", []))
+        shot for shot in _items(plan.get("shots", plan.get("broll_shots", [])))
         if shot.get("asset_path")
         and shot.get("status", "matched") not in {"rejected", "retained_a_roll"}
     ]
