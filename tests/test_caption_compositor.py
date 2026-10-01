@@ -194,6 +194,7 @@ class TestCaptionCompositorLayers:
             assert "WRONG" in behind_content, "Hook word 'WRONG' must be in behind-subject layer"
             assert "YOU" in behind_content
             assert "WERE" in behind_content
+            assert behind_content.count("Dialogue: 2,") == 1, "Hook phrase should render as one grouped behind-subject layer"
             assert "YOU" not in normal_content
             assert "WERE" not in normal_content
             assert "WRONG" not in normal_content
