@@ -229,7 +229,14 @@ export default function StudioDashboard() {
       }
       if (campRes.ok) {
         const campData = await campRes.json();
-        setCampaigns(campData);
+        const uniqueCampaigns = Array.from(
+          new Map(
+            (Array.isArray(campData) ? campData : [])
+              .filter((campaign): campaign is CampaignSummary => Boolean(campaign?.id))
+              .map((campaign) => [campaign.id, campaign]),
+          ).values(),
+        );
+        setCampaigns(uniqueCampaigns);
       }
     } catch (e) {
       console.error("Failed to load studio resources:", e);
