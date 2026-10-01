@@ -30,7 +30,9 @@ class Director:
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or Config.GEMINI_API_KEY
         self.model_name = model_name or Config.GEMINI_MODEL
-        self.client = genai.Client(api_key=self.api_key)
+        # CI, tests, and offline planning must not require a Gemini key just to
+        # construct the Director. Create the client only when a key exists.
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
     async def create_edit_plan(
         self,
