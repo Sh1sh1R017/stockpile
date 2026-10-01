@@ -977,11 +977,12 @@ Return ONLY a valid JSON object matching this schema:
                     if i + 1 < len(cleaned) else float(video_duration)
                 )
                 role = str(shot.get("cadence_role", "") or "").lower()
+                was_explicit_role = role in {"micro", "standard", "hero"}
                 if not role:
                     role = "standard"
                     shot["cadence_role"] = role
 
-                if i == len(cleaned) - 1 and not explicit_role_for_shot(shot):
+                if i == len(cleaned) - 1 and not was_explicit_role:
                     role = "hero"
                     shot["cadence_role"] = "hero"
 
