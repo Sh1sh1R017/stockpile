@@ -72,7 +72,7 @@ PLAN SUMMARY:
 TASK:
 Verify the visual execution quality of this edited video.
 Inspect whether the B-roll cutaway placement, pacing, and visual storytelling are sound.
-Check that B-roll clips are short, punchy (2-3 seconds), and that streamer reaction clips fit the energy.
+Check that B-roll clips respect the approved 0.65-1.8 second interval contract and that streamer reaction clips fit the energy.
 
 OUTPUT FORMAT:
 Return JSON:
@@ -192,9 +192,11 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
                 # Remove dirty watermarked asset so clean stock footage or A-roll is preserved
                 shot.pop("asset_path", None)
                 shot["status"] = "pending"
-            elif shot.get("duration", 0) > 3.0 and shot.get("style") == "stockpile":
-                shot["duration"] = 2.5
-                shot["end_time"] = round(shot["start_time"] + 2.5, 2)
+            elif shot.get("duration", 0) > 1.8 and shot.get("style") == "stockpile":
+                # Downstream review must not mutate approved timing. Flag the
+                # shot for upstream replanning instead.
+                shot["status"] = "needs_replan"
+                shot["review_issue"] = "B-roll interval exceeds 1.8s contract"
 
         edit_plan["shots"] = shots
         return edit_plan
