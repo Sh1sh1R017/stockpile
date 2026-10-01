@@ -11,6 +11,8 @@ from ai_broll_autopilot.config import Config
 
 logger = logging.getLogger(__name__)
 
+_UNSET_API_KEY = object()
+
 
 def clean_json_string(text: str) -> str:
     """Clean markdown markers and trailing noise from model responses."""
@@ -27,11 +29,10 @@ def clean_json_string(text: str) -> str:
 class Director:
     """Creative Director engine using Gemini to plan visual B-roll sequences."""
 
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or Config.GEMINI_API_KEY
+    def __init__(self, api_key: Optional[str] = _UNSET_API_KEY, model_name: Optional[str] = None):
+        # Omitted api_key means "use configured key"; explicit None means offline.
+        self.api_key = Config.GEMINI_API_KEY if api_key is _UNSET_API_KEY else api_key
         self.model_name = model_name or Config.GEMINI_MODEL
-        # CI, tests, and offline planning must not require a Gemini key just to
-        # construct the Director. Create the client only when a key exists.
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
 
     async def create_edit_plan(
