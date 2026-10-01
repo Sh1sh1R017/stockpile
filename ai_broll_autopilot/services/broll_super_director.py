@@ -129,170 +129,91 @@ class BrollSuperDirector:
         analysis: Dict[str, Any],
         video_duration: float,
     ) -> Dict[str, Any]:
-        """Retimes existing B-roll around the strongest emotional dialogue."""
+        """Enrich existing B-roll decisions without creating or retiming shots.
+
+        B-roll timing and eligibility belong to the canonical editorial planner.
+        The Super Director may add contextual search/semantic metadata to an
+        existing shot, but it cannot create placeholders, change intervals, or
+        chase a coverage percentage.
+        """
         moments = [
             m for m in (analysis.get("moments") or [])
             if m.get("best_for_broll", True)
         ]
-        if not moments:
+        existing = [dict(shot) for shot in (plan.get("shots") or [])]
+        if not existing or not moments:
             plan["broll_super_analysis"] = analysis
             return plan
 
-        existing = list(plan.get("shots") or [])
-        if not existing:
-            existing = [{} for _ in range(min(10, len(moments)))]
+        def overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
+            return max(0.0, min(a_end, b_end) - max(a_start, b_start))
 
-        style_data = plan.get("style") if isinstance(plan.get("style"), dict) else {}
-        reference_style = bool(
-            plan.get("reference_editing")
-            or style_data.get("reference_style")
-            or style_data.get("id") in {"cinematic_social_editorial", "cinematic_editorial"}
+        used = set()
+        enriched: List[Dict[str, Any]] = []
+        for shot in existing:
+            start = float(shot.get("start_time", 0.0) or 0.0)
+            end = float(shot.get("end_time", start) or start)
+
+            candidates = []
+            for index, moment in enumerate(moments):
+                if index in used:
+                    continue
+                try:
+                    m_start = float(moment.get("start", 0.0) or 0.0)
+                    m_end = float(moment.get("end", m_start) or m_start)
+                except (TypeError, ValueError):
+                    continue
+                candidates.append((
+                    overlap(start, end, m_start, m_end),
+                    -abs(start - m_start),
+                    float(moment.get("broll_priority", 0) or 0),
+                    index,
+                    moment,
+                ))
+
+            if candidates:
+                _, _, _, index, moment = max(candidates)
+                used.add(index)
+                shot["dialogue_quote"] = moment.get("anchor_quote") or shot.get("dialogue_quote", "")
+                shot["emotional_core"] = moment.get("emotion") or shot.get("emotional_core", "context")
+                shot["emotion"] = moment.get("emotion", shot.get("emotion", "neutral"))
+                shot["sentiment"] = moment.get("sentiment", shot.get("sentiment", "neutral"))
+                shot["tone_of_voice"] = moment.get("tone_of_voice", shot.get("tone_of_voice", "neutral"))
+                shot["tone_intensity"] = float(moment.get("tone_intensity", shot.get("tone_intensity", 0)) or 0)
+                shot["impact_score"] = float(moment.get("impact_score", shot.get("impact_score", 0)) or 0)
+                shot["visualizability"] = float(moment.get("visualizability", shot.get("visualizability", 0)) or 0)
+                shot["broll_priority"] = float(moment.get("broll_priority", shot.get("broll_priority", 0)) or 0)
+                shot["visual_strategy"] = moment.get("visual_strategy", shot.get("visual_strategy", "literal contextual scene"))
+                shot["avoid_visuals"] = list(moment.get("avoid_visuals") or shot.get("avoid_visuals") or [])[:6]
+                queries = [
+                    str(q).strip()
+                    for q in (moment.get("search_queries") or [])
+                    if str(q).strip()
+                ][:6]
+                if queries:
+                    shot["broll_search_queries"] = queries
+                    shot["search_prompt"] = queries[0]
+                    shot["micro_prompts"] = queries[:5]
+                shot["super_director_moment_id"] = moment.get("moment_id") or f"super_{index}"
+
+            # Preserve the canonical approved interval exactly.
+            enriched.append(shot)
+
+        plan["shots"] = enriched
+        plan["broll_shot_count"] = len(enriched)
+        total = sum(
+            max(0.0, float(shot.get("end_time", 0)) - float(shot.get("start_time", 0)))
+            for shot in enriched
+            if shot.get("asset_path")
         )
-        hero_max_duration = float(style_data.get("hero_broll_max_duration", 7.5 if reference_style else 2.6))
-
-        moments.sort(
-            key=lambda m: (
-                float(m.get("broll_priority", 0)),
-                float(m.get("impact_score", 0)),
-                float(m.get("visualizability", 0)),
-            ),
-            reverse=True,
-        )
-
-        selected: List[Dict[str, Any]] = []
-        for moment in moments:
-            start = float(moment["start"])
-            if not reference_style and start < 0.8 and video_duration > 3:
-                start = 0.8
-            min_reference_spacing = (
-                float(style_data.get("micro_broll_min_duration", 0.45))
-                if reference_style
-                else 1.0
-            )
-            if any(abs(start - x["start"]) < min_reference_spacing * 0.6 for x in selected):
-                continue
-            item = dict(moment)
-            item["start"] = start
-            selected.append(item)
-            if len(selected) >= len(existing):
-                break
-
-        selected.sort(key=lambda m: float(m["start"]))
-        merged: List[Dict[str, Any]] = []
-        for idx, original in enumerate(existing):
-            if idx >= len(selected):
-                # Do not preserve low-value Director filler when the super model
-                # explicitly found fewer strong visual opportunities.
-                continue
-
-            moment = selected[idx]
-            shot = dict(original)
-            start = float(moment["start"])
-            moment_duration = float(moment.get("recommended_duration", 1.5) or 1.5)
-            cadence_role = str(
-                moment.get("cadence_role") or moment.get("visual_role") or ""
-            ).lower().strip()
-            if reference_style:
-                if cadence_role not in {"micro", "standard", "hero"}:
-                    cadence_role = (
-                        "micro" if moment_duration <= 0.85
-                        else "hero" if moment_duration >= 3.0
-                        else "standard"
-                    )
-                if cadence_role == "micro":
-                    min_duration = float(style_data.get("micro_broll_min_duration", 0.45))
-                    duration_cap = float(style_data.get("micro_broll_max_duration", 0.85))
-                elif cadence_role == "hero":
-                    min_duration = float(style_data.get("hero_broll_min_duration", 3.0))
-                    duration_cap = hero_max_duration
-                else:
-                    min_duration = max(0.85, float(style_data.get("broll_min_duration", 0.8)))
-                    duration_cap = float(style_data.get("broll_max_duration", 2.2))
-            else:
-                cadence_role = "standard"
-                min_duration = 1.2
-                duration_cap = 2.6
-
-            original_duration = float(shot.get("duration", 2.0) or 2.0)
-            duration = (
-                min(moment_duration, duration_cap)
-                if reference_style
-                else min(original_duration, moment_duration, duration_cap)
-            )
-            duration = max(min_duration, duration)
-            end = min(video_duration, start + duration)
-            if end - start < 1.0:
-                continue
-
-            shot.update({
-                "start_time": round(start, 2),
-                "end_time": round(end, 2),
-                "duration": round(end - start, 2),
-                "dialogue_quote": moment.get("anchor_quote") or shot.get("dialogue_quote", ""),
-                "emotional_core": moment.get("emotion") or shot.get("emotional_core", "context"),
-                "emotion": moment.get("emotion", "neutral"),
-                "sentiment": moment.get("sentiment", "neutral"),
-                "tone_of_voice": moment.get("tone_of_voice", "neutral"),
-                "tone_intensity": float(moment.get("tone_intensity", 0) or 0),
-                "impact_score": float(moment.get("impact_score", 0) or 0),
-                "visualizability": float(moment.get("visualizability", 0) or 0),
-                "broll_priority": float(moment.get("broll_priority", 0) or 0),
-                "cadence_role": cadence_role,
-                "visual_strategy": moment.get("visual_strategy", "literal contextual scene"),
-                "avoid_visuals": moment.get("avoid_visuals", []),
-                "broll_search_queries": moment.get("search_queries", [])[:6],
-                "narrative_reason": moment.get(
-                    "why_broll",
-                    "High-impact dialogue with strong visual interpretation.",
-                ),
-            })
-
-            if shot["broll_search_queries"]:
-                shot["search_prompt"] = shot["broll_search_queries"][0]
-                shot["micro_prompts"] = shot["broll_search_queries"][:5]
-            merged.append(shot)
-
-        merged.sort(key=lambda s: float(s.get("start_time", 0)))
-        cleaned: List[Dict[str, Any]] = []
-        last_end = 0.0
-        for shot in merged:
-            cadence_role = str(shot.get("cadence_role", "standard")).lower().strip()
-            min_spacing = 0.03 if reference_style and cadence_role == "micro" else 0.05 if reference_style else 0.15
-            start = max(float(shot.get("start_time", 0)), last_end + min_spacing)
-            end = min(video_duration, float(shot.get("end_time", start + 1.2)))
-            min_valid_duration = (
-                float(style_data.get("micro_broll_min_duration", 0.45))
-                if reference_style and cadence_role == "micro"
-                else float(style_data.get("hero_broll_min_duration", 3.0))
-                if reference_style and cadence_role == "hero"
-                else 0.85 if reference_style
-                else 1.0
-            )
-            if end - start < min_valid_duration:
-                continue
-            shot["start_time"] = round(start, 2)
-            shot["end_time"] = round(end, 2)
-            shot["duration"] = round(end - start, 2)
-            cleaned.append(shot)
-            last_end = end
-
-        # Coverage is telemetry, not an objective. Never extend an approved
-        # or selected shot merely to approach a target coverage percentage.
-        total = round(sum(float(s.get("duration", 0)) for s in cleaned), 2)
-        plan["shots"] = cleaned
-        plan["broll_shot_count"] = len(cleaned)
-        plan["broll_coverage_seconds"] = total
+        plan["broll_coverage_seconds"] = round(total, 2)
         plan["broll_coverage_percentage"] = round(
-            (total / max(video_duration, 0.001)) * 100,
+            (total / max(float(video_duration), 0.001)) * 100.0,
             1,
         )
         plan["broll_super_analysis"] = analysis
         plan["broll_selection_model"] = analysis.get("model", self.model_name)
-        plan["broll_selection_policy"] = (
-            "reference-emotion-first"
-            if reference_style
-            else "emotion-first"
-        )
+        plan["broll_selection_policy"] = "metadata-enrichment-only"
         return plan
 
     @staticmethod
@@ -334,21 +255,11 @@ class BrollSuperDirector:
         if reference_mode:
             reference_rules = """
 REFERENCE EDITING MODE:
-- Treat B-roll as the primary visual language, aiming for roughly 85-95% visual
-  coverage when the asset library can support it.
-- Do not leave long stretches of talking-head footage merely because the line is
-  not an obvious "impact" moment.
-- Identify sequential visual beats across the full dialogue so the edit feels like
-  a designed cinematic montage rather than a slideshow of unrelated stock clips.
-- Use THREE timing roles:
-  1. micro = 0.45-0.85s visual punctuation,
-  2. standard = 0.90-2.20s contextual scene,
-  3. hero = 3.0-7.5s scene that carries a full thought/payoff.
-- A visual burst may contain 3-5 closely related micro/standard shots inside
-  roughly 3.5 seconds. Do NOT deduplicate these merely because they start close
-  together; they are intentionally separate angles of the same idea.
-- After a burst, prefer a return/settle into a longer hero or A-roll beat.
-- Start with a strong visual whenever possible; no mandatory talking-head intro.
+- Use B-roll only where the existing editorial plan already identifies a strong,
+  truthful visual opportunity.
+- Coverage is telemetry, not a quota.
+- Do not invent timing roles or duration targets downstream.
+- Preserve the canonical A-roll/B-roll interval decisions made by the editor.
 """
 
         return f"""You are the B-ROLL SUPER DIRECTOR for an AI short-form editor.
@@ -391,12 +302,10 @@ B-ROLL RULES:
 
 TIMING:
 - Anchor around the strongest phrase.
-- In reference mode, deliberately choose 0.45-0.85s micro beats for fast visual lists,
-  phrase escalations, reactions, or object changes; use 0.9-2.2s for normal context and
-  3.0-7.5s only when a hero visual can carry the story.
-- B-roll may begin slightly before the key phrase for a natural cut.
-- Related visual beats are allowed to start within the same 3.5s burst; timing should
-  follow phrase changes and visual reveals, not a one-second spacing rule.
+- Recommend visual context and searchable subjects, but never dictate approved timing
+  or extend an existing interval.
+- Timing is owned by the canonical editorial decision; use the supplied moment only
+  as semantic context.
 - Avoid redundant concepts, not close timestamps.
 
 RANK EACH MOMENT 0-100:
