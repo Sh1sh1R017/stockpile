@@ -312,9 +312,11 @@ class TestEditorialIntelligence(unittest.TestCase):
 
         self.assertIsInstance(report, QualityAuditReport)
         self.assertGreaterEqual(report.overall_score, 0.70)
-        # Quality Gate should have auto-repaired the early start to >= 1.2s
-        self.assertGreaterEqual(repaired_spec.broll_shots[0].start_time, 1.2, "Opening face rule must be auto-repaired to >=1.2s")
-        self.assertGreater(len(report.repaired_items), 0, "Repairs applied should be documented in audit report")
+        # Quality Gate must report the violation, but never retime an approved shot.
+        self.assertEqual(repaired_spec.broll_shots[0].start_time, 0.5)
+        opening_check = next(c for c in report.checks if c.name == "opening_face_rule")
+        self.assertFalse(opening_check.passed)
+        self.assertEqual(opening_check.severity, "error")
 
     # =========================================================================
     # 7. FULL PIPELINE & DIFFUSION STUDIO EXECUTION
