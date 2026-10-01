@@ -99,45 +99,23 @@ class Director:
         )
         style_profile = style_registry.get_style(style_id)
 
-        # Target calculations: a reference style can intentionally override the
-        # generic niche's conservative B-roll ratio.
-        style_broll_ratio = getattr(style_profile, "broll_target_ratio", None)
-        target_broll_ratio = (
-            float(style_broll_ratio)
-            if style_broll_ratio is not None
-            else (niche.editing.max_broll_ratio if niche else campaign.max_broll_ratio)
-        )
-
-        target_broll_seconds = round(video_duration * target_broll_ratio, 1)
-        target_aroll_seconds = round(video_duration - target_broll_seconds, 1)
-
-        # The reference edit is denser than a normal podcast cut: it uses small
-        # visual bursts plus a few longer hero scenes. Give the Director enough
-        # shot slots to express those bursts without forcing equal spacing.
+        # Relevance-first planning: visual coverage is telemetry, not a quota.
+        # Give the Director a bounded opportunity budget without requiring all slots
+        # to be used. Each slot must still earn its place semantically.
         reference_mode = bool(getattr(style_profile, "reference_style", False))
-        avg_cut_seconds = 2.0 if reference_mode else 2.8
-        max_possible_shots = (
-            max(3, min(14, int(video_duration / avg_cut_seconds)))
-            if reference_mode
-            else max(3, int(video_duration / avg_cut_seconds))
+        max_visual_slots = (
+            max(2, min(14, int(video_duration / (1.45 if reference_mode else 2.0))))
+            if video_duration > 0
+            else 0
         )
-        target_shots = max(
-            3,
-            min(
-                max_possible_shots,
-                int(round(
-                    target_broll_seconds
-                    / (1.55 if reference_mode else 2.0)
-                )),
-            ),
-        )
+        max_visual_slots = min(max_visual_slots, len(segments)) if segments else 0
 
         # Partition video duration into 3 narrative acts for uniform timeline distribution
         t_act1 = round(video_duration * 0.33, 1)
         t_act2 = round(video_duration * 0.66, 1)
-        quota_act1 = max(1, target_shots // 3)
-        quota_act2 = max(1, target_shots // 3)
-        quota_act3 = max(1, target_shots - quota_act1 - quota_act2)
+        quota_act1 = max(0, max_visual_slots // 3)
+        quota_act2 = max(0, max_visual_slots // 3)
+        quota_act3 = max(0, max_visual_slots - quota_act1 - quota_act2)
 
         # Segment grouping by act for explicit LLM awareness
         act1_segs = []
@@ -189,9 +167,9 @@ RELEVANT VISUAL THEMES: {niche_keywords_hint}
 MANDATORY DIRECTING OBJECTIVES:
 1. RHYTHMIC EDITING, NOT A MECHANICAL GRID:
    - Total Video Duration: {video_duration:.2f} seconds.
-   - Target Total B-Roll Duration: ~{target_broll_seconds:.1f} seconds (~{int(target_broll_ratio*100)}% of video).
-   - Target Total Speaker (A-Roll) Duration: ~{target_aroll_seconds:.1f} seconds.
-   - Generate EXACTLY {target_shots} contextual cutaways, but do NOT force equal spacing.
+   - B-ROLL COVERAGE IS NOT A TARGET. There is no required percentage or minimum number of cutaways.
+   - You may use up to {max_visual_slots} contextual cutaways only when each one materially reinforces the spoken idea.
+   - Do NOT fill unused visual slots and do NOT force equal spacing.
    - Build the sequence around the speech: setup -> literal context -> reaction/consequence -> narrative hold -> payoff.
    - REFERENCE CADENCE:
      • MICRO burst: 0.45-0.85s. Use for a short phrase, list, escalation, object swap, reaction, or rapid visual punctuation.
@@ -237,13 +215,13 @@ MANDATORY DIRECTING OBJECTIVES:
 
 VIDEO DURATION: {video_duration:.2f} seconds
 TIMESTAMPED TRANSCRIPT (DIVIDED INTO 3 ACTS):
-=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — Place {quota_act1} cut(s) here ===
+=== ACT 1 (HOOK & SETUP: 0.0s - {t_act1:.1f}s) — At most {quota_act1} optional visual opportunity slot(s) ===
 {act1_txt}
 
-=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — Place {quota_act2} cut(s) here ===
+=== ACT 2 (BODY & DEVELOPMENT: {t_act1:.1f}s - {t_act2:.1f}s) — At most {quota_act2} optional visual opportunity slot(s) ===
 {act2_txt}
 
-=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — Place {quota_act3} cut(s) here ===
+=== ACT 3 (CLIMAX & CONCLUSION: {t_act2:.1f}s - {video_duration:.1f}s) — At most {quota_act3} optional visual opportunity slot(s) ===
 {act3_txt}
 
 {learned_rules}
