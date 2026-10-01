@@ -285,7 +285,7 @@ class SemanticRetrievalEngine:
         domain_scores = {d: 0 for d in SemanticDomain}
         for d, sig in self.DOMAIN_SIGNATURES.items():
             for kw in sig["keywords"]:
-                if kw in text_lower:
+                if re.search(r"(?<!\w)" + re.escape(kw.lower()) + r"(?!\w)", text_lower):
                     domain_scores[d] += 1
 
         best_domain = max(domain_scores.items(), key=lambda x: x[1])
@@ -307,11 +307,16 @@ class SemanticRetrievalEngine:
         asset_id = str(asset.get("id", asset.get("asset_id", "asset_unknown")))
         asset_name = asset.get("title", asset.get("name", "Unknown Visual"))
         asset_path = asset.get("file_path", asset.get("path", ""))
-        tags = [t.lower() for t in asset.get("tags", [])]
-        category = asset.get("category", "").lower()
-        description = asset.get("description", "").lower()
+        raw_tags = asset.get("tags", [])
+        if isinstance(raw_tags, str):
+            tags = [part.strip().lower() for part in re.split(r"[,;|]", raw_tags) if part.strip()]
+        else:
+            tags = [str(t).strip().lower() for t in raw_tags if t is not None and str(t).strip()]
+        category = str(asset.get("category", "") or "").lower()
+        description = str(asset.get("description", "") or "").lower()
+        prompt = str(asset.get("prompt", "") or "").lower()
 
-        combined_asset_text = f"{asset_name.lower()} {category} {' '.join(tags)} {description}"
+        combined_asset_text = f"{asset_name.lower()} {category} {' '.join(tags)} {prompt} {description}"
         moment_text_lower = moment.text.lower()
 
         # -------------------------------------------------------------
@@ -365,7 +370,7 @@ class SemanticRetrievalEngine:
         topic_coherence = 0.5
         if moment.semantic_topic and moment.semantic_topic.lower() in combined_asset_text:
             topic_coherence = 0.95
-        elif category in moment_text_lower:
+        elif category and category in moment_text_lower:
             topic_coherence = 0.85
 
         # 3. Action Match
