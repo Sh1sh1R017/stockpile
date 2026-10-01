@@ -169,7 +169,9 @@ class EditDirectorService:
             except Exception as e:
                 logger.warning(f"Could not initialize GenAI client: {e}")
 
-\n\n    @staticmethod
+
+
+    @staticmethod
     def _scope_segments(segments, clip_in, clip_out):
         duration = max(1.0, clip_out - clip_in)
         out = []
