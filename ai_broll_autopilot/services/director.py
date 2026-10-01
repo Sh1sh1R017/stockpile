@@ -926,7 +926,14 @@ Return ONLY a valid JSON object matching this schema:
                 )
                 continue
 
-            if start >= video_duration or duration <= 0:
+            if start < 1.2:
+                logger.warning(
+                    "Dropping B-roll interval [%s] before the 1.2s opening-face boundary.",
+                    shot.get("shot_id", "unknown"),
+                )
+                continue
+
+            if start >= video_duration or end > video_duration or duration <= 0:
                 continue
 
             if duration < min_duration or duration > max_duration:
@@ -937,7 +944,6 @@ Return ONLY a valid JSON object matching this schema:
                 )
                 continue
 
-            end = min(end, video_duration)
             duration = round(end - start, 2)
             if duration < min_duration:
                 continue
