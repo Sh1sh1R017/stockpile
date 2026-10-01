@@ -275,9 +275,9 @@ class SemanticRetrievalEngine:
         active_rules = []
 
         for rule in self.DISAMBIGUATION_RULES:
-            if re.search(r"(?<!\\w)" + re.escape(rule.term.lower()) + r"(?!\\w)", text_lower):
+            if re.search(r"(?<!\w)" + re.escape(rule.term.lower()) + r"(?!\w)", text_lower):
                 # Check if any context keywords confirm the rule
-                hits = sum(1 for kw in rule.context_keywords if re.search(r"(?<!\\w)" + re.escape(kw.lower()) + r"(?!\\w)", text_lower))
+                hits = sum(1 for kw in rule.context_keywords if re.search(r"(?<!\w)" + re.escape(kw.lower()) + r"(?!\w)", text_lower))
                 if hits > 0:
                     active_rules.append(rule)
 
@@ -330,7 +330,7 @@ class SemanticRetrievalEngine:
         for rule in active_rules:
             # Check if candidate contains veto keywords for this disambiguated term
             for veto_kw in rule.veto_keywords:
-                if re.search(r"(?<!\\w)" + re.escape(veto_kw.lower()) + r"(?!\\w)", combined_asset_text):
+                if re.search(r"(?<!\w)" + re.escape(veto_kw.lower()) + r"(?!\w)", combined_asset_text):
                     is_vetoed = True
                     contradiction_score = 1.0
                     veto_reason = f"Metaphor contradiction: '{rule.term}' refers to {rule.inferred_domain.value}. Vetoed due to athlete/sports visual '{veto_kw}'."
@@ -342,7 +342,7 @@ class SemanticRetrievalEngine:
         if not is_vetoed and detected_domain in self.DOMAIN_SIGNATURES:
             forbidden = self.DOMAIN_SIGNATURES[detected_domain]["forbidden_visuals"]
             for f_kw in forbidden:
-                if re.search(r"(?<!\\w)" + re.escape(f_kw.lower()) + r"(?!\\w)", combined_asset_text):
+                if re.search(r"(?<!\w)" + re.escape(f_kw.lower()) + r"(?!\w)", combined_asset_text):
                     is_vetoed = True
                     contradiction_score = 0.95
                     veto_reason = f"Domain contradiction: Content is {detected_domain.value}. Disallowed visual '{f_kw}' detected."
@@ -352,7 +352,7 @@ class SemanticRetrievalEngine:
         if not is_vetoed:
             if moment.sentiment == SentimentCategory.NEGATIVE:
                 party_cues = ["beach", "party", "cheering", "fireworks", "celebration"]
-                if any(re.search(r"(?<!\\w)" + re.escape(p) + r"(?!\\w)", combined_asset_text) for p in party_cues):
+                if any(re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", combined_asset_text) for p in party_cues):
                     contradiction_score = 0.80
                     is_vetoed = True
                     veto_reason = "Emotional contradiction: Somber/serious dialogue paired with celebratory visual."
