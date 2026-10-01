@@ -76,7 +76,13 @@ class Renderer:
         style_data = edit_plan.get("style") if isinstance(edit_plan.get("style"), dict) else {}
         editing_style = str(edit_plan.get("editing_style") or style_data.get("id") or "")
         reference_style = bool(edit_plan.get("reference_editing") or style_data.get("reference_style") or editing_style in {"cinematic_social_editorial", "cinematic_editorial"})
-        shots = [s for s in edit_plan.get("shots", []) if s.get("asset_path")]
+        shots = [
+            {**shot, "_input_idx": idx}
+            for idx, shot in enumerate(
+                (s for s in edit_plan.get("shots", []) if s.get("asset_path")),
+                start=1,
+            )
+        ]
         audio_sfx_list: List[Dict[str, Any]] = []
         for shot in shots:
             start_t = float(shot.get("start_time", 0.0))
@@ -143,7 +149,11 @@ class Renderer:
             cyber_grid_backdrop_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(bg_p)]); current_input_idx += 1
             cyber_grid_mask_before_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(mb_p)]); current_input_idx += 1
             cyber_grid_mask_after_idx = current_input_idx; cmd.extend(["-loop", "1", "-i", str(ma_p)]); current_input_idx += 1
-        audio_inputs_start = current_input_idx
+        broll_max_input_idx = max(
+            [0] + [int(shot.get("_input_idx", 0)) for shot in shots]
+        )
+        audio_inputs_start = max(current_input_idx, broll_max_input_idx + 1)
+        current_input_idx = audio_inputs_start
         for sfx in audio_sfx_list:
             cmd.extend(["-i", str(sfx["path"])])
         bgm_stream_idx = None
