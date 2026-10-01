@@ -52,15 +52,21 @@ class Renderer:
             return ["-c:v", "h264_nvenc", "-preset", Config.NVENC_PRESET, "-rc", "vbr", "-cq", str(Config.NVENC_CQ), "-b:v", "0"]
         return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(Config.VIDEO_CRF), "-threads", "0"]
 
-    @staticmethod
-    def _cuda_decode_args() -> List[str]:
-        try:
-            probe = subprocess.run(["ffmpeg", "-hide_banner", "-hwaccels"], capture_output=True, text=True, timeout=5)
-            if "cuda" in (probe.stdout or "").lower():
-                return ["-hwaccel", "cuda"]
-        except Exception as exc:
-            logger.debug("Suppressed optional failure: %s", exc)
-        return []
+    @classmethod
+    def _cuda_decode_args(cls) -> List[str]:
+        if not hasattr(cls, "_cuda_supported"):
+            cls._cuda_supported = False
+            try:
+                probe = subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-y", "-hwaccel", "cuda", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04", "-f", "null", "-"],
+                    capture_output=True,
+                    timeout=3
+                )
+                if probe.returncode == 0:
+                    cls._cuda_supported = True
+            except Exception as exc:
+                logger.debug("Suppressed CUDA hwaccel probe failure: %s", exc)
+        return ["-hwaccel", "cuda"] if cls._cuda_supported else []
 
     async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str, ass_subtitles_path: str = None, bgm_path: str = None, bgm_volume: float = 0.15, ducking_enabled: bool = True, upscale_hdr: bool = False, hdr_scale: float = 1.0, hdr_tone: str = "vivid", watermark_path: str = None, watermark_position: str = "bottom_safe", watermark_scale: float = 0.28, preserve_dialogue_only: bool = False, frame_overlay_path: str = None, viewport: tuple = None, behind_subject_ass_path: str = None, subject_matte_path: str = None, layout_mode: str = None, source_start_time: float = 0.0, render_duration: float = None) -> str:
         """Render composite video. Optional fast mode uses a 720x1280 working canvas."""
