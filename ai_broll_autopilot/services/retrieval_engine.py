@@ -399,15 +399,31 @@ class SemanticRetrievalEngine:
             return CandidateEvaluationResult(asset_id=asset_id, asset_name=asset_name, asset_path=asset_path, semantic_match=0.0, topic_coherence=0.0, action_match=0.0, visual_quality=0.0, sentiment_resonance=0.0, duration_fit=0.0, freshness=0.0, variety_penalty=0.0, contradiction_score=1.0, final_score=0.0, confidence=0.0, is_vetoed=True, veto_reason="Watermarked asset")
 
         # 6. Duration Fit
+        # Missing duration is an uncertainty, not evidence that the clip is bad.
+        # The final matcher still performs ffprobe/media eligibility before a clip
+        # is committed to the EditPlan.
         asset_duration_raw = asset.get("duration")
-        if asset_duration_raw is None:
-            return CandidateEvaluationResult(asset_id=asset_id, asset_name=asset_name, asset_path=asset_path, semantic_match=0.0, topic_coherence=0.0, action_match=0.0, visual_quality=0.0, sentiment_resonance=0.0, duration_fit=0.0, freshness=0.0, variety_penalty=0.0, contradiction_score=1.0, final_score=0.0, confidence=0.0, is_vetoed=True, veto_reason="Unknown asset duration")
-        speed = max(0.1, float(asset.get("speed") or 1.0))
-        asset_duration = float(asset_duration_raw) / speed
-        if asset_duration + 0.05 < target_duration:
-            duration_fit = max(0.2, asset_duration / max(1.0, target_duration))
+        duration_unknown = asset_duration_raw is None
+        if duration_unknown:
+            duration_fit = 0.5
+            asset_duration = None
         else:
-            duration_fit = 1.0
+            try:
+                asset_duration = float(asset_duration_raw)
+            except (TypeError, ValueError):
+                asset_duration = None
+                duration_unknown = True
+                duration_fit = 0.5
+
+        speed = max(0.1, float(asset.get("speed") or 1.0))
+        if asset_duration is not None:
+            asset_duration = asset_duration / speed
+        asset_duration = float(asset_duration_raw) / speed
+        if asset_duration is not None:
+            if asset_duration + 0.05 < target_duration:
+                duration_fit = max(0.2, asset_duration / max(1.0, target_duration))
+            else:
+                duration_fit = 1.0
 
         # 7. Freshness (usage penalty)
         usage_count = int(asset.get("usage_count", 0))
