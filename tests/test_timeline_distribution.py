@@ -75,7 +75,7 @@ def test_timeline_audit_drops_invalid_intervals_without_retiming_valid_ones():
         campaign=object(),
     )
 
-    assert [s["shot_id"] for s in audited] == ["too_early", "valid"]
+    assert [s["shot_id"] for s in audited] == ["valid"]
     assert all(s["shot_id"] != "too_long" for s in audited)
 
 
