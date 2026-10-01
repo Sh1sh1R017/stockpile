@@ -28,7 +28,6 @@ class Transcriber:
         self.model_name = model_name or Config.WHISPER_MODEL
         self.model = None
         self._lock = asyncio.Lock()
-        self._load_model()
 
     def _load_model(self):
         try:
@@ -67,6 +66,8 @@ class Transcriber:
                 raise RuntimeError("Failed to extract audio from video")
 
             async with self._lock:
+                if self.model is None:
+                    await asyncio.to_thread(self._load_model)
                 result = await asyncio.to_thread(self._run_whisper, str(audio_temp))
 
             return result
