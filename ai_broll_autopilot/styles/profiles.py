@@ -14,7 +14,7 @@ PROFILES = [
             "Prefer literal, cinematic, archival, documentary, or stylized visual metaphors that communicate the spoken idea.",
             "Open immediately on a strong visual or phrase; do not reserve a mandatory clean talking-head intro.",
             "Prioritize literal, relevant visuals when they materially strengthen the spoken idea; never add B-roll merely to increase coverage.",
-            "Use a tight cadence: 0.45-0.85s micro cuts and 0.9-1.8s contextual holds. Hero holds may reach 2.0s only when the visual is exceptionally strong.",
+            "Use a tight cadence within the approved 0.65-1.8s B-roll contract; never extend a cutaway solely for coverage.",
             "Allow short visual bursts of 3+ related shots inside roughly 3.5s when the dialogue is listing, escalating, or reframing the idea.",
             "Do not cut on a fixed timer. Cut on phrase boundaries, semantic shifts, reactions, reveals, object changes, or a new visual metaphor.",
             "Prefer hard cuts. Use fades only for a genuine change of visual world; avoid flashy wipes, glitch transitions, and aggressive zooms.",
