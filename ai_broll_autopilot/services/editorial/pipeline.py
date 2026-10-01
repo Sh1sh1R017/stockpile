@@ -66,53 +66,42 @@ class EditorialIntelligencePipeline:
         assets = available_broll_assets or []
 
         # -------------------------------------------------------------
+        # CLIP-SCOPED TRANSCRIPT (shared time base for hooks + moments)
+        # -------------------------------------------------------------
+        clip_in = clip_interval[0] if clip_interval else 0.0
+        clip_out = clip_interval[1] if clip_interval else video_duration
+        target_duration = max(1.0, clip_out - clip_in)
+        scoped_segments = scope_segments(transcript_segments, clip_in, clip_out)
+
+        # -------------------------------------------------------------
         # STEP 1: HOOK DETECTION & SELECTION
         # -------------------------------------------------------------
         hook_candidates = self.hook_engine.generate_candidates(
-            transcript_segments=transcript_segments,
-            video_duration=video_duration,
-            target_clip_interval=clip_interval,
+            transcript_segments=scoped_segments,
+            video_duration=target_duration,
         )
 
         selected_hook: Optional[HookCandidate] = None
         if hook_candidates:
-            selected_hook = hook_candidates[0]  # Top scoring candidate
+            selected_hook = hook_candidates[0]
             logger.info(
-                f"Selected primary opening hook [{selected_hook.candidate_id}] (Score: {selected_hook.scores.final_score:.1f}): "
-                f"'{selected_hook.tightened_text}'"
+                f"Selected primary opening hook [{selected_hook.candidate_id}] "
+                f"(Score: {selected_hook.scores.final_score:.1f}): '{selected_hook.tightened_text}'"
             )
         else:
-            # Fallback natural opener
-            first_text = transcript_segments[0].get("text", "") if transcript_segments else "Key Takeaway"
+            first_text = scoped_segments[0].get("text", "") if scoped_segments else "Key Takeaway"
             selected_hook = self.hook_engine.evaluate_candidate(
                 candidate_id="hook_default",
                 raw_text=first_text,
                 start_time=0.0,
-                end_time=min(4.0, video_duration),
-                duration=min(4.0, video_duration),
+                end_time=min(4.0, target_duration),
+                duration=min(4.0, target_duration),
                 full_transcript=first_text,
             )
 
         # -------------------------------------------------------------
         # STEP 2: EDITORIAL MOMENT MAP
         # -------------------------------------------------------------
-        # Filter segments for this short's time window if clip_interval is provided
-        clip_in = clip_interval[0] if clip_interval else 0.0
-        clip_out = clip_interval[1] if clip_interval else video_duration
-        target_duration = max(1.0, clip_out - clip_in)
-
-        scoped_segments = []
-        for s in transcript_segments:
-            st = s.get("start", 0.0)
-            et = s.get("end", 0.0)
-            if et > clip_in and st < clip_out:
-                scoped_segments.append({
-                    "start": max(0.0, round(st - clip_in, 2)),
-                    "end": min(target_duration, round(et - clip_in, 2)),
-                    "text": s.get("text", ""),
-                    "words": s.get("words", []),
-                })
-
         moments = self.moment_analyzer.analyze_transcript(
             transcript_segments=scoped_segments,
             video_duration=target_duration,
