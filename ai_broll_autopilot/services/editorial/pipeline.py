@@ -20,6 +20,7 @@ from ai_broll_autopilot.services.editorial.moment_analyzer import MomentAnalyzer
 from ai_broll_autopilot.services.editorial.pacing_model import PacingModel
 from ai_broll_autopilot.services.editorial.quality_gate import EditorialQualityGate
 from ai_broll_autopilot.services.editorial.sound_designer import SoundDesigner
+from ai_broll_autopilot.services.edit_director import EditDirectorService
 from ai_broll_autopilot.services.editorial.types import (
     ContextualBrollDecision,
     EditorialCaptionSpec,
