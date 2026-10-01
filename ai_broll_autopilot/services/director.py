@@ -371,14 +371,17 @@ Return ONLY a valid JSON object matching this schema:
                 max_clip = min(max_clip, max_dur)
                 duration = min(max_clip, max(min_clip, requested_duration))
                 if style == "meme":
-                    duration = min(2.0, max(1.3, duration))
+                    duration = min(
+                        float(getattr(Config, "BROLL_MAX_RENDER_DURATION", 1.8)),
+                        max(float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65)), duration),
+                    )
                 end = min(video_duration, start + duration)
                 duration = round(end - start, 2)
 
                 min_valid_duration = (
-                    float(getattr(style_profile, "micro_broll_min_duration", 0.45))
+                    float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65))
                     if reference_editing and requested_role == "micro"
-                    else 0.8 if reference_editing
+                    else float(getattr(Config, "BROLL_MIN_RENDER_DURATION", 0.65)) if reference_editing
                     else 1.0
                 )
                 if duration < min_valid_duration:
