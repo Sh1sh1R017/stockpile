@@ -183,6 +183,9 @@ class Orchestrator:
         subtitles = edit_plan.get("subtitles", []) if edit_plan else []
         render_settings = edit_plan.get("render_settings", {}) if edit_plan else {}
         force_behind = bool(render_settings.get("subtitles_behind_subject", False))
+        subtitle_y_percent = render_settings.get("subtitle_y_percent")
+        custom_colors = render_settings.get("custom_colors")
+        effective_margin_v = None if subtitle_y_percent is not None else custom_margin_v
         segments = annotate_segments_for_subject_captions(
             transcript_segments,
             subtitles,
@@ -197,7 +200,9 @@ class Orchestrator:
                 output_path=all_ass_dest,
                 style_preset=style_preset,
                 position=position,
-                custom_margin_v=custom_margin_v,
+                custom_margin_v=effective_margin_v,
+                custom_colors=custom_colors,
+                subtitle_y_percent=subtitle_y_percent,
                 hook_text=hook_text,
                 hook_duration=hook_duration,
                 suppress_hook=suppress_hook,
@@ -223,7 +228,9 @@ class Orchestrator:
                 output_path=normal_ass_dest,
                 style_preset=style_preset,
                 position=position,
-                custom_margin_v=custom_margin_v,
+                custom_margin_v=effective_margin_v,
+                custom_colors=custom_colors,
+                subtitle_y_percent=subtitle_y_percent,
                 hook_text=hook_text,
                 hook_duration=hook_duration,
                 suppress_hook=suppress_hook,
@@ -236,7 +243,9 @@ class Orchestrator:
                 output_path=behind_ass_dest,
                 style_preset=style_preset,
                 position=position,
-                custom_margin_v=custom_margin_v,
+                custom_margin_v=effective_margin_v,
+                custom_colors=custom_colors,
+                subtitle_y_percent=subtitle_y_percent,
                 hook_text=None,
                 hook_duration=None,
                 suppress_hook=True,
