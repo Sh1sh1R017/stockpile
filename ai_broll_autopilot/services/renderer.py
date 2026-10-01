@@ -138,6 +138,20 @@ class Renderer:
         reference_card_width_ratio = float(style_data.get("visual_container_width_ratio", 0.944))
         reference_card_height_ratio = float(style_data.get("visual_container_height_ratio", 0.574))
         reference_card_radius = int(style_data.get("visual_container_radius", 52))
+        reference_focal_x = 0.5
+        if reference_style:
+            try:
+                from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+                layout = subject_isolation_service.analyze_subject_layout(
+                    str(base_p),
+                    sample_time=min(1.0, max(0.0, float(edit_plan.get("target_duration") or 1.0) * 0.25)),
+                )
+                reference_focal_x = max(
+                    0.0,
+                    min(1.0, float(layout.get("center_x", 0.5) or 0.5)),
+                )
+            except Exception as exc:
+                logger.debug("Could not determine speaker focal point; using center crop: %s", exc)
         current_input_idx = 1 + len(shots)
         frame_overlay_stream_idx = None
         if frame_overlay_path and os.path.exists(frame_overlay_path):
@@ -182,6 +196,7 @@ class Renderer:
             reference_style=reference_style, reference_card_mask_idx=reference_card_mask_idx,
             reference_card_width_ratio=reference_card_width_ratio, reference_card_height_ratio=reference_card_height_ratio,
             reference_card_radius=reference_card_radius,
+            reference_focal_x=reference_focal_x,
             output_duration=float(edit_plan.get("target_duration") or 30.0),
         )
         assert_filtergraph_labels(
