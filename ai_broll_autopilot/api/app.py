@@ -27,7 +27,7 @@ from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.api.path_safety import safe_join, validate_external_url
 from ai_broll_autopilot.core.database import Database
 from ai_broll_autopilot.core.job import Job, JobState
-from ai_broll_autopilot.orchestrator import Orchestrator
+from ai_broll_autopilot.orchestrator import Orchestrator, get_video_duration
 from ai_broll_autopilot.services.learning import FeedbackLearningEngine
 from ai_broll_autopilot.services.drive_sync import drive_sync_service
 from ai_broll_autopilot.services.pexels import pexels_service
@@ -148,12 +148,24 @@ class JobSettingsRequest(BaseModel):
     subtitles_enabled: Optional[bool] = Field(None, description="Toggle kinetic subtitles on/off")
     subtitle_style: Optional[str] = Field(None, description="Subtitle style: hormozi, beast, clean")
     subtitle_position: Optional[str] = Field(None, description="Subtitle position: bottom, center, top")
-    subtitles_behind_subject: Optional[bool] = Field(None, description="Place kinetic captions behind the detected foreground subject")
+    subtitle_y_percent: Optional[float] = Field(
+        None, ge=0.0, le=100.0, description="Caption vertical position as percent from top"
+    )
+    preset: Optional[str] = Field(None, description="Caption preset key")
+    words_per_beat: Optional[int] = Field(None, ge=1, le=12, description="Visible caption words per beat")
+    caption_motion: Optional[str] = Field(None, description="Caption motion profile")
+    custom_colors: Optional[Dict[str, str]] = Field(None, description="Caption colors: main, second, third")
+    enable_emojis: Optional[bool] = Field(None, description="Allow emoji rendering in captions")
+    subtitles_behind_subject: Optional[bool] = Field(
+        None, description="Place kinetic captions behind the detected foreground subject"
+    )
     bgm_track_id: Optional[str] = Field(None, description="BGM track ID or None to mute")
-    bgm_volume: Optional[float] = Field(None, description="BGM volume 0.0 to 1.0")
+    bgm_volume: Optional[float] = Field(None, ge=0.0, le=1.0, description="BGM volume 0.0 to 1.0")
     bgm_ducking: Optional[bool] = Field(None, description="Toggle voice auto-ducking")
     hdr_upscale_enabled: Optional[bool] = Field(None, description="Toggle SDR2HDR upscale & HDR10 output")
-    hdr_output_scale: Optional[float] = Field(None, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)")
+    hdr_output_scale: Optional[float] = Field(
+        None, ge=1.0, le=2.0, description="HDR output scale: 1.0 (native), 1.5 (QHD), 2.0 (4K UHD)"
+    )
     hdr_tone: Optional[str] = Field(None, description="HDR tone: vivid or reference")
 
 
@@ -455,36 +467,56 @@ async def get_job_broll_thumb(job_id: str, shot_id: str):
     )
 
 
+SFX_ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg"}
+
+def _safe_sfx_path(root: Path, candidate: Path) -> Optional[Path]:
+    """Resolve a catalog/local SFX path and refuse anything outside the SFX root."""
+    root_resolved = root.resolve()
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(root_resolved)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file() or resolved.suffix.lower() not in SFX_ALLOWED_EXTENSIONS:
+        return None
+    return resolved
+
+
 @app.get("/api/sfx/{filename}")
 async def get_sfx_audio(filename: str):
-    """Serve individual SFX from the 189 unified sound effect library."""
-    import urllib.parse
-    clean_fn = urllib.parse.unquote(filename).strip()
-    if Path(clean_fn).name != clean_fn or "/" in clean_fn or "\\" in clean_fn:
+    """Serve individual SFX from the unified sound effect library."""
+    clean_fn = filename.strip()
+    if not clean_fn or Path(clean_fn).name != clean_fn or "/" in clean_fn or "\\" in clean_fn:
         raise HTTPException(status_code=400, detail="Invalid filename")
+    if Path(clean_fn).suffix.lower() not in SFX_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported SFX format")
 
-    # 1. Check local split_sfx
-    sfx_path = Config.OUTPUT_DIR / "split_sfx" / clean_fn
-    if sfx_path.exists() and sfx_path.is_file():
-        media_type = "audio/wav" if clean_fn.lower().endswith(".wav") else "audio/mpeg"
-        return FileResponse(path=str(sfx_path), media_type=media_type, filename=clean_fn)
+    sfx_root = (Config.OUTPUT_DIR / "split_sfx").resolve()
 
-    # 2. Check catalog for exact or case-insensitive filename or path
-    catalog_path = Config.OUTPUT_DIR / "split_sfx" / "sfx_catalog.json"
+    # 1. Check the local split_sfx directory.
+    local_path = _safe_sfx_path(sfx_root, sfx_root / clean_fn)
+    if local_path:
+        media_type = "audio/wav" if local_path.suffix.lower() == ".wav" else "audio/mpeg"
+        return FileResponse(path=str(local_path), media_type=media_type, filename=local_path.name)
+
+    # 2. Check the catalog, but never trust an arbitrary catalog path outside sfx_root.
+    catalog_path = sfx_root / "sfx_catalog.json"
     if catalog_path.exists():
         try:
             with open(catalog_path, "r", encoding="utf-8") as f:
                 catalog = json.load(f)
-                for item in catalog:
-                    item_file = item.get("file", "")
-                    item_name = Path(item.get("path", "")).name
-                    if clean_fn.lower() in (item_file.lower(), item_name.lower()):
-                        item_p = Path(item["path"])
-                        if item_p.exists():
-                            media_type = "audio/wav" if item_p.suffix.lower() == ".wav" else "audio/mpeg"
-                            return FileResponse(path=str(item_p), media_type=media_type, filename=item_p.name)
-        except Exception as e:
-            logger.warning(f"Error checking catalog for {filename}: {e}")
+            wanted = clean_fn.lower()
+            for item in catalog:
+                item_file = str(item.get("file", ""))
+                item_name = Path(str(item.get("path", ""))).name
+                if wanted not in {item_file.lower(), item_name.lower()}:
+                    continue
+                item_path = _safe_sfx_path(sfx_root, Path(str(item.get("path", ""))))
+                if item_path:
+                    media_type = "audio/wav" if item_path.suffix.lower() == ".wav" else "audio/mpeg"
+                    return FileResponse(path=str(item_path), media_type=media_type, filename=item_path.name)
+        except Exception as exc:
+            logger.warning("Error checking SFX catalog for %s: %s", filename, exc)
 
     raise HTTPException(status_code=404, detail=f"SFX file '{filename}' not found")
 
@@ -2072,7 +2104,7 @@ async def get_bgm_track_audio(track_id: str):
 
 @app.post("/api/jobs/{job_id}/settings")
 async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
-    """Update subtitle formatting and background music settings for a job."""
+    """Update all render-affecting caption, audio, and HDR settings for a job."""
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -2081,35 +2113,54 @@ async def update_job_render_settings(job_id: str, req: JobSettingsRequest):
         job.edit_plan = {"shots": []}
 
     settings = job.edit_plan.get("render_settings", {})
-    if req.subtitles_enabled is not None:
-        settings["subtitles_enabled"] = req.subtitles_enabled
-    if req.subtitle_style is not None:
-        settings["subtitle_style"] = req.subtitle_style
-    if req.subtitle_position is not None:
-        settings["subtitle_position"] = req.subtitle_position
+    render_affecting_change = False
+
+    scalar_fields = {
+        "subtitles_enabled": req.subtitles_enabled,
+        "subtitle_style": req.subtitle_style,
+        "subtitle_position": req.subtitle_position,
+        "subtitle_y_percent": req.subtitle_y_percent,
+        "preset": req.preset,
+        "words_per_beat": req.words_per_beat,
+        "caption_motion": req.caption_motion,
+        "enable_emojis": req.enable_emojis,
+        "bgm_volume": req.bgm_volume,
+        "bgm_ducking": req.bgm_ducking,
+        "hdr_upscale_enabled": req.hdr_upscale_enabled,
+        "hdr_output_scale": req.hdr_output_scale,
+        "hdr_tone": req.hdr_tone,
+    }
+    for key, value in scalar_fields.items():
+        if value is not None:
+            settings[key] = value
+            render_affecting_change = True
+
+    if req.custom_colors is not None:
+        settings["custom_colors"] = req.custom_colors
+        render_affecting_change = True
+
     if req.subtitles_behind_subject is not None:
         settings["subtitles_behind_subject"] = req.subtitles_behind_subject
         for subtitle in job.edit_plan.get("subtitles", []):
             subtitle["behind_subject"] = req.subtitles_behind_subject
-        job.edit_plan["render_stale"] = True
-        job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
+        render_affecting_change = True
+
     if req.bgm_track_id is not None:
         settings["bgm_track_id"] = req.bgm_track_id if req.bgm_track_id != "none" else None
-    if req.bgm_volume is not None:
-        settings["bgm_volume"] = req.bgm_volume
-    if req.bgm_ducking is not None:
-        settings["bgm_ducking"] = req.bgm_ducking
+        render_affecting_change = True
 
-    if req.hdr_upscale_enabled is not None:
-        settings["hdr_upscale_enabled"] = req.hdr_upscale_enabled
-    if req.hdr_output_scale is not None:
-        settings["hdr_output_scale"] = req.hdr_output_scale
-    if req.hdr_tone is not None:
-        settings["hdr_tone"] = req.hdr_tone
+    if render_affecting_change:
+        job.edit_plan["render_stale"] = True
+        job.edit_plan["edit_revision"] = int(job.edit_plan.get("edit_revision", 0)) + 1
 
     job.edit_plan["render_settings"] = settings
     db.save_job(job)
-    return {"status": "success", "render_settings": settings}
+    return {
+        "status": "success",
+        "render_settings": settings,
+        "render_stale": bool(job.edit_plan.get("render_stale", False)),
+        "edit_revision": int(job.edit_plan.get("edit_revision", 0)),
+    }
 
 
 async def _execute_rerender_job(job_id: str):
@@ -2124,6 +2175,8 @@ async def _execute_rerender_job(job_id: str):
     renderer = Renderer()
     trans_engine = TransitionEngine()
     bgm_engine = BGMEngine()
+    from ai_broll_autopilot.services.meme_engine import MemeEngine
+    meme_engine = MemeEngine()
 
     work_dir = Config.OUTPUT_DIR / "workspace" / job.job_id
     work_dir.mkdir(parents=True, exist_ok=True)
