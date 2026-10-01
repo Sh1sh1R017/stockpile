@@ -109,7 +109,6 @@ PROFILES = [
         broll_max_duration=2.2,
         max_continuous_aroll_seconds=2.8,
         max_zoom_scale=1.045,
-        hero_broll_max_duration=7.5,
         micro_broll_min_duration=0.45,
         micro_broll_max_duration=0.85,
         hero_broll_min_duration=3.0,
