@@ -16,12 +16,15 @@ from ai_broll_autopilot.config import Config
 
 logger = logging.getLogger(__name__)
 
+_UNSET_API_KEY = object()
+
 
 class BrollSuperDirector:
     """Listens to source audio and ranks dialogue moments worth visualizing."""
 
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
-        self.api_key = api_key or Config.GEMINI_API_KEY
+    def __init__(self, api_key: Optional[str] = _UNSET_API_KEY, model_name: Optional[str] = None):
+        # Omitted api_key means "use configured key"; explicit None means offline.
+        self.api_key = Config.GEMINI_API_KEY if api_key is _UNSET_API_KEY else api_key
         self.model_name = model_name or getattr(
             Config, "GEMINI_BROLL_SUPER_MODEL", "gemini-2.5-pro"
         )
