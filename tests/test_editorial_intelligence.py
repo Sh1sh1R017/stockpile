@@ -111,7 +111,13 @@ class TestEditorialIntelligence(unittest.TestCase):
     # =========================================================================
     def test_visual_variety_penalties(self):
         variety = VisualVarietyEngine()
-        variety.record_shot(shot_type=ShotType.WIDE, subject_category="person_talking", camera_motion="static")
+        variety.record_placed_shot(
+            shot_id="shot_1",
+            shot_type=ShotType.WIDE,
+            subject_category="person_talking",
+            camera_movement="static",
+            location="indoor",
+        )
 
         # Score identical shot type immediately following
         penalty = variety.calculate_variety_penalty(
@@ -232,12 +238,12 @@ class TestEditorialIntelligence(unittest.TestCase):
             EditorialMoment("m6", 15.0, 18.0, 3.0, "step 2 rules", sentiment=SentimentCategory.NEUTRAL, narrative_role=NarrativeRole.EXPLANATION),
         ]
 
-        cues = designer.design_soundtrack(
+        cues = designer.design_soundscape(
             moments=moments,
             broll_shots=[],
             captions=[],
             camera_moves=[],
-            total_duration=18.0,
+            video_duration=18.0,
         )
         # In an 18s video, density limit (<=6/min = ~1.8 cues) caps to at most 2 cues
         self.assertLessEqual(len(cues), 2, "SFX sparsity control must cap density to prevent acoustic clutter")
