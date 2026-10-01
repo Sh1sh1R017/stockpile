@@ -59,12 +59,18 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Enable CORS for Next.js web frontend and OpenReel editor
+_cors_default = "http://localhost:3000,http://127.0.0.1:3000"
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("STOCKPILE_CORS_ORIGINS", _cors_default).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all for development and flexible Azure deployment
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
     expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "ETag"],
 )
 
