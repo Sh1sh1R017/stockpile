@@ -418,7 +418,6 @@ class SemanticRetrievalEngine:
         speed = max(0.1, float(asset.get("speed") or 1.0))
         if asset_duration is not None:
             asset_duration = asset_duration / speed
-        asset_duration = float(asset_duration_raw) / speed
         if asset_duration is not None:
             if asset_duration + 0.05 < target_duration:
                 duration_fit = max(0.2, asset_duration / max(1.0, target_duration))
