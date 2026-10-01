@@ -49,6 +49,19 @@ class StyleProfile:
     max_continuous_aroll_seconds: float = 3.5
     max_zoom_scale: float = 1.05
     hero_broll_max_duration: float = 2.6
+
+    # Reference-edit cadence controls. These model the supplied final edit's
+    # rhythm: short visual punctuation, normal contextual holds, and occasional
+    # long hero scenes.
+    micro_broll_min_duration: float = 0.45
+    micro_broll_max_duration: float = 0.85
+    hero_broll_min_duration: float = 3.0
+    hero_broll_target_ratio: float = 0.20
+    visual_burst_window_seconds: float = 3.5
+    visual_burst_min_cuts: int = 3
+    semantic_callout_max: int = 4
+    semantic_callout_min_duration: float = 0.7
+    semantic_callout_max_duration: float = 2.8
     visual_container_scale: float = 0.944
     visual_container_width_ratio: float = 0.944
     visual_container_height_ratio: float = 0.574
@@ -93,6 +106,15 @@ class StyleProfile:
             "broll_min_duration": self.broll_min_duration,
             "broll_max_duration": self.broll_max_duration,
             "max_continuous_aroll_seconds": self.max_continuous_aroll_seconds,
+            "micro_broll_min_duration": self.micro_broll_min_duration,
+            "micro_broll_max_duration": self.micro_broll_max_duration,
+            "hero_broll_min_duration": self.hero_broll_min_duration,
+            "hero_broll_target_ratio": self.hero_broll_target_ratio,
+            "visual_burst_window_seconds": self.visual_burst_window_seconds,
+            "visual_burst_min_cuts": self.visual_burst_min_cuts,
+            "semantic_callout_max": self.semantic_callout_max,
+            "semantic_callout_min_duration": self.semantic_callout_min_duration,
+            "semantic_callout_max_duration": self.semantic_callout_max_duration,
             "max_zoom_scale": self.max_zoom_scale,
             "hero_broll_max_duration": self.hero_broll_max_duration,
             "visual_container_scale": self.visual_container_scale,
