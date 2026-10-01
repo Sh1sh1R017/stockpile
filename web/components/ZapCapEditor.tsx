@@ -812,7 +812,7 @@ export const ZapCapEditor: React.FC<ZapCapEditorProps> = ({
                 </span>
               </span>
               <p className="text-[10px] text-purple-300/80">
-                Large emphasis punchlines appear physically behind the speaker's torso while the foreground subject stays in front.
+                Large emphasis punchlines appear physically behind the speaker&apos;s torso while the foreground subject stays in front.
               </p>
             </div>
             <button
