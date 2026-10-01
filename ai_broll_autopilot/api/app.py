@@ -262,8 +262,8 @@ async def get_job_detail(job_id: str):
         if survey_path.exists():
             try:
                 survey_data = json.loads(survey_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed optional failure: %s", exc)
 
     # Enhance edit_plan shots with direct B-roll video preview URLs
     enhanced_edit_plan = None
@@ -584,8 +584,8 @@ async def get_job_openreel_project(job_id: str, mode: Optional[str] = None):
                 pdata.get("format", {}).get("duration")
                 or source_duration
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed optional failure: %s", exc)
 
     plan_obj = EditPlan(
         plan_id=plan_dict.get("plan_id", f"plan_{job.job_id}"),
@@ -1087,8 +1087,8 @@ async def get_job_asset(job_id: str, asset_name: str):
                         cmd = ["ffmpeg", "-y", "-ss", str(st), "-i", str(final_cand), "-t", str(dur), "-c", "copy", str(target)]
                         try:
                             subprocess.run(cmd, capture_output=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Suppressed optional failure: %s", exc)
                         break
 
         if target.exists():
@@ -1217,8 +1217,8 @@ async def clear_all_jobs_endpoint():
             if item.is_dir():
                 try:
                     shutil.rmtree(item)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed optional failure: %s", exc)
     return {"status": "cleared", "message": "All projects cleared successfully"}
 
 
@@ -2209,8 +2209,8 @@ async def _execute_rerender_job(job_id: str):
         cmd = ["ffmpeg", "-y", "-ss", "1.0", "-i", str(final_dest), "-frames:v", "1", "-update", "1", "-q:v", "2", str(final_thumb)]
         try:
             await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed optional failure: %s", exc)
 
         job.edit_plan["render_stale"] = False
         rev = int(job.edit_plan.get("last_render_revision", 0)) + 1
