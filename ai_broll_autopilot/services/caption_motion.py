@@ -36,7 +36,7 @@ CAPTION_MOTION_PROFILES: Dict[str, Dict[str, Any]] = {
             "perspective": 0.35,
         },
     },
-    "typewriter": {"label": "Typewriter", "openreel": "typewriter", "recipe": "kinetic:typewriter", "description": "Sequential reveal."},
+    "typewriter": {"label": "Typewriter", "openreel": "typewriter", "recipe": "motion-anything:typewriter-multi", "description": "Sequential reveal."},
     "focus": {"label": "True Focus", "openreel": "word-highlight", "recipe": "kinetic:true-focus", "description": "Stable line with active-word emphasis."},
     "scramble": {"label": "Text Scramble", "openreel": "word-by-word", "recipe": "kinetic:scramble", "description": "Fast decode-style word transition."},
     "impact-auto": {"label": "AI Impact Auto", "openreel": "impact-auto", "recipe": "kinetic:impact-auto", "description": "Automatically chooses an effect from the impact word's semantic type."},
