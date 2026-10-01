@@ -149,7 +149,7 @@ class EditorialQualityGate:
                 passed=False,
                 score=0.8,
                 message="Early B-roll was not auto-shifted; approved timing was preserved.",
-                severity="warning",
+                severity="error",
             ))
         else:
             checks.append(QualityCheckItem(
