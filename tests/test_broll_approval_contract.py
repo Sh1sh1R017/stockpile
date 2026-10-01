@@ -117,3 +117,36 @@ def test_timeline_audit_drops_out_of_contract_interval():
     )
 
     assert shots == []
+
+
+def test_missing_duration_is_probed_before_candidate_veto(monkeypatch, tmp_path):
+    engine = BrollIntelligence()
+    clip = tmp_path / "candidate.mp4"
+    clip.write_bytes(b"fixture")
+
+    from ai_broll_autopilot.services import broll_library
+
+    monkeypatch.setattr(
+        broll_library,
+        "extract_media_metadata",
+        lambda path: {"duration": 4.0, "width": 1080, "height": 1920},
+    )
+
+    score = engine.score_candidate_asset(
+        moment=make_moment(),
+        asset={
+            "file_path": str(clip),
+            "title": "Person opening shipping box",
+            "prompt": "person opening shipping box",
+            "tags": ["shipping", "box", "person"],
+            "width": 1080,
+            "height": 1920,
+        },
+        target_duration=1.2,
+        narrative_role=BrollNarrativeRole.ILLUSTRATE,
+        variety_engine=VisualVarietyEngine(),
+    )
+
+    assert "Unknown asset duration" not in (score.rejection_reason or "")
+    assert score.decision in {"ACCEPT", "RETAIN_A_ROLL"}
+    assert score.semantic_match >= 0.25
