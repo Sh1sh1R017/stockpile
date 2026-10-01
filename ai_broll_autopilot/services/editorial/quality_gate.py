@@ -8,6 +8,7 @@ Automatically repairs detected anomalies prior to NLE rendering.
 import logging
 from typing import Any, Dict, List, Tuple
 
+from ai_broll_autopilot.services.editorial.invariants import collect_plan_invariant_violations
 from ai_broll_autopilot.services.editorial.types import (
     EditorialCaptionSpec,
     EditorialCameraSpec,
@@ -236,7 +237,34 @@ class EditorialQualityGate:
             ))
 
         # -------------------------------------------------------------
-        # 5. OVERALL NARRATIVE ARC AUDIT
+        # 5. EXECUTABLE PLAN INVARIANTS
+        # -------------------------------------------------------------
+        invariant_payload = spec.to_dict()
+        invariant_violations = collect_plan_invariant_violations(
+            invariant_payload,
+            target_duration=total_dur,
+        )
+        if invariant_violations:
+            checks.append(QualityCheckItem(
+                name="plan_invariants",
+                category="overall",
+                passed=False,
+                score=0.0,
+                message=f"{len(invariant_violations)} executable plan invariant(s) violated.",
+                severity="error",
+            ))
+            recommendations.extend(invariant_violations)
+        else:
+            checks.append(QualityCheckItem(
+                name="plan_invariants",
+                category="overall",
+                passed=True,
+                score=1.0,
+                message="All executable plan invariants hold.",
+            ))
+
+        # -------------------------------------------------------------
+        # 6. OVERALL NARRATIVE ARC AUDIT
         # -------------------------------------------------------------
         has_hook = any(m.narrative_role.value == "HOOK" for m in spec.moments)
         has_payoff = any(m.narrative_role.value in ["PAYOFF", "REVEAL", "CTA"] for m in spec.moments)
