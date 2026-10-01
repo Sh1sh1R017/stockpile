@@ -116,12 +116,12 @@ class BrollSuperDirector:
             if uploaded is not None:
                 try:
                     await asyncio.to_thread(self.client.files.delete, name=uploaded.name)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed optional failure: %s", exc)
             try:
                 audio_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed optional failure: %s", exc)
 
     def apply_to_plan(
         self,
