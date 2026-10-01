@@ -32,7 +32,7 @@ class Config:
     MAX_CLIP_DURATION_SECONDS: float = float(os.getenv("MAX_CLIP_DURATION_SECONDS", "1.8"))
     BROLL_MIN_RENDER_DURATION: float = float(os.getenv("BROLL_MIN_RENDER_DURATION", "0.65"))
     BROLL_MAX_RENDER_DURATION: float = float(os.getenv("BROLL_MAX_RENDER_DURATION", "1.8"))
-    BROLL_HERO_MAX_DURATION: float = float(os.getenv("BROLL_HERO_MAX_DURATION", "2.4"))
+    BROLL_HERO_MAX_DURATION: float = float(os.getenv("BROLL_HERO_MAX_DURATION", "1.8"))
     BROLL_REPEAT_GAP_SECONDS: float = float(os.getenv("BROLL_REPEAT_GAP_SECONDS", "5.0"))
     STOCKPILE_START_OFFSET_SECONDS: float = float(os.getenv("STOCKPILE_START_OFFSET_SECONDS", "6.0"))
     BROLL_SPEED_MULTIPLIER: float = float(os.getenv("BROLL_SPEED_MULTIPLIER", "1.25"))
