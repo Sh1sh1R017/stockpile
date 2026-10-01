@@ -412,8 +412,13 @@ class TimelineEngine:
         # 4. Multi-Track Audio Mixing (Dialogue + SFX + BGM Ducking)
         # -------------------------------------------------------------
         final_audio_layer = "final_a"
+        filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[base_a_raw]")
+        need_ducking = bgm_stream_idx is not None and ducking_enabled
+        if need_ducking:
+            filters.append("[base_a_raw]asplit=2[base_a][base_a_sc]")
+        else:
+            filters.append("[base_a_raw]anull[base_a]")
         mix_streams = ["[base_a]"]
-        filters.append("[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[base_a]")
 
         # 4a. Transition stingers & Foley SFX
         if audio_sfx_list:
@@ -457,7 +462,7 @@ class TimelineEngine:
                     f"volume={vol_val:.2f}[bgm_pre]"
                 )
                 filters.append(
-                    f"[bgm_pre][base_a]sidechaincompress=threshold=0.07:ratio=5:attack=40:release=350[bgm_ducked]"
+                    f"[bgm_pre][base_a_sc]sidechaincompress=threshold=0.07:ratio=5:attack=40:release=350[bgm_ducked]"
                 )
                 mix_streams.append("[bgm_ducked]")
             else:
