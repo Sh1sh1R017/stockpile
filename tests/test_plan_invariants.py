@@ -82,3 +82,22 @@ def test_invariants_reject_word_outside_parent_segment():
     }
     violations = collect_plan_invariant_violations(plan)
     assert any("word outside segment" in item for item in violations)
+
+
+def test_invariants_reject_orphaned_sfx_targets():
+    plan = {
+        "target_duration": 5.0,
+        "editorial_spec": {
+            "broll_shots": [{"shot_id": "b1"}],
+            "moments": [{"moment_id": "m1"}],
+            "captions": [],
+            "camera_moves": [{"id": "cam1"}],
+            "sfx_cues": [
+                {"cue_id": "s1", "target_id": "missing"},
+                {"cue_id": "s2"},
+            ],
+        },
+    }
+    violations = collect_plan_invariant_violations(plan)
+    assert any("does not exist" in item for item in violations)
+    assert any("missing target_id" in item for item in violations)
