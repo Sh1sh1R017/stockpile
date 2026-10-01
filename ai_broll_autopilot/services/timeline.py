@@ -257,8 +257,14 @@ class TimelineEngine:
                     type_in = "cut"
 
                 # Snappy fast-paced transitions (0.18s max)
-                dur_in = min(0.20, trans.get("duration_in", 0.18))
-                dur_out = min(0.20, trans.get("duration_out", 0.18))
+                dur_in = max(0.0, min(0.20, float(trans.get("duration_in", 0.18) or 0.0)))
+                dur_out = max(0.0, min(0.20, float(trans.get("duration_out", 0.18) or 0.0)))
+                if type_in in {"slide_left", "slide_right"} and dur_in <= 0.0:
+                    type_in = "cut"
+                if type_in != "cut":
+                    dur_in = max(0.001, dur_in)
+                if type_in == "dissolve":
+                    dur_out = max(0.001, dur_out)
 
                 # Apply transition effects with high-velocity speed acceleration
                 if reference_style:
