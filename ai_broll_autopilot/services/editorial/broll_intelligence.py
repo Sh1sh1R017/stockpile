@@ -243,17 +243,10 @@ class BrollIntelligence:
                 except Exception as exc:
                     logger.debug("Could not probe candidate duration for %s: %s", candidate_path, exc)
 
-        if duration_raw is None:
-            return BrollCandidateScore(
-                decision="RETAIN_A_ROLL",
-                final_score=0.0,
-                confidence=0.0,
-                rejection_reason="Unknown asset duration",
-            )
-
+        duration_unknown = duration_raw is None
         speed = max(0.1, float(asset.get("speed") or getattr(Config, "BROLL_SPEED_MULTIPLIER", 1.0)))
-        effective_duration = float(duration_raw) / speed
-        if effective_duration + 0.05 < target_duration:
+        effective_duration = None if duration_unknown else float(duration_raw) / speed
+        if effective_duration is not None and effective_duration + 0.05 < target_duration:
             return BrollCandidateScore(decision="RETAIN_A_ROLL", final_score=0.0, confidence=0.0,
                                        rejection_reason="Asset too short for approved B-roll interval")
         width, height = asset.get("width"), asset.get("height")
@@ -301,7 +294,16 @@ class BrollIntelligence:
         action_score = 0.50
         if moment.action != "explaining concept":
             action_terms = [t.strip() for t in moment.action.lower().split(" / ") if t.strip()]
-            action_score = 0.95 if any(has_term(asset_text, term) or set(re.findall(r"\\w+", term)).issubset(set(re.findall(r"\\w+", asset_text))) for term in action_terms) else 0.35
+            asset_word_set = set(re.findall(r"\w+", asset_text))
+            action_score = 0.95 if any(
+                has_term(asset_text, term)
+                or set(re.findall(r"\w+", term)).issubset(asset_word_set)
+                or (
+                    len(set(re.findall(r"\w+", term))) > 1
+                    and len(set(re.findall(r"\w+", term)).intersection(asset_word_set)) >= 1
+                )
+                for term in action_terms
+            ) else 0.35
 
         narrative_score = 0.60
         if narrative_role in {BrollNarrativeRole.ILLUSTRATE, BrollNarrativeRole.EXPLAIN, BrollNarrativeRole.REINFORCE} and semantic_score >= 0.70:
@@ -334,8 +336,11 @@ class BrollIntelligence:
         if used_count > 0:
             freshness_score = max(0.2, 1.0 - (used_count * 0.3))
 
-        asset_dur = float(asset.get("duration", target_duration) or target_duration)
-        duration_fit = 1.0 if asset_dur >= target_duration else max(0.4, asset_dur / max(0.5, target_duration))
+        if duration_unknown:
+            duration_fit = 0.50
+        else:
+            asset_dur = float(asset.get("duration", target_duration) or target_duration)
+            duration_fit = 1.0 if asset_dur >= target_duration else max(0.4, asset_dur / max(0.5, target_duration))
 
         shot_type = self._infer_shot_type(asset)
         subject = asset.get("category", "general")
