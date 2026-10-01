@@ -105,6 +105,25 @@ class PacingModel:
 
         balanced_broll = repaired
 
+        kept_ids = {b.shot_id for b in balanced_broll}
+        pruned_sfx = [
+            cue for cue in sfx_cues
+            if not getattr(cue, "target_id", None)
+            or getattr(cue, "target_id", None) in kept_ids
+        ]
+
+        # Remove cues that now fall inside a dropped B-roll interval.
+        kept_intervals = [(b.start_time, b.end_time) for b in balanced_broll]
+        original_intervals = [(b.start_time, b.end_time, b.shot_id) for b in broll_shots]
+        dropped_intervals = [
+            (st, et) for st, et, sid in original_intervals if sid not in kept_ids
+        ]
+        pruned_sfx = [
+            cue for cue in pruned_sfx
+            if not any(st <= float(getattr(cue, "timestamp", getattr(cue, "start_time", -1))) < et
+                       for st, et in dropped_intervals)
+        ]
+
         # Stagger captions slightly after a B-roll entrance so the visual can register first.
         for b in balanced_broll:
             for cap in captions:
