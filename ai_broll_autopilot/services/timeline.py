@@ -53,7 +53,9 @@ class TimelineEngine:
 
         reference_mask_labels = []
         active_shot_indices = [
-            i for i, shot in enumerate(shots, start=1) if shot.get("asset_path")
+            int(shot.get("_input_idx", i))
+            for i, shot in enumerate(shots, start=1)
+            if shot.get("asset_path")
         ]
         if reference_style and reference_card_mask_idx is not None:
             reference_mask_labels = ["ref_mask_0"] + [
@@ -95,7 +97,8 @@ class TimelineEngine:
                 end_t = float(shot["end_time"])
                 active_broll_intervals.append((start_t, end_t))
                 speed = float(shot.get("speed") or 1.0)
-                broll_stream = f"[{idx}:v]"
+                input_idx = int(shot.get("_input_idx", idx))
+                broll_stream = f"[{input_idx}:v]"
                 scaled_broll = f"broll_after_{idx}"
                 next_after = f"after_layer_{idx}"
                 filters.append(
@@ -230,8 +233,9 @@ class TimelineEngine:
                 if not shot.get("asset_path"):
                     continue
 
-                broll_stream = f"[{idx}:v]"
-                scaled_broll = f"broll_{idx}"
+                input_idx = int(shot.get("_input_idx", idx))
+                broll_stream = f"[{input_idx}:v]"
+                scaled_broll = f"broll_{input_idx}"
                 next_layer = f"layer_{idx}"
 
                 start_t = float(shot["start_time"])
@@ -258,8 +262,8 @@ class TimelineEngine:
 
                 # Apply transition effects with high-velocity speed acceleration
                 if reference_style:
-                    reference_card_label = f"broll_ref_card_{idx}"
-                    mask_label = f"ref_mask_{idx}" if idx in active_shot_indices else None
+                    reference_card_label = f"broll_ref_card_{input_idx}"
+                    mask_label = f"ref_mask_{input_idx}" if input_idx in active_shot_indices else None
                     filters.append(
                         f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
                         f"{scale_and_pad},setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
