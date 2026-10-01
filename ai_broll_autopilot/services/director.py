@@ -194,8 +194,8 @@ MANDATORY DIRECTING OBJECTIVES:
    - REFERENCE CADENCE:
      • MICRO burst: 0.45-0.85s. Use for a short phrase, list, escalation, object swap, reaction, or rapid visual punctuation.
      • STANDARD hold: 0.90-2.20s. Use for the main contextual idea.
-     • HERO hold: 3.0-7.5s. Use sparingly when one strong visual can carry the payoff, conclusion, or a complete sentence.
-     • A reference-style short should usually contain 2-4 micro/standard visual changes inside a larger semantic beat, then settle into a hero or speaker hold.
+     • HERO moments are still short: use the same 0.65-1.8s render contract; create emphasis through a stronger visual, not a long hold.
+     • A reference-style short should usually contain 2-4 micro/standard visual changes inside a larger semantic beat, then return to speaker footage.
    - Cut on meaning, phrase boundaries, visual reveals, reaction changes, or a change in visual metaphor — NEVER on a metronome.
    - Keep adjacent micro shots closely related to the same spoken idea; use them as a visual montage, not unrelated stock spam.
    - The first 1-2 seconds may be B-roll immediately when the opening words have a concrete visual metaphor.
