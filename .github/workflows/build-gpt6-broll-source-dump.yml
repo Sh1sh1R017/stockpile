@@ -1,0 +1,92 @@
+name: Build GPT-6 B-roll Source Dump
+
+on:
+  push:
+    branches:
+      - gpt6/broll-source-dump
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build source dump
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="STOCKPILE_BROLL_GPT6_FULL_AUDIT.md"
+          {
+            echo '# STOCKPILE — GPT-6 FULL B-ROLL SOURCE AUDIT PACKET'
+            echo
+            echo 'Repository: Sh1sh1R017/stockpile'
+            echo 'Source ref: gpt6/broll-source-dump (branched from main)'
+            echo
+            echo '## INSTRUCTIONS FOR GPT-6'
+            echo
+            echo 'Audit the supplied source as one integrated B-roll pipeline. Do not invent functions or root causes. Trace: EditorialMoment -> B-roll intent -> retrieval -> scoring -> decision -> pacing -> pipeline -> edit director -> timeline. Identify exact defects causing long B-roll holds, weak semantic matches, generic/text-heavy footage, and downstream duration extension. Propose the smallest coherent patch and concrete regression tests. Preserve A-roll when no candidate is strong enough. Do not modify rendering/GPU, captions, memes, SFX, or BGM systems unless a direct dependency is proven.'
+            echo
+            echo '## REQUIRED OUTPUT'
+            echo '1. Verified current call graph'
+            echo '2. Exact root causes with file/function names'
+            echo '3. Minimal patch plan'
+            echo '4. Concrete code/diff'
+            echo '5. Regression tests'
+            echo '6. Expected rendered behavior'
+            echo '7. Compatibility risks'
+            echo
+            echo '## PRIMARY SOURCE FILES'
+            echo
+          } > "$out"
+
+          files=(
+            'ai_broll_autopilot/services/editorial/types.py'
+            'ai_broll_autopilot/services/editorial/broll_intelligence.py'
+            'ai_broll_autopilot/services/retrieval_engine.py'
+            'ai_broll_autopilot/services/editorial/pacing_model.py'
+            'ai_broll_autopilot/services/editorial/pipeline.py'
+            'ai_broll_autopilot/services/edit_director.py'
+            'ai_broll_autopilot/services/timeline.py'
+            'tests/test_editorial_intelligence.py'
+            'tests/test_timeline_distribution.py'
+          )
+
+          for f in "${files[@]}"; do
+            echo >> "$out"
+            echo '============================================================' >> "$out"
+            echo "FILE: $f" >> "$out"
+            echo '============================================================' >> "$out"
+            echo >> "$out"
+            if [ -f "$f" ]; then
+              echo '```python' >> "$out"
+              cat "$f" >> "$out"
+              echo >> "$out"
+              echo '```' >> "$out"
+            else
+              echo "[FILE NOT PRESENT IN THIS REF: $f]" >> "$out"
+            fi
+          done
+
+          {
+            echo
+            echo '## AUDIT FOCUS'
+            echo '- Source duration must not determine editorial hold duration.'
+            echo '- Approved B-roll intervals must never be silently extended downstream.'
+            echo '- Weak candidates must fall back to A-roll.'
+            echo '- Proposition-level relevance must beat broad topic similarity.'
+            echo '- Consider a bounded top-N frame/OCR/vision inspection stage for visible unrelated text.'
+            echo '- Any timing replacement must remain inside the approved interval or receive explicit re-approval.'
+          } >> "$out"
+
+      - name: Commit generated packet
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add STOCKPILE_BROLL_GPT6_FULL_AUDIT.md
+          git diff --cached --quiet && exit 0
+          git commit -m 'chore: generate full GPT-6 B-roll source audit packet'
+          git push
