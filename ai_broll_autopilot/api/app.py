@@ -473,7 +473,10 @@ def _safe_sfx_path(root: Path, candidate: Path) -> Optional[Path]:
     """Resolve a catalog/local SFX path and refuse anything outside the SFX root."""
     root_resolved = root.resolve()
     try:
-        resolved = candidate.resolve()
+        # Catalog entries may be stored as either absolute paths or filenames relative
+        # to the SFX root. Never resolve a relative catalog path from process CWD.
+        candidate_path = candidate if candidate.is_absolute() else root_resolved / candidate
+        resolved = candidate_path.resolve()
         resolved.relative_to(root_resolved)
     except (OSError, ValueError):
         return None
