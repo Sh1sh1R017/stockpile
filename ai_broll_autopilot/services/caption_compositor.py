@@ -110,10 +110,14 @@ class CaptionCompositor:
             logger.info("[CAPTION-COMPOSITOR] Subtitles disabled or no transcript segments.")
             return None, None, None
 
-        behind_subject_enabled = bool(
-            render_settings.get("subtitles_behind_subject", False)
-            or (edit_plan and edit_plan.get("subtitles_behind_subject", False))
-        )
+        if "subtitles_behind_subject" in render_settings:
+            behind_subject_enabled = bool(render_settings["subtitles_behind_subject"])
+        elif edit_plan and "subtitles_behind_subject" in edit_plan:
+            behind_subject_enabled = bool(edit_plan["subtitles_behind_subject"])
+        else:
+            # New jobs get the reference-style hook treatment by default. An
+            # explicit False from the editor still disables it.
+            behind_subject_enabled = True
 
         preset_key = render_settings.get("subtitle_style") or render_settings.get("preset") or style_preset or "hormozi"
         resolved_colors = custom_colors or render_settings.get("custom_colors") or (edit_plan.get("style", {}).get("colors"))
