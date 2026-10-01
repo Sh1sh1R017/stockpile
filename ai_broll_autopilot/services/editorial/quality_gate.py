@@ -132,7 +132,7 @@ class EditorialQualityGate:
                     f"{len(out_of_bounds)} cutaway intervals require explicit re-planning "
                     "rather than automatic extension/clamping."
                 ),
-                severity="warning",
+                severity="error",
             ))
 
         # Opening timing is also read-only: moving a shot changes its approved
