@@ -39,6 +39,7 @@ class TimelineEngine:
         reference_card_width_ratio: float = 0.944,
         reference_card_height_ratio: float = 0.574,
         reference_card_radius: int = 52,
+        output_duration: float = None,
     ) -> Tuple[str, str, str]:
         """Construct FFmpeg complex filtergraph for compositing B-roll video transitions,
         subject-aware typography and behind-subject captions, frame overlay mask, and multi-track audio mixing with BGM auto-ducking.
@@ -138,7 +139,7 @@ class TimelineEngine:
                 filters.append(f"[0:v]{reference_scale}[base_card]")
                 filters.append("[base_card][ref_mask_0]alphamerge[base_card_rounded]")
                 filters.append(
-                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d=30[reference_canvas]"
+                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d={max(1.0, float(output_duration or 30.0)):.3f}[reference_canvas]"
                 )
                 filters.append(
                     f"[reference_canvas][base_card_rounded]overlay={card_x}:{card_y}:eof_action=pass[base]"
