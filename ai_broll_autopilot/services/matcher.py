@@ -286,8 +286,8 @@ class Matcher:
                 logger.warning(f"Cached asset for '{p}' failed watermark scan ({reason}); purging dirty file and re-acquiring")
                 try:
                     Path(cached["file_path"]).unlink(missing_ok=True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed optional failure: %s", exc)
             return await self._acquire_stockpile_clip(
                 p, target_dir, micro_id, max_clip_duration=clip_dur
             )
@@ -469,8 +469,8 @@ class Matcher:
                         logger.warning(f"[WATERMARK REJECTED] Candidate {attempt_idx+1} ({Path(downloaded).name}) REJECTED by WatermarkScanner: {reason}")
                         try:
                             Path(downloaded).unlink(missing_ok=True)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Suppressed optional failure: %s", exc)
                         continue  # Try next candidate!
 
                 logger.info(f"[VERIFIED CLEAN] 100% clean footage for [{shot_id}]: {Path(downloaded).name}")
