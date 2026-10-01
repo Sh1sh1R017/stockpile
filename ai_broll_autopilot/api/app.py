@@ -1231,19 +1231,32 @@ async def upload_video(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    ext = Path(file.filename).suffix.lower()
+    original_name = Path(file.filename).name
+    ext = Path(original_name).suffix.lower()
     if ext not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}:
         raise HTTPException(status_code=400, detail=f"Unsupported video format: {ext}")
 
-    target_file = Config.INPUT_DIR / file.filename
-    # Avoid overwriting directly with duplicate name
+    target_file = Config.INPUT_DIR / original_name
+    # Avoid overwriting directly with duplicate name.
     if target_file.exists():
-        stem = Path(file.filename).stem
+        stem = Path(original_name).stem
         target_file = Config.INPUT_DIR / f"{stem}_{int(asyncio.get_event_loop().time())}{ext}"
 
-    # Write file chunk by chunk
-    with open(target_file, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    max_bytes = int(getattr(Config, "MAX_UPLOAD_SIZE_MB", 500)) * 1024 * 1024
+    written = 0
+    try:
+        with open(target_file, "wb") as buffer:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    target_file.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="Uploaded video exceeds size limit")
+                buffer.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        target_file.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {exc}")
 
     logger.info(f"Uploaded file saved to: {target_file} (Campaign: {campaign_id})")
 
