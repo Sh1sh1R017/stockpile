@@ -1,0 +1,44 @@
+name: Enforce branch limit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/enforce-branch-limit.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  trim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete excess branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          branches=(
+            "feat/cinematic-editorial-reference-style"
+            "feat/cinematic-editorial-reference-style-v2"
+            "feat/cinematic-social-editing-guideline-v2"
+            "feat/cinematic-social-reference-current-main"
+            "feat/reference-edit-guideline"
+            "feat/reference-editorial-short-style"
+            "feat/reference-matched-editing-v3"
+            "feat/zapcap-style-workflow"
+          )
+          for branch in "${branches[@]}"; do
+            echo "Deleting ${branch}"
+            gh api --method DELETE "repos/${repo}/git/refs/heads/${branch}"
+          done
+      - name: Delete this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          path=".github/workflows/enforce-branch-limit.yml"
+          sha="$(gh api "repos/${repo}/contents/${path}" --jq '.sha')"
+          gh api --method DELETE "repos/${repo}/contents/${path}"             -f message="chore: enforce three branch limit"             -f sha="${sha}"             -f branch="main"
