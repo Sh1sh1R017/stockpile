@@ -1152,6 +1152,32 @@ async def get_job_asset(job_id: str, asset_name: str):
     raise HTTPException(status_code=404, detail=f"Asset '{asset_name}' not found for job {job_id}")
 
 
+@app.get("/api/jobs/{job_id}/subtitles/ass")
+async def download_job_ass_subtitles(job_id: str):
+    """Download the canonical compiled ASS subtitle layer for a rendered job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    workspace = Config.OUTPUT_DIR / "workspace" / job.job_id
+    # The canonical compositor writes subtitles_normal.ass when a separate
+    # behind-subject layer exists, otherwise subtitles_kinetic.ass.
+    candidates = (
+        workspace / "subtitles_normal.ass",
+        workspace / "subtitles_kinetic.ass",
+    )
+    ass_path = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if ass_path is None:
+        raise HTTPException(status_code=404, detail="Compiled ASS subtitles not found")
+
+    clean_name = Path(job.source_filename).stem
+    return FileResponse(
+        path=str(ass_path),
+        media_type="text/plain; charset=utf-8",
+        filename=f"{clean_name}.ass",
+    )
+
+
 @app.get("/api/jobs/{job_id}/export/openreel")
 async def export_job_openreel_file(job_id: str):
     """Download OpenReel project bundle (.oreel) for direct opening in OpenReel."""
