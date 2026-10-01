@@ -180,11 +180,11 @@ export const CuratedMomentsModal: React.FC<CuratedMomentsModalProps> = ({
                         </div>
 
                         <div className="text-xs font-bold text-zinc-100 group-hover:text-emerald-300 transition-colors">
-                          "{m.screen_hook}"
+                          &quot;{m.screen_hook}&quot;
                         </div>
 
                         <p className="text-[11px] text-zinc-400 italic">
-                          "{m.post_caption}"
+                          &quot;{m.post_caption}&quot;
                         </p>
 
                         {m.broll_theme && (
