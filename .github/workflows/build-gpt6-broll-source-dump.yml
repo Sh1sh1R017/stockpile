@@ -26,7 +26,7 @@ jobs:
             echo
             echo '## INSTRUCTIONS FOR GPT-6'
             echo
-            echo 'Audit the supplied source as one integrated B-roll pipeline. Do not invent functions or root causes. Trace: EditorialMoment -> B-roll intent -> retrieval -> scoring -> decision -> pacing -> pipeline -> edit director -> timeline. Identify exact defects causing long B-roll holds, weak semantic matches, generic/text-heavy footage, and downstream duration extension. Propose the smallest coherent patch and concrete regression tests. Preserve A-roll when no candidate is strong enough. Do not modify rendering/GPU, captions, memes, SFX, or BGM systems unless a direct dependency is proven.'
+            echo 'Audit the supplied source as one integrated B-roll pipeline AND perform the repo-wide audit appendix below. Do not invent functions or root causes. Trace exact call graphs before proposing patches. Preserve existing Stockpile features. Return concrete file/function-level diffs and regression tests.'
             echo
             echo '## REQUIRED OUTPUT'
             echo '1. Verified current call graph'
@@ -60,7 +60,10 @@ jobs:
             echo '============================================================' >> "$out"
             echo >> "$out"
             if [ -f "$f" ]; then
-              echo '```python' >> "$out"
+              case "$f" in
+                *.py) echo '```python' >> "$out";;
+                *) echo '```text' >> "$out";;
+              esac
               cat "$f" >> "$out"
               echo >> "$out"
               echo '```' >> "$out"
@@ -71,17 +74,21 @@ jobs:
 
           {
             echo
-            echo '## AUDIT FOCUS'
+            echo '## B-ROLL AUDIT FOCUS'
             echo '- Source duration must not determine editorial hold duration.'
             echo '- Approved B-roll intervals must never be silently extended downstream.'
             echo '- Weak candidates must fall back to A-roll.'
             echo '- Proposition-level relevance must beat broad topic similarity.'
-            echo '- Consider a bounded top-N frame/OCR/vision inspection stage for visible unrelated text.'
+            echo '- Consider bounded top-N frame/OCR/vision inspection for visible unrelated text.'
             echo '- Any timing replacement must remain inside the approved interval or receive explicit re-approval.'
             echo
             echo '## REPO-WIDE AUDIT APPENDIX'
             echo
             cat GPT6_REPO_WIDE_AUDIT_APPENDIX.md
+            echo
+            echo '## VERIFIED REPO FINDINGS FROM INITIAL SCAN'
+            echo
+            cat GPT6_VERIFIED_REPO_FINDINGS.md
           } >> "$out"
 
       - name: Commit generated packet
@@ -92,5 +99,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add STOCKPILE_BROLL_GPT6_FULL_AUDIT.md
           git diff --cached --quiet && exit 0
-          git commit -m 'chore: generate full GPT-6 B-roll source audit packet'
+          git commit -m 'chore: generate master GPT-6 Stockpile audit packet'
           git push
