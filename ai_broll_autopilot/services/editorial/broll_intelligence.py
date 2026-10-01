@@ -215,6 +215,25 @@ class BrollIntelligence:
         asset_text = f"{title} {tags_str} {prompt} {description}"
         moment_text = moment.text.lower()
 
+        # Hard media eligibility: never approve assets that cannot cover the
+        # entire editorial interval at their intended playback speed.
+        if asset.get("watermarked"):
+            return BrollCandidateScore(decision="RETAIN_A_ROLL", final_score=0.0, confidence=0.0,
+                                       rejection_reason="Watermarked asset")
+        duration_raw = asset.get("duration")
+        if duration_raw is None:
+            return BrollCandidateScore(decision="RETAIN_A_ROLL", final_score=0.0, confidence=0.0,
+                                       rejection_reason="Unknown asset duration")
+        speed = max(0.1, float(asset.get("speed") or getattr(Config, "BROLL_SPEED_MULTIPLIER", 1.0)))
+        effective_duration = float(duration_raw) / speed
+        if effective_duration + 0.05 < target_duration:
+            return BrollCandidateScore(decision="RETAIN_A_ROLL", final_score=0.0, confidence=0.0,
+                                       rejection_reason="Asset too short for approved B-roll interval")
+        width, height = asset.get("width"), asset.get("height")
+        if width is not None and height is not None and min(int(width), int(height)) < 720:
+            return BrollCandidateScore(decision="RETAIN_A_ROLL", final_score=0.0, confidence=0.0,
+                                       rejection_reason="Asset resolution below 720px")
+
         from ai_broll_autopilot.services.retrieval_engine import retrieval_engine
         detected_domain, active_rules = retrieval_engine._disambiguate_context(moment)
         retrieval_eval = retrieval_engine._evaluate_single_candidate(
@@ -307,8 +326,8 @@ class BrollIntelligence:
             + freshness_score * 0.05
             + duration_fit * 0.05
         )
-        final_score = round(weighted_base * variety_factor, 2)
-        confidence = round(weighted_base, 2)
+        final_score = weighted_base * variety_factor
+        confidence = weighted_base
 
         decision = "ACCEPT" if final_score >= self.acceptance_threshold else "RETAIN_A_ROLL"
         rejection_reason = None
@@ -339,8 +358,8 @@ class BrollIntelligence:
             freshness=freshness_score,
             duration_fit=duration_fit,
             variety_penalty=round(1.0 - variety_factor, 2),
-            final_score=final_score,
-            confidence=confidence,
+            final_score=round(final_score, 4),
+            confidence=round(confidence, 4),
             decision=decision,
             rejection_reason=rejection_reason,
         )
