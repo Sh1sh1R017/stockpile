@@ -2370,8 +2370,6 @@ async def start_job_hdr_upscale(job_id: str, req: HdrUpscaleRequest, background_
     db.save_job(job)
 
     def _run_hdr_job():
-
-    def _run_hdr_job():
         try:
             from ai_broll_autopilot.services.sdr2hdr_service import SDR2HDREngine
             engine = SDR2HDREngine()
