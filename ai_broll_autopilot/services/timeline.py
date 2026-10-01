@@ -204,8 +204,13 @@ class TimelineEngine:
             if font_color.startswith("#"):
                 font_color = "0x" + font_color[1:]
 
+            from ai_broll_autopilot.config import Config
+            font_path = str(getattr(Config, "FONT_PATH", "") or "")
+            if font_path:
+                font_path = font_path.replace("\\", "\\\\").replace(":", "\\:")
+            fontfile_opt = f":fontfile='{font_path}'" if font_path else ""
             drawtext_flt = (
-                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}:fontfile='{getattr(__import__('ai_broll_autopilot.config', fromlist=['Config']).Config, 'FONT_PATH', '')}':"
+                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}{fontfile_opt}:"
                 f"bordercolor=black:borderw=5:x=(w-text_w)/2:y={int(self.height * pos_y)}:"
                 f"enable='between(t,{t_start:.2f},{t_end:.2f})'"
             )
