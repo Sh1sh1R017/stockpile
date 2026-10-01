@@ -58,8 +58,8 @@ class Renderer:
             probe = subprocess.run(["ffmpeg", "-hide_banner", "-hwaccels"], capture_output=True, text=True, timeout=5)
             if "cuda" in (probe.stdout or "").lower():
                 return ["-hwaccel", "cuda"]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed optional failure: %s", exc)
         return []
 
     async def render(self, base_video: str, edit_plan: Dict[str, Any], output_path: str, ass_subtitles_path: str = None, bgm_path: str = None, bgm_volume: float = 0.15, ducking_enabled: bool = True, upscale_hdr: bool = False, hdr_scale: float = 1.0, hdr_tone: str = "vivid", watermark_path: str = None, watermark_position: str = "bottom_safe", watermark_scale: float = 0.28, preserve_dialogue_only: bool = False, frame_overlay_path: str = None, viewport: tuple = None, behind_subject_ass_path: str = None, subject_matte_path: str = None, layout_mode: str = None) -> str:
