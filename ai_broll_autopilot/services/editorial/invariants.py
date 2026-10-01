@@ -11,6 +11,7 @@ TIME_KEYS = (
     "start_time",
     "end_time",
     "timestamp",
+    "time",
     "start",
     "end",
 )
