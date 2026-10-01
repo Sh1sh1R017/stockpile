@@ -1,7 +1,14 @@
 """Shared transcript time-base normalization for clip-scoped editorial processing."""
 
+import math
+
+
 def scope_segments(segments, clip_in, clip_out):
-    duration = max(1.0, float(clip_out) - float(clip_in))
+    raw_duration = max(1.0, float(clip_out) - float(clip_in))
+    # Return the greatest representable float strictly below the raw duration.
+    # This avoids rare property-test failures caused by subtraction rounding
+    # nudging an end timestamp one ulp above the mathematically intended bound.
+    duration = math.nextafter(raw_duration, 0.0)
     out = []
     for seg in segments or []:
         st, et = float(seg.get("start", 0)), float(seg.get("end", 0))
