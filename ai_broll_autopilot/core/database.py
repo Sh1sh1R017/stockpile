@@ -434,3 +434,9 @@ class Database:
 
 
 logger = logging.getLogger(__name__)
+
+
+# Shared read/write database handle used by services that participate in the
+# canonical editorial pipeline. Other services may still inject their own
+# Database instance for isolation in tests.
+db = Database()
