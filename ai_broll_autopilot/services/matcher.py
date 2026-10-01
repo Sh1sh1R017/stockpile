@@ -194,6 +194,8 @@ class Matcher:
             asset_path = await pexels_service.search_and_download(
                 pexels_prompt, p_out, duration=target_duration, orientation="portrait"
             )
+            if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
+                asset_path = None
 
         # 4. If not cached or resolved from Pexels, acquire asset based on style
         if not asset_path:
@@ -203,6 +205,8 @@ class Matcher:
                 asset_path = await self._build_rapid_montage(
                     micro_prompts, target_duration, job_cache_dir, shot_id
                 )
+                if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
+                    asset_path = None
             else:
                 asset_path = await self._acquire_stockpile_clip(
                     prompt,
@@ -212,6 +216,8 @@ class Matcher:
                     search_queries=semantic_queries,
                     evaluation_context=evaluation_context,
                 )
+                if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
+                    asset_path = None
 
         # 5. If stockpile acquisition failed, try clean real-world Pexels stock footage
         if not asset_path or not Path(asset_path).exists():
@@ -221,6 +227,8 @@ class Matcher:
             asset_path = await pexels_service.search_and_download(
                 fallback_prompt, p_fallback, duration=target_duration, orientation="portrait"
             )
+            if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
+                asset_path = None
             if asset_path and Path(asset_path).exists():
                 logger.info(f"Resolved clean Pexels stock footage for [{shot_id}]: {Path(asset_path).name}")
             else:
