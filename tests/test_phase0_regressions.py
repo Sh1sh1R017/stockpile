@@ -2,6 +2,8 @@
 
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.services.director import Director
+from ai_broll_autopilot.services.reviewer import Reviewer
+from services.ai_service import AIService
 from ai_broll_autopilot.campaigns import campaign_registry
 
 
@@ -19,3 +21,13 @@ def test_campaign_registry_exposes_unique_ids():
     campaigns = campaign_registry.list_campaigns()
     ids = [campaign.id for campaign in campaigns]
     assert len(ids) == len(set(ids))
+
+
+def test_reviewer_constructor_is_offline_safe_without_api_key():
+    reviewer = Reviewer(api_key=None)
+    assert reviewer.client is None
+
+
+def test_source_ai_service_constructor_is_offline_safe_without_api_key():
+    service = AIService(api_key=None)
+    assert service.client is None
