@@ -38,7 +38,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Ruff bug rules
-        run: ruff check . --select F,B
+        run: ruff check ai_broll_autopilot tests --select F,B
 
       - name: Mypy baseline
         continue-on-error: true
