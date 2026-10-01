@@ -51,8 +51,13 @@ class TimelineEngine:
         active_broll_intervals = []
 
         reference_mask_labels = []
+        active_shot_indices = [
+            i for i, shot in enumerate(shots, start=1) if shot.get("asset_path")
+        ]
         if reference_style and reference_card_mask_idx is not None:
-            reference_mask_labels = [f"ref_mask_{i}" for i in range(len(shots) + 1)]
+            reference_mask_labels = ["ref_mask_0"] + [
+                f"ref_mask_{i}" for i in active_shot_indices
+            ]
             filters.append(
                 f"[{reference_card_mask_idx}:v]fps={self.fps},format=gray,"
                 f"split={len(reference_mask_labels)}"
@@ -133,7 +138,7 @@ class TimelineEngine:
                 filters.append(f"[0:v]{reference_scale}[base_card]")
                 filters.append("[base_card][ref_mask_0]alphamerge[base_card_rounded]")
                 filters.append(
-                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d=300[reference_canvas]"
+                    f"color=c=#050505:s={self.width}x{self.height}:r={self.fps}:d=30[reference_canvas]"
                 )
                 filters.append(
                     f"[reference_canvas][base_card_rounded]overlay={card_x}:{card_y}:eof_action=pass[base]"
@@ -162,7 +167,15 @@ class TimelineEngine:
                 current_layer = "base"
 
             # If subject matte compositing is enabled, split base into background and subject foreground source
-            if subject_matte_stream_idx is not None and not reference_style:
+            uses_subject_source = (
+                subject_matte_stream_idx is not None
+                and not reference_style
+                and (
+                    (behind_subject_text and behind_subject_text.get("text") and not behind_subject_ass_path)
+                    or (behind_subject_ass_path and __import__("os").path.exists(behind_subject_ass_path))
+                )
+            )
+            if uses_subject_source:
                 filters.append("[base]split=2[base_bg][subject_src]")
                 current_layer = "base_bg"
 
@@ -170,7 +183,14 @@ class TimelineEngine:
         # 1b. Backward-Compatible Subject-Aware Layered Text Overlay
         # -------------------------------------------------------------
         if behind_subject_text and behind_subject_text.get("text") and not behind_subject_ass_path:
-            raw_text = behind_subject_text.get("text", "").replace("'", "")
+            raw_text = (
+                str(behind_subject_text.get("text", ""))
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace(":", "\\:")
+                .replace("%", "\\%")
+                .replace(",", "\\,")
+            )
             t_start = float(behind_subject_text.get("start_time", 0.5))
             t_dur = float(behind_subject_text.get("duration", 2.5))
             t_end = t_start + t_dur
@@ -181,7 +201,7 @@ class TimelineEngine:
                 font_color = "0x" + font_color[1:]
 
             drawtext_flt = (
-                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}:"
+                f"drawtext=text='{raw_text}':fontsize={font_size}:fontcolor={font_color}:fontfile='{getattr(__import__('ai_broll_autopilot.config', fromlist=['Config']).Config, 'FONT_PATH', '')}':"
                 f"bordercolor=black:borderw=5:x=(w-text_w)/2:y={int(self.height * pos_y)}:"
                 f"enable='between(t,{t_start:.2f},{t_end:.2f})'"
             )
@@ -238,7 +258,7 @@ class TimelineEngine:
                 # Apply transition effects with high-velocity speed acceleration
                 if reference_style:
                     reference_card_label = f"broll_ref_card_{idx}"
-                    mask_label = reference_mask_labels[idx] if idx < len(reference_mask_labels) else None
+                    mask_label = f"ref_mask_{idx}" if idx in active_shot_indices else None
                     filters.append(
                         f"{broll_stream}setpts=(PTS-STARTPTS)/{speed:.2f},"
                         f"{scale_and_pad},setpts=PTS+{start_t:.2f}/TB[{scaled_broll}]"
