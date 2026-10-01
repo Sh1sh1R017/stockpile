@@ -216,7 +216,7 @@ class BrollSuperDirector:
         )
         plan["broll_super_analysis"] = analysis
         plan["broll_selection_model"] = analysis.get("model", self.model_name)
-        plan["broll_selection_policy"] = "metadata-enrichment-only"
+        plan["broll_selection_policy"] = "tone_of_voice + dialogue_impact + visualizability + narrative_need"
         return plan
 
     @staticmethod
@@ -263,6 +263,11 @@ REFERENCE EDITING MODE:
 - Coverage is telemetry, not a quota.
 - Do not invent timing roles or duration targets downstream.
 - Preserve the canonical A-roll/B-roll interval decisions made by the editor.
+- cadence_role must be one of micro, standard, or hero.
+- micro is short visual punctuation; standard is the main contextual hold; hero is
+  reserved for especially important visual beats that deserve a longer hold.
+- When the dialogue concentrates on one idea, allow 3-5 closely related micro/standard shots
+  inside the same semantic beat, provided each shot shows a distinct observable angle.
 """
 
         return f"""You are the B-ROLL SUPER DIRECTOR for an AI short-form editor.
@@ -301,6 +306,7 @@ B-ROLL RULES:
 - Search queries must describe exactly what should be visible, not just the emotion.
 - Use 3-6 concrete words per query and provide 2-4 visual angles.
 - Never invent negative drama.
+- For digital actions, prefer observable outcomes such as search results, a person reading search results, a visible app state, or another literal on-screen action.
 - Never use sports, basketball, streamers, memes, or generic podcast footage unless the dialogue genuinely calls for it.
 
 TIMING:
