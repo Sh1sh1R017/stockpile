@@ -92,7 +92,7 @@ export const MemeStudioModal: React.FC<MemeStudioModalProps> = ({
         {memeTargetShot?.dialogue_quote && (
           <div className="bg-indigo-950/40 border-b border-indigo-500/20 px-6 py-2.5 flex items-center justify-between">
             <div className="text-xs text-indigo-200 truncate mr-3">
-              <span className="font-semibold text-indigo-400">Spoken Quote:</span> "{memeTargetShot.dialogue_quote}"
+              <span className="font-semibold text-indigo-400">Spoken Quote:</span> &quot;{memeTargetShot.dialogue_quote}&quot;
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
