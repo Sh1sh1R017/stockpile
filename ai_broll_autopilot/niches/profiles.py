@@ -11,6 +11,7 @@ PROFILES = [
         description="Basketball podcasts, games, tournaments, player interviews, and analysis.",
         visual_keywords=[
             "basketball", "nba", "slam dunk", "basketball court", "basketball hoop",
+            "court", "gym", "crossover", "crossovers", "dunk", "dunking", "tournament",
             "crossover dribble", "buzzer beater", "three-pointer", "free throw", "rebound",
             "jump shot", "layup", "basketball jersey", "basketball game", "nba finals"
         ],
