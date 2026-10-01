@@ -275,9 +275,9 @@ class SemanticRetrievalEngine:
         active_rules = []
 
         for rule in self.DISAMBIGUATION_RULES:
-            if rule.term in text_lower:
+            if re.search(r"(?<!\\w)" + re.escape(rule.term.lower()) + r"(?!\\w)", text_lower):
                 # Check if any context keywords confirm the rule
-                hits = sum(1 for kw in rule.context_keywords if kw in text_lower)
+                hits = sum(1 for kw in rule.context_keywords if re.search(r"(?<!\\w)" + re.escape(kw.lower()) + r"(?!\\w)", text_lower))
                 if hits > 0:
                     active_rules.append(rule)
 
@@ -305,8 +305,8 @@ class SemanticRetrievalEngine:
     ) -> CandidateEvaluationResult:
         """Score a single candidate asset against contextual criteria and contradiction rules."""
         asset_id = str(asset.get("id", asset.get("asset_id", "asset_unknown")))
-        asset_name = asset.get("title", asset.get("name", "Unknown Visual"))
-        asset_path = asset.get("file_path", asset.get("path", ""))
+        asset_name = str(asset.get("title") or asset.get("name") or "Unknown Visual")
+        asset_path = asset.get("file_path") or asset.get("asset_path") or asset.get("path") or ""
         raw_tags = asset.get("tags", [])
         if isinstance(raw_tags, str):
             tags = [part.strip().lower() for part in re.split(r"[,;|]", raw_tags) if part.strip()]
@@ -330,7 +330,7 @@ class SemanticRetrievalEngine:
         for rule in active_rules:
             # Check if candidate contains veto keywords for this disambiguated term
             for veto_kw in rule.veto_keywords:
-                if veto_kw in combined_asset_text:
+                if re.search(r"(?<!\\w)" + re.escape(veto_kw.lower()) + r"(?!\\w)", combined_asset_text):
                     is_vetoed = True
                     contradiction_score = 1.0
                     veto_reason = f"Metaphor contradiction: '{rule.term}' refers to {rule.inferred_domain.value}. Vetoed due to athlete/sports visual '{veto_kw}'."
@@ -342,7 +342,7 @@ class SemanticRetrievalEngine:
         if not is_vetoed and detected_domain in self.DOMAIN_SIGNATURES:
             forbidden = self.DOMAIN_SIGNATURES[detected_domain]["forbidden_visuals"]
             for f_kw in forbidden:
-                if f_kw in combined_asset_text:
+                if re.search(r"(?<!\\w)" + re.escape(f_kw.lower()) + r"(?!\\w)", combined_asset_text):
                     is_vetoed = True
                     contradiction_score = 0.95
                     veto_reason = f"Domain contradiction: Content is {detected_domain.value}. Disallowed visual '{f_kw}' detected."
@@ -352,7 +352,7 @@ class SemanticRetrievalEngine:
         if not is_vetoed:
             if moment.sentiment == SentimentCategory.NEGATIVE:
                 party_cues = ["beach", "party", "cheering", "fireworks", "celebration"]
-                if any(p in combined_asset_text for p in party_cues):
+                if any(re.search(r"(?<!\\w)" + re.escape(p) + r"(?!\\w)", combined_asset_text) for p in party_cues):
                     contradiction_score = 0.80
                     is_vetoed = True
                     veto_reason = "Emotional contradiction: Somber/serious dialogue paired with celebratory visual."
@@ -393,12 +393,18 @@ class SemanticRetrievalEngine:
         visual_quality = 0.85
         width = asset.get("width", 1920)
         height = asset.get("height", 1080)
-        if width < 1280 or height < 720:
+        if width is not None and height is not None and (width < 1280 or height < 720):
             visual_quality = 0.40
+        if asset.get("watermarked"):
+            return CandidateEvaluationResult(asset_id=asset_id, asset_name=asset_name, asset_path=asset_path, semantic_match=0.0, topic_coherence=0.0, action_match=0.0, visual_quality=0.0, sentiment_resonance=0.0, duration_fit=0.0, freshness=0.0, variety_penalty=0.0, contradiction_score=1.0, final_score=0.0, confidence=0.0, is_vetoed=True, veto_reason="Watermarked asset")
 
         # 6. Duration Fit
-        asset_duration = float(asset.get("duration", 10.0))
-        if asset_duration < target_duration:
+        asset_duration_raw = asset.get("duration")
+        if asset_duration_raw is None:
+            return CandidateEvaluationResult(asset_id=asset_id, asset_name=asset_name, asset_path=asset_path, semantic_match=0.0, topic_coherence=0.0, action_match=0.0, visual_quality=0.0, sentiment_resonance=0.0, duration_fit=0.0, freshness=0.0, variety_penalty=0.0, contradiction_score=1.0, final_score=0.0, confidence=0.0, is_vetoed=True, veto_reason="Unknown asset duration")
+        speed = max(0.1, float(asset.get("speed") or 1.0))
+        asset_duration = float(asset_duration_raw) / speed
+        if asset_duration + 0.05 < target_duration:
             duration_fit = max(0.2, asset_duration / max(1.0, target_duration))
         else:
             duration_fit = 1.0
