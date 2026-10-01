@@ -1004,8 +1004,17 @@ Return ONLY a valid JSON object matching this schema:
 
         if total_broll > target_broll_sec and cleaned:
             scale = target_broll_sec / total_broll
-            floor = float(getattr(style_profile, "broll_min_duration", 0.8)) if reference_style else 1.3
             for s in cleaned:
+                role = str(s.get("cadence_role", "standard")).lower().strip()
+                floor = (
+                    float(getattr(style_profile, "micro_broll_min_duration", 0.45))
+                    if reference_style and role == "micro"
+                    else float(getattr(style_profile, "hero_broll_min_duration", 3.0))
+                    if reference_style and role == "hero"
+                    else float(getattr(style_profile, "broll_min_duration", 0.8))
+                    if reference_style
+                    else 1.3
+                )
                 scaled_dur = round(max(floor, s["duration"] * scale), 2)
                 s["duration"] = scaled_dur
                 s["end_time"] = round(s["start_time"] + scaled_dur, 2)
