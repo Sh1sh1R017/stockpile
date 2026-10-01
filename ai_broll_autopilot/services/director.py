@@ -484,8 +484,82 @@ Return ONLY a valid JSON object matching this schema:
             )
             total_broll_time = round(sum(s["duration"] for s in clean_shots), 2)
 
-            # Preserve or detect Level 3 typographic emphasis graphics
+            # Normalize semantic callouts into deliberate editorial graphics.
+            # These are separate from word-by-word captions and are capped so the
+            # reference treatment never becomes an always-on text wall.
             emphasis_graphics = plan_data.get("text_emphasis_graphics", [])
+            if reference_editing:
+                normalized_graphics = []
+                seen_graphic_text = set()
+                max_graphics = int(getattr(style_profile, "semantic_callout_max", 4))
+                min_graphic_duration = float(
+                    getattr(style_profile, "semantic_callout_min_duration", 0.7)
+                )
+                max_graphic_duration = float(
+                    getattr(style_profile, "semantic_callout_max_duration", 2.8)
+                )
+                for graphic in emphasis_graphics if isinstance(emphasis_graphics, list) else []:
+                    if len(normalized_graphics) >= max_graphics or not isinstance(graphic, dict):
+                        break
+                    primary = str(
+                        graphic.get("primary_text")
+                        or graphic.get("text")
+                        or ""
+                    ).strip()
+                    if not primary:
+                        continue
+                    normalized_key = re.sub(r"\s+", " ", primary.lower())
+                    if normalized_key in seen_graphic_text:
+                        continue
+                    # Semantic callouts should be compact; long prose remains in captions.
+                    if len(primary.split()) > 6:
+                        continue
+
+                    try:
+                        graph_start = max(0.0, float(graphic.get("start_time", 0.0)))
+                        graph_duration = max(
+                            min_graphic_duration,
+                            min(
+                                max_graphic_duration,
+                                float(graphic.get("duration", 1.2) or 1.2),
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if graph_start >= video_duration:
+                        continue
+                    graph_duration = min(graph_duration, video_duration - graph_start)
+                    if graph_duration < min_graphic_duration:
+                        continue
+
+                    normalized = {
+                        "graphic_id": str(
+                            graphic.get(
+                                "graphic_id",
+                                f"semantic_{len(normalized_graphics)+1}",
+                            )
+                        ),
+                        "primary_text": primary,
+                        "secondary_text": str(graphic.get("secondary_text", "") or "").strip(),
+                        "start_time": round(graph_start, 2),
+                        "duration": round(graph_duration, 2),
+                        "position": graphic.get(
+                            "position",
+                            {"x_percent": 50, "y_percent": getattr(style_profile, "caption_y_percent", 58.0)},
+                        ),
+                        "graphic_type": "semantic_callout",
+                        "animation_in": graphic.get("animation_in", "pop_spring"),
+                        "accent_color": graphic.get("accent_color", style_profile.highlight_color),
+                        "reason": graphic.get(
+                            "reason",
+                            "Semantic phrase deserves dedicated visual emphasis.",
+                        ),
+                    }
+                    normalized_graphics.append(normalized)
+                    seen_graphic_text.add(normalized_key)
+                emphasis_graphics = normalized_graphics
+            else:
+                emphasis_graphics = emphasis_graphics if isinstance(emphasis_graphics, list) else []
 
             plan_result = {
                 "total_duration": video_duration,
