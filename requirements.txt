@@ -13,3 +13,6 @@ uvicorn
 python-multipart
 httpx
 Pillow
+numpy
+opencv-python
+pytest
