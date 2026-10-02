@@ -130,6 +130,11 @@ export interface ShotDetail {
   visual_strategy?: string;
   broll_search_queries?: string[];
   avoid_visuals?: string[];
+  search_query?: string;
+  search_prompt?: string;
+  category?: string;
+  asset_path?: string;
+  source?: string;
 }
 
 export interface JobDetail extends JobSummary {
@@ -151,6 +156,14 @@ export interface JobDetail extends JobSummary {
       end: number;
       highlight?: boolean;
       emoji?: string;
+      behindSubject?: boolean;
+      words?: Array<{
+        word: string;
+        start: number;
+        end: number;
+        highlight?: boolean;
+        emoji?: string;
+      }>;
     }>;
     zooms?: Array<{
       start: number;
@@ -194,6 +207,9 @@ export interface JobDetail extends JobSummary {
       bgm_volume?: number;
       bgm_ducking?: boolean;
       enable_emojis?: boolean;
+      preset?: string;
+      words_per_beat?: number;
+      caption_motion?: string;
       custom_colors?: {
         main?: string;
         second?: string;
