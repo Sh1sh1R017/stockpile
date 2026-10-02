@@ -5,13 +5,32 @@ from pathlib import Path
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-load_dotenv(PROJECT_ROOT / ".env")
+# Resolve the actual project root robustly. This also handles a local checkout
+# nested one level deeper than expected (for example E:\\stockpile\\stockpile).
+_CONFIG_DIR = Path(__file__).resolve().parent
+_PROJECT_CANDIDATES = [_CONFIG_DIR.parent, *_CONFIG_DIR.parents]
+PROJECT_ROOT = next(
+    (
+        p for p in _PROJECT_CANDIDATES
+        if (p / ".env").exists() or (p / "requirements.txt").exists() or (p / ".git").exists()
+    ),
+    _CONFIG_DIR.parent,
+)
+
+# Prefer the .env nearest the actual project root, then walk upward so a nested
+# checkout can still use a local .env kept at its parent directory.
+_ENV_CANDIDATES = [PROJECT_ROOT / ".env", *_PROJECT_CANDIDATES]
+_ENV_FILE = next((p / ".env" for p in _ENV_CANDIDATES if (p / ".env").exists()), None)
+if _ENV_FILE:
+    load_dotenv(_ENV_FILE, override=False)
+else:
+    load_dotenv(override=False)
 
 
 class Config:
     """Autopilot central configuration."""
     PROJECT_ROOT: Path = PROJECT_ROOT
+    ENV_FILE: Path | None = _ENV_FILE
     INPUT_DIR: Path = PROJECT_ROOT / os.getenv("LOCAL_INPUT_FOLDER", "input")
     OUTPUT_DIR: Path = PROJECT_ROOT / os.getenv("LOCAL_OUTPUT_FOLDER", "output")
     DB_PATH: Path = PROJECT_ROOT / "autopilot.db"
@@ -48,12 +67,9 @@ class Config:
     TARGET_FPS: int = 30
     VIDEO_CRF: int = 19
 
-    # Hardware encoding: auto detects h264_nvenc and falls back to CPU x264.
-    # Set STOCKPILE_NVENC=0 to force CPU encoding; set STOCKPILE_NVENC=1 to require NVENC.
     NVENC_MODE: str = os.getenv("STOCKPILE_NVENC", "auto").strip().lower()
     NVENC_PRESET: str = os.getenv("STOCKPILE_NVENC_PRESET", "p4")
     NVENC_CQ: int = int(os.getenv("STOCKPILE_NVENC_CQ", str(VIDEO_CRF)))
-    # Skip expensive packet/atom inspection on the hot render path when enabled.
     FAST_RENDER_VALIDATION: bool = os.getenv("STOCKPILE_FAST_VALIDATION", "1").strip().lower() not in {"0", "false", "off"}
 
     EDITOR_ENGINE: str = os.getenv("EDITOR_ENGINE", "openreel")
