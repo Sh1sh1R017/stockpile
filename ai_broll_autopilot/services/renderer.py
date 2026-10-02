@@ -108,6 +108,9 @@ class Renderer:
         behind_subject_ass_path: str = None,
         subject_matte_path: str = None,
         layout_mode: str = None,
+        source_start_time: float = 0.0,
+        render_duration: Optional[float] = None,
+        **kwargs,
     ) -> str:
         """Render the composite video with B-roll cutaway overlays, dynamic transitions,
         kinetic subtitles, frame overlay mask, watermark branding, and mixed audio SFX with ducked background music.
@@ -256,7 +259,10 @@ class Renderer:
 
         # Build FFmpeg command inputs
         # Input 0: Base video
-        cmd = ["ffmpeg", "-y", "-i", str(base_p)]
+        cmd = ["ffmpeg", "-y"]
+        if source_start_time and float(source_start_time) > 0.001:
+            cmd.extend(["-ss", f"{float(source_start_time):.3f}"])
+        cmd.extend(["-i", str(base_p)])
 
         # Inputs 1 .. len(shots): B-roll video streams
         for shot in shots:
@@ -407,8 +413,17 @@ class Renderer:
             "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
         ])
-        if base_dur and base_dur > 0:
-            cmd.extend(["-t", f"{base_dur:.3f}"])
+        effective_dur = None
+        if render_duration and float(render_duration) > 0:
+            effective_dur = float(render_duration)
+        elif base_dur and base_dur > 0:
+            if source_start_time and float(source_start_time) > 0:
+                effective_dur = max(0.0, base_dur - float(source_start_time))
+            else:
+                effective_dur = base_dur
+
+        if effective_dur and effective_dur > 0:
+            cmd.extend(["-t", f"{effective_dur:.3f}"])
         else:
             cmd.append("-shortest")
         cmd.extend([
