@@ -5,7 +5,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from PIL import Image, ImageDraw
 

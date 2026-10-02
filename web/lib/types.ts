@@ -172,10 +172,17 @@ export interface JobDetail extends JobSummary {
       subtitles_enabled?: boolean;
       subtitle_style?: string;
       subtitle_position?: string;
+      subtitle_y_percent?: number;
       subtitles_behind_subject?: boolean;
       bgm_track_id?: string;
       bgm_volume?: number;
       bgm_ducking?: boolean;
+      enable_emojis?: boolean;
+      custom_colors?: {
+        main?: string;
+        second?: string;
+        third?: string;
+      };
     };
     shots: ShotDetail[];
   };
