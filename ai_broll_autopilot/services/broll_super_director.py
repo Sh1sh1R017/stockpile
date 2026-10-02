@@ -387,7 +387,7 @@ B-ROLL RULES:
 - Prefer high-impact AND highly visualizable dialogue.
 - Choose the MOST IMPACTFUL DIALOGUE for each visual opportunity.
 - Do not repeat the same visual concept when another useful angle exists.
-- Search queries must describe exactly what should be visible, not just the emotion.
+- Search queries must describe exactly what should be visible (WHO is visible, WHAT are they physically doing, WHERE are they), not just the emotion.
 - Use 3-6 concrete words per query and provide 2-4 visual angles.
 - Never invent negative drama.
 - Never use sports, basketball, streamers, memes, or generic podcast footage unless the dialogue genuinely calls for it.

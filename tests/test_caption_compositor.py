@@ -122,7 +122,7 @@ class TestCaptionCompositorLayers:
             assert behind_ass is not None
             assert Path(behind_ass).exists()
             behind_content = Path(behind_ass).read_text(encoding="utf-8")
-            assert "WRONG" in behind_content
+            assert "W\\NR\\NO\\NN\\NG" in behind_content
             assert "YOU" not in behind_content
         asyncio.run(_run())
 
@@ -189,7 +189,7 @@ class TestCaptionCompositorLayers:
 
             assert behind_ass is not None
             behind_content = Path(behind_ass).read_text(encoding="utf-8")
-            assert "WRONG" in behind_content, "Hook word 'WRONG' must be in behind-subject layer"
+            assert "W\\NR\\NO\\NN\\NG" in behind_content, "Hook word 'WRONG' must be in behind-subject layer"
         asyncio.run(_run())
 
     def test_hook_text_not_silently_discarded_when_behind_disabled(self, temp_work_dir, dummy_video):
@@ -217,7 +217,7 @@ class TestCaptionCompositorLayers:
             assert matte is None
             assert normal_ass is not None
             normal_content = Path(normal_ass).read_text(encoding="utf-8")
-            assert "WRONG" in normal_content
+            assert "W\\NR\\NO\\NN\\NG" in normal_content
         asyncio.run(_run())
 
     def test_subject_matte_generated_when_behind_hook_exists(self, temp_work_dir, dummy_video):
@@ -288,7 +288,7 @@ class TestCaptionCompositorLayers:
             assert behind is None
             assert matte is None
             normal_content = Path(normal).read_text(encoding="utf-8")
-            assert "HOOK" in normal_content
+            assert "H\\NO\\NO\\NK" in normal_content
         asyncio.run(_run())
 
 

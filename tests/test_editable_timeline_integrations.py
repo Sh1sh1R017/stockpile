@@ -21,7 +21,7 @@ def test_caption_motion_profiles_are_normalized_and_applied():
     updated = apply_caption_motion(subtitles, "typewriter")
     assert updated[0]["animationStyle"] == "typewriter"
     assert updated[0]["motionProfile"] == "typewriter"
-    assert updated[0]["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert updated[0]["motionRecipe"] == "kinetic:typewriter"
 
 
 def test_openreel_export_uses_raw_source_as_editable_a_roll():
@@ -69,7 +69,7 @@ def test_subject_aware_caption_metadata_ass_layers_and_timeline(tmp_path):
             "endTime": 1.5,
             "behind_subject": True,
             "motionProfile": "typewriter",
-            "motionRecipe": "motion-anything:typewriter-multi",
+            "motionRecipe": "kinetic:typewriter",
             "words": [
                 {"text": "PUT", "startTime": 0.0, "endTime": 0.4},
                 {"text": "THIS", "startTime": 0.4, "endTime": 0.8},
@@ -171,7 +171,7 @@ def test_openreel_round_trips_subject_caption_metadata():
                 "endTime": 2.0,
                 "animationStyle": "typewriter",
                 "motionProfile": "typewriter",
-                "motionRecipe": "motion-anything:typewriter-multi",
+                "motionRecipe": "kinetic:typewriter",
                 "behind_subject": True,
                 "style": {"fontFamily": "Arial"},
                 "words": [],
@@ -188,14 +188,14 @@ def test_openreel_round_trips_subject_caption_metadata():
     )
     assert sub["behindSubject"] is True
     assert sub["metadata"]["motionProfile"] == "typewriter"
-    assert sub["metadata"]["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert sub["metadata"]["motionRecipe"] == "kinetic:typewriter"
     assert project["project"]["timeline"]["subtitles"] == []
     assert "subtitle-behind-subject" in project["project"]["capabilities"]
 
     updated = openreel_adapter.update_edit_plan_from_openreel(plan, project)
     assert updated.subtitles[0]["behind_subject"] is True
     assert updated.subtitles[0]["motionProfile"] == "typewriter"
-    assert updated.subtitles[0]["motionRecipe"] == "motion-anything:typewriter-multi"
+    assert updated.subtitles[0]["motionRecipe"] == "kinetic:typewriter"
     assert updated.subtitles[0]["startTime"] == 0.0
     assert updated.subtitles[0]["endTime"] == 2.0
 

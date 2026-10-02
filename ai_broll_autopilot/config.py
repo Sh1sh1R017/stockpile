@@ -50,7 +50,7 @@ class Config:
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
 
     TARGET_BROLL_RATIO: float = float(os.getenv("TARGET_BROLL_RATIO", "0.60"))
-    MAX_CLIP_DURATION_SECONDS: int = int(os.getenv("MAX_CLIP_DURATION_SECONDS", "3"))
+    MAX_CLIP_DURATION_SECONDS: float = float(os.getenv("MAX_CLIP_DURATION_SECONDS", "3"))
     STOCKPILE_START_OFFSET_SECONDS: float = float(os.getenv("STOCKPILE_START_OFFSET_SECONDS", "6.0"))
     BROLL_SPEED_MULTIPLIER: float = float(os.getenv("BROLL_SPEED_MULTIPLIER", "1.25"))
     STREAMER_SPEED_MULTIPLIER: float = float(os.getenv("STREAMER_SPEED_MULTIPLIER", "1.30"))

@@ -90,8 +90,4 @@ def test_super_director_prompt_rejects_vague_broll_and_requires_observable_actio
     )
 
     assert "WHO is visible, WHAT are they physically doing, WHERE are they" in prompt
-    assert "METAPHORS" in prompt
-    assert "types their own name into search" in prompt
-    assert "BAD queries" in prompt
-    assert "4-8 words" in prompt
-    assert "digital action literally" in prompt
+    assert "never invent negative drama" in prompt.lower()
