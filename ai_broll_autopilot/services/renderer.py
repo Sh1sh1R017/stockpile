@@ -206,18 +206,21 @@ class Renderer:
                 else:
                     try:
                         from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
-                    m_path = subject_isolation_service.create_subject_matte_clip(
-                        video_path=str(base_p),
-                        output_matte_path=str(matte_file),
-                        start_time=0.0,
-                        duration=None,
-                        target_width=Config.TARGET_WIDTH,
-                        target_height=Config.TARGET_HEIGHT,
-                    )
+                        m_path = subject_isolation_service.create_subject_matte_clip(
+                            video_path=str(base_p),
+                            output_matte_path=str(matte_file),
+                            start_time=0.0,
+                            duration=None,
+                            target_width=Config.TARGET_WIDTH,
+                            target_height=Config.TARGET_HEIGHT,
+                        )
                         if m_path and os.path.exists(m_path):
                             subject_matte_path = m_path
                     except Exception as e:
-                        logger.warning(f"Subject isolation matte for subtitles skipped: {e}. Falling back to standard compositing.")
+                        logger.warning(
+                            f"Subject isolation matte for subtitles skipped: {e}. "
+                            "Falling back to standard compositing."
+                        )
             elif behind_subject_overlay:
                 matte_file = out_p.parent / f"matte_{behind_subject_overlay.get('id', 'hook')}.mp4"
                 if matte_file.exists() and matte_file.stat().st_size > 0:
@@ -225,20 +228,23 @@ class Renderer:
                 else:
                     try:
                         from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
-                    st = float(behind_subject_overlay.get("start_time", 0.0))
-                    dur = float(behind_subject_overlay.get("duration", 2.5))
-                    m_path = subject_isolation_service.create_subject_matte_clip(
-                        video_path=str(base_p),
-                        output_matte_path=str(matte_file),
-                        start_time=st,
-                        duration=dur,
-                        target_width=Config.TARGET_WIDTH,
-                        target_height=Config.TARGET_HEIGHT,
-                    )
+                        st = float(behind_subject_overlay.get("start_time", 0.0))
+                        dur = float(behind_subject_overlay.get("duration", 2.5))
+                        m_path = subject_isolation_service.create_subject_matte_clip(
+                            video_path=str(base_p),
+                            output_matte_path=str(matte_file),
+                            start_time=st,
+                            duration=dur,
+                            target_width=Config.TARGET_WIDTH,
+                            target_height=Config.TARGET_HEIGHT,
+                        )
                         if m_path and os.path.exists(m_path):
                             subject_matte_path = m_path
                     except Exception as e:
-                        logger.warning(f"Subject isolation matte skipped: {e}. Falling back to normal text overlay.")
+                        logger.warning(
+                            f"Subject isolation matte skipped: {e}. "
+                            "Falling back to normal text overlay."
+                        )
 
         logger.info(
             f"Rendering timeline: base={base_p.name} with {len(shots)} B-roll cutaway overlays, "
