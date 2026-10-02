@@ -5,13 +5,14 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.core.database import Database
 from ai_broll_autopilot.services.collage_bridge import CollageBridge
 from ai_broll_autopilot.services.watermark_scanner import watermark_scanner
 from ai_broll_autopilot.services.pexels import pexels_service
+from ai_broll_autopilot.services.giphy import giphy_service
 from ai_broll_autopilot.services.meme_engine import MemeEngine
 
 # Import Stockpile services directly from src/
@@ -50,11 +51,23 @@ class Matcher:
         # Memes allowed only if both campaign AND niche profile permit meme cutaways
         allow_memes = bool(campaign.allow_ai_broll and (getattr(niche.editing, "meme_cutaways", False) if niche else False))
 
-        # Resolve all shots concurrently with asyncio.gather
-        tasks = [self._resolve_single_shot(shot, job_cache_dir, allow_memes=allow_memes, niche_id=niche_id) for shot in shots]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        # Shared set to track used asset IDs across all shots (prevents duplicates)
+        used_ids: Set[str] = set()
+        used_ids_lock = asyncio.Lock()
 
-        resolved_shots = [s for s in results if s is not None]
+        # Resolve shots sequentially to maintain strict deduplication guarantee
+        resolved_shots = []
+        for shot in shots:
+            result = await self._resolve_single_shot(
+                shot, job_cache_dir,
+                allow_memes=allow_memes,
+                niche_id=niche_id,
+                used_ids=used_ids,
+                used_ids_lock=used_ids_lock,
+            )
+            if result is not None:
+                resolved_shots.append(result)
+
         plan["shots"] = resolved_shots
         plan["matched_count"] = len(resolved_shots)
         logger.info(f"Successfully matched {len(resolved_shots)} of {len(shots)} shots in parallel")
@@ -66,8 +79,13 @@ class Matcher:
         job_cache_dir: Path,
         allow_memes: bool = False,
         niche_id: Optional[str] = None,
+        used_ids: Optional[Set[str]] = None,
+        used_ids_lock: Optional[asyncio.Lock] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Resolve a single B-roll shot concurrently."""
+        """Resolve a single B-roll shot. used_ids tracks globally-used asset IDs to prevent repeats."""
+        if used_ids is None:
+            used_ids = set()
+
         shot_id = shot.get("shot_id", "shot")
         prompt = shot.get("search_prompt") or shot.get("visceral_human_metaphor") or shot.get("emotional_core")
         semantic_queries = shot.get("broll_search_queries") or shot.get("micro_prompts") or []
@@ -161,8 +179,11 @@ class Matcher:
             logger.info(f"Attempting Pexels stock video search for [{shot_id}]: '{pexels_prompt}'")
             p_out = job_cache_dir / f"{shot_id}_pexels.mp4"
             asset_path = await pexels_service.search_and_download(
-                pexels_prompt, p_out, duration=target_duration, orientation="portrait"
+                pexels_prompt, p_out, duration=target_duration, orientation="portrait",
+                used_ids=used_ids,
             )
+            if asset_path and pexels_service.last_downloaded_id:
+                used_ids.add(str(pexels_service.last_downloaded_id))
 
         # 4. If not cached or resolved from Pexels, acquire asset based on style
         if not asset_path:
@@ -188,13 +209,46 @@ class Matcher:
             p_fallback = job_cache_dir / f"{shot_id}_pexels_fallback.mp4"
             fallback_prompt = semantic_queries[0] if semantic_queries else prompt
             asset_path = await pexels_service.search_and_download(
-                fallback_prompt, p_fallback, duration=target_duration, orientation="portrait"
+                fallback_prompt, p_fallback, duration=target_duration, orientation="portrait",
+                used_ids=used_ids,
             )
             if asset_path and Path(asset_path).exists():
+                if pexels_service.last_downloaded_id:
+                    used_ids.add(str(pexels_service.last_downloaded_id))
                 logger.info(f"Resolved clean Pexels stock footage for [{shot_id}]: {Path(asset_path).name}")
             else:
-                logger.info(f"No clean stock footage found for [{shot_id}] ('{prompt}'); preserving clean A-roll speaker footage.")
                 asset_path = None
+
+        # 5b. Giphy animated GIF (converted to MP4) — never repeats same GIF
+        if not asset_path and giphy_service.is_available():
+            logger.info(f"Trying Giphy GIF fallback for [{shot_id}]: '{prompt}'")
+            g_out = job_cache_dir / f"{shot_id}_giphy.mp4"
+            giphy_prompt = semantic_queries[0] if semantic_queries else prompt
+            result = await giphy_service.search_and_download(
+                giphy_prompt, g_out, duration=target_duration, used_ids=used_ids
+            )
+            if result:
+                asset_path, giphy_id = result
+                used_ids.add(str(giphy_id))
+                logger.info(f"Resolved Giphy GIF for [{shot_id}]: {Path(asset_path).name}")
+
+        # 5c. Pexels static photo (looped into a still clip) — last resort before giving up
+        if not asset_path and pexels_service.is_available():
+            logger.info(f"Trying Pexels static photo fallback for [{shot_id}]: '{prompt}'")
+            photo_out = job_cache_dir / f"{shot_id}_photo.mp4"
+            photo_prompt = semantic_queries[0] if semantic_queries else prompt
+            result = await pexels_service.search_and_download_photo(
+                photo_prompt, photo_out, duration=target_duration, used_ids=used_ids
+            )
+            if result:
+                asset_path, photo_id = result
+                used_ids.add(str(photo_id))
+                logger.info(f"Resolved Pexels photo for [{shot_id}]: {Path(asset_path).name}")
+
+        if not asset_path:
+            logger.info(f"No B-roll found for [{shot_id}] ('{prompt}'); preserving A-roll speaker footage.")
+
+
 
         if asset_path and Path(asset_path).exists():
             shot["asset_path"] = str(Path(asset_path).resolve())

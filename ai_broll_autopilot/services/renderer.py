@@ -264,9 +264,9 @@ class Renderer:
             cmd.extend(["-ss", f"{float(source_start_time):.3f}"])
         cmd.extend(["-i", str(base_p)])
 
-        # Inputs 1 .. len(shots): B-roll video streams
+        # Inputs 1 .. len(shots): B-roll video streams (DO NOT loop B-roll)
         for shot in shots:
-            cmd.extend(["-stream_loop", "-1", "-i", str(shot["asset_path"])])
+            cmd.extend(["-i", str(shot["asset_path"])])
 
         # Layout mode resolution
         layout_mode = (

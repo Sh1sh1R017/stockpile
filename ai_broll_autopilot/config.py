@@ -92,6 +92,7 @@ class Config:
     GOOGLE_DRIVE_OUTPUT_FOLDER_ID: str = os.getenv("GOOGLE_DRIVE_OUTPUT_FOLDER_ID", "")
     NOTIFICATION_EMAIL: str = os.getenv("NOTIFICATION_EMAIL", "")
     PEXELS_API_KEY: str = os.getenv("PEXELS_API_KEY", "")
+    GIPHY_API_KEY: str = os.getenv("GIPHY_API_KEY", "S158gtyK087a7AuLRiiAVuEsFZCE8Btj")
     OPENSHORTS_API_URL: str = os.getenv("OPENSHORTS_API_URL", "")
     OPENSHORTS_API_KEY: str = os.getenv("OPENSHORTS_API_KEY", "")
     MOTION_ANYTHING_DIR: Path = Path(os.getenv("MOTION_ANYTHING_DIR", str(PROJECT_ROOT / "motion-anything")))
