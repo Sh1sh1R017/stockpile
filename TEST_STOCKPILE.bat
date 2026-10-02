@@ -82,6 +82,15 @@ if errorlevel 1 (
 "%PYTHON%" -m pip install --disable-pip-version-check pytest >nul 2>&1
 echo [OK] Python dependencies ready.
 
+REM ---- Configuration diagnostic ------------------------------------------
+echo [TEST] Checking Stockpile configuration and .env...
+"%PYTHON%" -c "from ai_broll_autopilot.config import Config; print('Project root:', Config.PROJECT_ROOT); print('Env file:', Config.ENV_FILE if Config.ENV_FILE else 'NOT FOUND'); print('Gemini key:', 'DETECTED' if Config.GEMINI_API_KEY else 'MISSING')"
+if errorlevel 1 (
+  echo.
+  echo [ERROR] Stockpile configuration could not be loaded.
+  goto :fail
+)
+
 REM ---- FFmpeg -------------------------------------------------------------
 where ffmpeg >nul 2>&1
 if errorlevel 1 (
