@@ -54,6 +54,39 @@ class Renderer:
         image.save(output_path, format="PNG")
         return output_path
 
+    @staticmethod
+    def _encoder_args() -> List[str]:
+        """Select NVENC when available, otherwise preserve the CPU fallback."""
+        mode = str(getattr(Config, "NVENC_MODE", "auto")).strip().lower()
+        if mode in {"0", "false", "off"}:
+            return ["-c:v", "libx264", "-preset", "veryfast", "-threads", "0", "-crf", str(Config.VIDEO_CRF)]
+
+        try:
+            probe = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            nvenc_available = "h264_nvenc" in (probe.stdout or "")
+        except Exception:
+            nvenc_available = False
+
+        if mode in {"1", "true", "on"} and not nvenc_available:
+            logger.warning("NVENC requested but h264_nvenc is unavailable; falling back to libx264.")
+
+        if nvenc_available:
+            return [
+                "-c:v", "h264_nvenc",
+                "-preset", str(getattr(Config, "NVENC_PRESET", "p4")),
+                "-rc", "vbr",
+                "-cq", str(getattr(Config, "NVENC_CQ", Config.VIDEO_CRF)),
+                "-b:v", "0",
+            ]
+
+        return ["-c:v", "libx264", "-preset", "veryfast", "-threads", "0", "-crf", str(Config.VIDEO_CRF)]
+
     async def render(
         self,
         base_video: str,
@@ -168,8 +201,11 @@ class Renderer:
             subject_matte_path = None
             if has_behind_subtitles:
                 matte_file = out_p.parent / "subject_matte.mp4"
-                try:
-                    from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+                if matte_file.exists() and matte_file.stat().st_size > 0:
+                    subject_matte_path = str(matte_file)
+                else:
+                    try:
+                        from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
                     m_path = subject_isolation_service.create_subject_matte_clip(
                         video_path=str(base_p),
                         output_matte_path=str(matte_file),
@@ -178,14 +214,17 @@ class Renderer:
                         target_width=Config.TARGET_WIDTH,
                         target_height=Config.TARGET_HEIGHT,
                     )
-                    if m_path and os.path.exists(m_path):
-                        subject_matte_path = m_path
-                except Exception as e:
-                    logger.warning(f"Subject isolation matte for subtitles skipped: {e}. Falling back to standard compositing.")
+                        if m_path and os.path.exists(m_path):
+                            subject_matte_path = m_path
+                    except Exception as e:
+                        logger.warning(f"Subject isolation matte for subtitles skipped: {e}. Falling back to standard compositing.")
             elif behind_subject_overlay:
                 matte_file = out_p.parent / f"matte_{behind_subject_overlay.get('id', 'hook')}.mp4"
-                try:
-                    from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
+                if matte_file.exists() and matte_file.stat().st_size > 0:
+                    subject_matte_path = str(matte_file)
+                else:
+                    try:
+                        from ai_broll_autopilot.services.subject_isolation import subject_isolation_service
                     st = float(behind_subject_overlay.get("start_time", 0.0))
                     dur = float(behind_subject_overlay.get("duration", 2.5))
                     m_path = subject_isolation_service.create_subject_matte_clip(
@@ -196,10 +235,10 @@ class Renderer:
                         target_width=Config.TARGET_WIDTH,
                         target_height=Config.TARGET_HEIGHT,
                     )
-                    if m_path and os.path.exists(m_path):
-                        subject_matte_path = m_path
-                except Exception as e:
-                    logger.warning(f"Subject isolation matte skipped: {e}. Falling back to normal text overlay.")
+                        if m_path and os.path.exists(m_path):
+                            subject_matte_path = m_path
+                    except Exception as e:
+                        logger.warning(f"Subject isolation matte skipped: {e}. Falling back to normal text overlay.")
 
         logger.info(
             f"Rendering timeline: base={base_p.name} with {len(shots)} B-roll cutaway overlays, "
@@ -353,10 +392,7 @@ class Renderer:
             "-filter_complex", filtergraph,
             "-map", f"[{final_video}]",
             "-map", f"[{final_audio}]",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-threads", "0",
-            "-crf", str(Config.VIDEO_CRF),
+            *self._encoder_args(),
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
@@ -419,7 +455,7 @@ class Renderer:
         cmd = [
             "ffmpeg", "-y", "-i", str(base_p),
             "-vf", f"scale={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad={Config.TARGET_WIDTH}:{Config.TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1",
-            "-c:v", "libx264", "-preset", "veryfast", "-threads", "0", "-crf", str(Config.VIDEO_CRF),
+            *self._encoder_args(),
             "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             "-ar", "48000", "-ac", "2",
