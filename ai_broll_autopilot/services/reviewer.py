@@ -21,7 +21,12 @@ class Reviewer:
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or Config.GEMINI_API_KEY
         self.model_name = model_name or Config.GEMINI_MODEL
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = None
+        if self.api_key:
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception as exc:
+                logger.warning(f"Failed to initialize Gemini client for Reviewer: {exc}")
 
     async def review_video(
         self,
@@ -88,33 +93,34 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
         models_to_try = [self.model_name] + [m for m in Config.GEMINI_FALLBACK_MODELS if m != self.model_name]
         result = None
 
-        for model_cand in models_to_try:
-            try:
-                response = self.client.models.generate_content(
-                    model=model_cand,
-                    contents=review_prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.2,
-                        response_mime_type="application/json",
-                        http_options=types.HttpOptions(
-                            retry_options=types.HttpRetryOptions(attempts=1),
-                            timeout=15000
+        if self.client:
+            for model_cand in models_to_try:
+                try:
+                    response = self.client.models.generate_content(
+                        model=model_cand,
+                        contents=review_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.2,
+                            response_mime_type="application/json",
+                            http_options=types.HttpOptions(
+                                retry_options=types.HttpRetryOptions(attempts=1),
+                                timeout=15000
+                            ),
                         ),
-                    ),
-                )
-                raw = response.text or "{}"
-                if raw.startswith("```json"):
-                    raw = raw[7:-3]
-                elif raw.startswith("```"):
-                    raw = raw[3:-3]
+                    )
+                    raw = response.text or "{}"
+                    if raw.startswith("```json"):
+                        raw = raw[7:-3]
+                    elif raw.startswith("```"):
+                        raw = raw[3:-3]
 
-                parsed = json.loads(raw.strip())
-                if "verdict" in parsed:
-                    result = parsed
-                    break
-            except Exception as model_err:
-                logger.warning(f"AI Reviewer model {model_cand} error: {model_err}")
-                continue
+                    parsed = json.loads(raw.strip())
+                    if "verdict" in parsed:
+                        result = parsed
+                        break
+                except Exception as model_err:
+                    logger.warning(f"AI Reviewer model {model_cand} error: {model_err}")
+                    continue
 
         if not result:
             logger.info("AI Reviewer defaulted to APPROVED (models unavailable).")

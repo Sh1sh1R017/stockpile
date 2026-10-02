@@ -30,7 +30,12 @@ class Director:
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or Config.GEMINI_API_KEY
         self.model_name = model_name or Config.GEMINI_MODEL
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = None
+        if self.api_key:
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception as exc:
+                logger.warning(f"Failed to initialize Gemini client for Director: {exc}")
 
     async def create_edit_plan(
         self,
@@ -263,28 +268,31 @@ Return ONLY a valid JSON object matching this schema:
         models_to_try = [self.model_name] + [m for m in Config.GEMINI_FALLBACK_MODELS if m != self.model_name]
         plan_data = None
 
-        for model_cand in models_to_try:
-            try:
-                response = self.client.models.generate_content(
-                    model=model_cand,
-                    contents=director_prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.3,
-                        response_mime_type="application/json",
-                        http_options=types.HttpOptions(
-                            retry_options=types.HttpRetryOptions(attempts=1),
-                            timeout=15000
+        if self.client:
+            for model_cand in models_to_try:
+                try:
+                    response = self.client.models.generate_content(
+                        model=model_cand,
+                        contents=director_prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.3,
+                            response_mime_type="application/json",
+                            http_options=types.HttpOptions(
+                                retry_options=types.HttpRetryOptions(attempts=1),
+                                timeout=15000
+                            ),
                         ),
-                    ),
-                )
-                raw_text = clean_json_string(response.text or "{}")
-                plan_data = json.loads(raw_text)
-                min_shots = 1 if campaign.max_broll_ratio <= 0.35 else 2
-                if plan_data and "shots" in plan_data and len(plan_data["shots"]) >= min_shots:
-                    break
-            except Exception as model_err:
-                logger.warning(f"AI Director model {model_cand} failed: {model_err}. Trying next fallback...")
-                continue
+                    )
+                    raw_text = clean_json_string(response.text or "{}")
+                    plan_data = json.loads(raw_text)
+                    min_shots = 1 if campaign.max_broll_ratio <= 0.35 else 2
+                    if plan_data and "shots" in plan_data and len(plan_data["shots"]) >= min_shots:
+                        break
+                except Exception as model_err:
+                    logger.warning(f"AI Director model {model_cand} failed: {model_err}. Trying next fallback...")
+                    continue
+        else:
+            logger.warning("Gemini client not initialized for Director (no API key configured).")
 
         if not plan_data or "shots" not in plan_data or not plan_data["shots"]:
             logger.warning(f"AI Director failed to produce valid plan for '{campaign.id}'. Falling back to heuristic plan.")
