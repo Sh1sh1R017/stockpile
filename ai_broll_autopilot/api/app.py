@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from ai_broll_autopilot.config import Config
 from ai_broll_autopilot.core.database import Database
 from ai_broll_autopilot.core.job import Job, JobState
-from ai_broll_autopilot.orchestrator import Orchestrator
+from ai_broll_autopilot.orchestrator import Orchestrator, get_video_duration
 from ai_broll_autopilot.services.learning import FeedbackLearningEngine
 from ai_broll_autopilot.services.drive_sync import drive_sync_service
 from ai_broll_autopilot.services.pexels import pexels_service

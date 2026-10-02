@@ -212,8 +212,13 @@ export const CreatorWorkflowPanel: React.FC<CreatorWorkflowPanelProps> = ({
           subtitles_behind_subject: behindSubject,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Could not create edit");
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Fallback if server returned text (e.g. 500 error)
+      }
+      if (!response.ok) throw new Error(data.detail || response.statusText || "Could not create edit");
       setBatchId(data.batch_id || null);
       setMode("home");
     } catch (e) {
@@ -246,8 +251,13 @@ export const CreatorWorkflowPanel: React.FC<CreatorWorkflowPanelProps> = ({
           confirm_rights: true,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "OpenShorts failed");
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Fallback if server returned text
+      }
+      if (!response.ok) throw new Error(data.detail || response.statusText || "OpenShorts failed");
       setOpenShortsJobId(data.openshorts_job_id);
       setOpenShortsStatus(data.status || "queued");
     } catch (e) {
@@ -284,8 +294,13 @@ export const CreatorWorkflowPanel: React.FC<CreatorWorkflowPanelProps> = ({
           }),
         }
       );
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Could not queue edited shorts");
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Fallback if server returned text
+      }
+      if (!response.ok) throw new Error(data.detail || response.statusText || "Could not queue edited shorts");
       setBatchId(data.batch_id);
       setChildEdits(data.edits || []);
       setMode("home");
