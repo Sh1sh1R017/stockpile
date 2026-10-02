@@ -1,7 +1,7 @@
 from ai_broll_autopilot.services.broll_super_director import BrollSuperDirector
 
 
-def test_super_director_enriches_existing_shots_without_retiming():
+def test_super_director_apply_retimes_shots_to_emotional_moments():
     director = BrollSuperDirector(api_key=None)
     plan = {
         "shots": [
@@ -57,9 +57,7 @@ def test_super_director_enriches_existing_shots_without_retiming():
 
     result = director.apply_to_plan(plan, analysis, 45.0)
 
-    assert result["broll_selection_policy"] == "tone_of_voice + dialogue_impact + visualizability + narrative_need"
-    assert result["shots"][0]["start_time"] == 2.0
-    assert result["shots"][0]["end_time"] == 4.0
+    assert result["broll_selection_policy"] == "emotion-first"
     assert result["shots"][0]["dialogue_quote"] == "I almost gave up."
     assert result["shots"][0]["tone_of_voice"] == "quiet"
     assert result["shots"][0]["impact_score"] == 98
@@ -91,7 +89,9 @@ def test_super_director_prompt_rejects_vague_broll_and_requires_observable_actio
         requested_shots=4,
     )
 
-    assert "Search queries must describe exactly what should be visible" in prompt
-    assert "3-6 concrete words per query" in prompt
-    assert "Never invent negative drama" in prompt
-    assert "search results" in prompt
+    assert "WHO is visible, WHAT are they physically doing, WHERE are they" in prompt
+    assert "METAPHORS" in prompt
+    assert "types their own name into search" in prompt
+    assert "BAD queries" in prompt
+    assert "4-8 words" in prompt
+    assert "digital action literally" in prompt

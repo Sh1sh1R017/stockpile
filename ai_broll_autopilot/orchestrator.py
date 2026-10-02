@@ -179,52 +179,93 @@ class Orchestrator:
         suppress_hook: bool = False,
         text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Prepare the single canonical caption stack used by production rendering.
-
-        CaptionCompositor owns Razor events, semantic hook promotion, normal-vs-
-        behind-subject separation, and matte generation. Keeping this wrapper
-        preserves the Orchestrator API while removing the old parallel subtitle
-        implementation that could burn the hook twice.
-        """
-        from ai_broll_autopilot.services.caption_compositor import CaptionCompositor
-
+        """Prepare normal/behind-subject caption layers and a reusable subject matte."""
+        subtitles = edit_plan.get("subtitles", []) if edit_plan else []
         render_settings = edit_plan.get("render_settings", {}) if edit_plan else {}
-        # Behind-subject hook treatment is the default production behavior when
-        # no explicit user setting exists. An explicit false remains authoritative.
-        if "subtitles_behind_subject" not in render_settings and (
-            not edit_plan or "subtitles_behind_subject" not in edit_plan
-        ):
-            render_settings = dict(render_settings)
-            render_settings["subtitles_behind_subject"] = True
-            if edit_plan is not None:
-                edit_plan["render_settings"] = render_settings
-                edit_plan["subtitles_behind_subject"] = True
+        force_behind = bool(render_settings.get("subtitles_behind_subject", False))
+        segments = annotate_segments_for_subject_captions(
+            transcript_segments,
+            subtitles,
+            force_behind_subject=force_behind,
+        )
+        behind_enabled = has_behind_subject_segments(segments)
 
-        compositor = CaptionCompositor(
-            target_width=Config.TARGET_WIDTH,
-            target_height=Config.TARGET_HEIGHT,
-        )
-        return await compositor.prepare_caption_render_assets(
-            source_video=source_video,
-            edit_plan=edit_plan,
-            transcript_segments=transcript_segments,
-            work_dir=work_dir,
-            style_preset=style_preset,
-            position=position,
-            custom_margin_v=(
-                custom_margin_v
-                if render_settings.get("subtitle_y_percent") is None
-                else None
-            ),
-            hook_text=None if suppress_hook else hook_text,
-            hook_duration=hook_duration,
-            suppress_hook=suppress_hook,
-            text_emphasis_events=text_emphasis_events,
-            caption_motion=render_settings.get("caption_motion", "word-pop"),
-            custom_colors=render_settings.get("custom_colors"),
-            enable_emojis=render_settings.get("enable_emojis", True),
-            words_per_beat=int(render_settings.get("words_per_beat", 3) or 3),
-        )
+        all_ass_dest = work_dir / "subtitles_kinetic.ass"
+        try:
+            self.sub_engine.generate_ass_file(
+                segments=segments or transcript_segments,
+                output_path=all_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=hook_text,
+                hook_duration=hook_duration,
+                suppress_hook=suppress_hook,
+                text_emphasis_events=text_emphasis_events,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+            )
+        except Exception as se:
+            logger.warning(f"Could not generate kinetic subtitles: {se}")
+            return None, None, None
+
+        if not behind_enabled:
+            return (
+                str(all_ass_dest.resolve()) if all_ass_dest.exists() else None,
+                None,
+                None,
+            )
+
+        normal_ass_dest = work_dir / "subtitles_normal.ass"
+        behind_ass_dest = work_dir / "subtitles_behind_subject.ass"
+        try:
+            self.sub_engine.generate_ass_file(
+                segments=segments,
+                output_path=normal_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=hook_text,
+                hook_duration=hook_duration,
+                suppress_hook=suppress_hook,
+                text_emphasis_events=text_emphasis_events,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+                only_behind_subject=False,
+            )
+            self.sub_engine.generate_ass_file(
+                segments=segments,
+                output_path=behind_ass_dest,
+                style_preset=style_preset,
+                position=position,
+                custom_margin_v=custom_margin_v,
+                hook_text=None,
+                hook_duration=None,
+                suppress_hook=True,
+                text_emphasis_events=None,
+                motion_profile=render_settings.get("caption_motion", "word-pop"),
+                only_behind_subject=True,
+            )
+
+            matte_dest = work_dir / "subject_matte.mp4"
+            await asyncio.to_thread(
+                subject_isolation_service.generate_person_matte_video,
+                source_video,
+                str(matte_dest),
+            )
+            if not matte_dest.exists():
+                raise RuntimeError("Subject matte file was not created")
+
+            return (
+                str(normal_ass_dest.resolve()) if normal_ass_dest.exists() else None,
+                str(behind_ass_dest.resolve()) if behind_ass_dest.exists() else None,
+                str(matte_dest.resolve()),
+            )
+        except Exception as me:
+            logger.warning(f"Could not prepare behind-subject captions: {me}. Falling back to normal subtitles.")
+            return (
+                str(all_ass_dest.resolve()) if all_ass_dest.exists() else None,
+                None,
+                None,
+            )
 
     async def process_job(self, job: Job):
         """Process a single job end-to-end through the state machine."""
@@ -243,8 +284,6 @@ class Orchestrator:
             # 1. INGESTING
             self._update_state(job, JobState.INGESTING, progress=0.1, msg=f"Validating input for '{campaign.name}'")
             duration = get_video_duration(job.source_file)
-            # Keep the canonical source duration available to later export stages.
-            total_duration = duration
             logger.info(f"Input video duration: {duration:.2f}s")
 
             # 2. TRANSCRIBING

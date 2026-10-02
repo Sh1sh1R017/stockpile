@@ -51,7 +51,7 @@ def load_config() -> Dict:
             os.getenv("MAX_VIDEO_DURATION_SECONDS", "600")
         ),
         "max_video_size_mb": int(os.getenv("MAX_VIDEO_SIZE_MB", "100")),
-        "max_clip_duration_seconds": float(os.getenv("MAX_CLIP_DURATION_SECONDS", "3")),
+        "max_clip_duration_seconds": int(os.getenv("MAX_CLIP_DURATION_SECONDS", "3")),
     }
 
     return config

@@ -212,8 +212,8 @@ class VisualQAService:
                     if mdat_pos == -1 or moov_pos < mdat_pos:
                         return True
                     return False
-        except Exception as exc:
-            logger.debug("Suppressed optional failure: %s", exc)
+        except Exception:
+            pass
         return True
 
     def _detect_black_and_freeze(

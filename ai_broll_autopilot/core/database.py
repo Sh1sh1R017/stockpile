@@ -1,7 +1,6 @@
 """Database module managing SQLite persistence for AI B-Roll Autopilot."""
 
 import json
-import logging
 import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -50,8 +49,8 @@ class Database:
             # Graceful migration for existing database instances
             try:
                 cursor.execute("ALTER TABLE jobs ADD COLUMN campaign_id TEXT DEFAULT 'default'")
-            except Exception as exc:
-                logger.debug("Suppressed optional failure: %s", exc)
+            except Exception:
+                pass
 
             # Performance indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs (created_at DESC)")
@@ -99,8 +98,8 @@ class Database:
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE broll_assets ADD COLUMN {col} {col_type}")
-                except Exception as exc:
-                    logger.debug("Suppressed optional failure: %s", exc)
+                except Exception:
+                    pass
 
             conn.commit()
 
@@ -303,22 +302,15 @@ class Database:
                 sql += " AND (niche_id = ? OR niche_id = 'generic')"
                 params.append(niche_id)
 
-            terms = [t for t in query.lower().split() if len(t) >= 2] if query else []
-            if terms:
-                term_clauses = []
+            if query:
+                terms = query.lower().split()
                 for term in terms:
-                    term_clauses.append("(LOWER(title) LIKE ? OR LOWER(prompt) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)")
+                    sql += " AND (LOWER(title) LIKE ? OR LOWER(prompt) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(description) LIKE ?)"
                     pattern = f"%{term}%"
                     params.extend([pattern, pattern, pattern, pattern])
-                # Retrieval is intentionally broad; semantic/editorial scoring owns
-                # the final decision downstream.
-                sql += " AND (" + " OR ".join(term_clauses) + ")"
 
-            # Overfetch so a natural-language query does not discard a useful asset
-            # just because one uncommon word is absent from its metadata.
-            candidate_limit = max(limit * 5, limit, 25)
             sql += " ORDER BY score DESC, created_at DESC LIMIT ?"
-            params.append(candidate_limit)
+            params.append(limit)
 
             cursor.execute(sql, tuple(params))
             results = []
@@ -329,38 +321,17 @@ class Database:
                         d["tags"] = json.loads(d["tags"])
                     except Exception:
                         d["tags"] = []
-                haystack = " ".join(
-                    str(d.get(k) or "").lower()
-                    for k in ("title", "prompt", "tags", "description")
-                )
-                d["_query_match_count"] = sum(1 for term in terms if term in haystack) if terms else 0
                 results.append(d)
-
-            if terms:
-                results.sort(
-                    key=lambda item: (
-                        item.get("_query_match_count", 0),
-                        int(item.get("score") or 0),
-                    ),
-                    reverse=True,
-                )
-            for item in results:
-                item.pop("_query_match_count", None)
-            return results[:limit]
+            return results
 
     def list_broll_assets(self, niche_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """List assets optionally filtered by niche."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            if niche_id and niche_id != "generic":
+            if niche_id:
                 cursor.execute(
-                    "SELECT * FROM broll_assets WHERE (niche_id = ? OR niche_id = 'generic') ORDER BY score DESC, created_at DESC LIMIT ?",
+                    "SELECT * FROM broll_assets WHERE niche_id = ? ORDER BY created_at DESC LIMIT ?",
                     (niche_id, limit)
-                )
-            elif niche_id == "generic":
-                cursor.execute(
-                    "SELECT * FROM broll_assets WHERE niche_id = 'generic' ORDER BY score DESC, created_at DESC LIMIT ?",
-                    (limit,)
                 )
             else:
                 cursor.execute(
@@ -431,12 +402,3 @@ class Database:
             repair_count=row["repair_count"],
             campaign_id=row["campaign_id"] if "campaign_id" in row.keys() and row["campaign_id"] else "default",
         )
-
-
-logger = logging.getLogger(__name__)
-
-
-# Shared read/write database handle used by services that participate in the
-# canonical editorial pipeline. Other services may still inject their own
-# Database instance for isolation in tests.
-db = Database()

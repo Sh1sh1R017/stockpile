@@ -216,8 +216,8 @@ class MediaValidator:
                 if pts < -0.005 or dts < -0.005:
                     has_negative_ts = True
                     break
-        except Exception as exc:
-            logger.debug("Suppressed optional failure: %s", exc)
+        except Exception:
+            pass
 
         if not has_faststart:
             warnings.append("MP4 faststart disabled: 'moov' atom is at EOF instead of beginning")

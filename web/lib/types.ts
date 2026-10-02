@@ -130,9 +130,6 @@ export interface ShotDetail {
   visual_strategy?: string;
   broll_search_queries?: string[];
   avoid_visuals?: string[];
-  search_query?: string;
-  search_prompt?: string;
-  category?: string;
 }
 
 export interface JobDetail extends JobSummary {
@@ -171,9 +168,6 @@ export interface JobDetail extends JobSummary {
       subtitles_behind_subject?: boolean | null;
       error?: string;
     };
-    hook_text?: string;
-    subtitles?: Array<Record<string, any>>;
-    zooms?: Array<Record<string, any>>;
     render_settings?: {
       subtitles_enabled?: boolean;
       subtitle_style?: string;
@@ -182,17 +176,6 @@ export interface JobDetail extends JobSummary {
       bgm_track_id?: string;
       bgm_volume?: number;
       bgm_ducking?: boolean;
-      preset?: string;
-      words_per_beat?: number;
-      caption_motion?: string;
-      enable_emojis?: boolean;
-      subtitle_y_percent?: number;
-      custom_colors?: {
-        main?: string;
-        second?: string;
-        third?: string;
-        [key: string]: string | undefined;
-      };
     };
     shots: ShotDetail[];
   };

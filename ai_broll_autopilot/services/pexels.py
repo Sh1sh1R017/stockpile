@@ -119,8 +119,8 @@ class PexelsService:
                             if videos:
                                 matched_query = cand
                                 break
-                    except Exception as exc:
-                        logger.debug("Suppressed optional failure: %s", exc)
+                    except Exception:
+                        pass
 
             if not videos:
                 logger.info(f"Pexels found 0 videos across candidates for query: '{query}'")
@@ -188,8 +188,8 @@ class PexelsService:
 
             try:
                 temp_raw.unlink(missing_ok=True)
-            except Exception as exc:
-                logger.debug("Suppressed optional failure: %s", exc)
+            except Exception:
+                pass
 
             if output_path.exists() and output_path.stat().st_size > 0:
                 logger.info(f"Pexels footage successfully formatted: {output_path.name}")

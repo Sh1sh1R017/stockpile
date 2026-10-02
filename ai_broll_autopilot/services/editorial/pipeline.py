@@ -20,7 +20,6 @@ from ai_broll_autopilot.services.editorial.moment_analyzer import MomentAnalyzer
 from ai_broll_autopilot.services.editorial.pacing_model import PacingModel
 from ai_broll_autopilot.services.editorial.quality_gate import EditorialQualityGate
 from ai_broll_autopilot.services.editorial.sound_designer import SoundDesigner
-from ai_broll_autopilot.services.transcript_scope import scope_segments
 from ai_broll_autopilot.services.editorial.types import (
     ContextualBrollDecision,
     EditorialCaptionSpec,
@@ -66,42 +65,53 @@ class EditorialIntelligencePipeline:
         assets = available_broll_assets or []
 
         # -------------------------------------------------------------
-        # CLIP-SCOPED TRANSCRIPT (shared time base for hooks + moments)
-        # -------------------------------------------------------------
-        clip_in = clip_interval[0] if clip_interval else 0.0
-        clip_out = clip_interval[1] if clip_interval else video_duration
-        target_duration = max(1.0, clip_out - clip_in)
-        scoped_segments = scope_segments(transcript_segments, clip_in, clip_out)
-
-        # -------------------------------------------------------------
         # STEP 1: HOOK DETECTION & SELECTION
         # -------------------------------------------------------------
         hook_candidates = self.hook_engine.generate_candidates(
-            transcript_segments=scoped_segments,
-            video_duration=target_duration,
+            transcript_segments=transcript_segments,
+            video_duration=video_duration,
+            target_clip_interval=clip_interval,
         )
 
         selected_hook: Optional[HookCandidate] = None
         if hook_candidates:
-            selected_hook = hook_candidates[0]
+            selected_hook = hook_candidates[0]  # Top scoring candidate
             logger.info(
-                f"Selected primary opening hook [{selected_hook.candidate_id}] "
-                f"(Score: {selected_hook.scores.final_score:.1f}): '{selected_hook.tightened_text}'"
+                f"Selected primary opening hook [{selected_hook.candidate_id}] (Score: {selected_hook.scores.final_score:.1f}): "
+                f"'{selected_hook.tightened_text}'"
             )
         else:
-            first_text = scoped_segments[0].get("text", "") if scoped_segments else "Key Takeaway"
+            # Fallback natural opener
+            first_text = transcript_segments[0].get("text", "") if transcript_segments else "Key Takeaway"
             selected_hook = self.hook_engine.evaluate_candidate(
                 candidate_id="hook_default",
                 raw_text=first_text,
                 start_time=0.0,
-                end_time=min(4.0, target_duration),
-                duration=min(4.0, target_duration),
+                end_time=min(4.0, video_duration),
+                duration=min(4.0, video_duration),
                 full_transcript=first_text,
             )
 
         # -------------------------------------------------------------
         # STEP 2: EDITORIAL MOMENT MAP
         # -------------------------------------------------------------
+        # Filter segments for this short's time window if clip_interval is provided
+        clip_in = clip_interval[0] if clip_interval else 0.0
+        clip_out = clip_interval[1] if clip_interval else video_duration
+        target_duration = max(1.0, clip_out - clip_in)
+
+        scoped_segments = []
+        for s in transcript_segments:
+            st = s.get("start", 0.0)
+            et = s.get("end", 0.0)
+            if et > clip_in and st < clip_out:
+                scoped_segments.append({
+                    "start": max(0.0, round(st - clip_in, 2)),
+                    "end": min(target_duration, round(et - clip_in, 2)),
+                    "text": s.get("text", ""),
+                    "words": s.get("words", []),
+                })
+
         moments = self.moment_analyzer.analyze_transcript(
             transcript_segments=scoped_segments,
             video_duration=target_duration,
@@ -181,7 +191,7 @@ class EditorialIntelligencePipeline:
                 captions.append(
                     EditorialCaptionSpec(
                         caption_id=f"cap_stat_{m.moment_id}",
-                        text=m.text.strip()[:80],
+                        text=f"{m.entities[0].upper()} IMPACT",
                         start_time=round(m.start_time + 0.2, 2),
                         duration=1.8,
                         position="center",
@@ -212,21 +222,7 @@ class EditorialIntelligencePipeline:
                 )
 
         # -------------------------------------------------------------
-        # STEP 7: PACING & COGNITIVE PROCESSING LOAD BALANCING
-        # -------------------------------------------------------------
-        # Balance the approved visual timeline first. SFX do not participate
-        # in this pass because their final timing depends on the balanced shots
-        # and camera moves.
-        broll_decisions, camera_moves, _ = self.pacing_model.audit_and_balance_load(
-            moments=moments,
-            broll_shots=broll_decisions,
-            captions=captions,
-            camera_moves=camera_moves,
-            sfx_cues=[],
-        )
-
-        # -------------------------------------------------------------
-        # STEP 8: FINAL SOUND DESIGN AFTER VISUAL BALANCING
+        # STEP 7: SOUND DESIGN & SYNCHRONIZATION
         # -------------------------------------------------------------
         sfx_cues = self.sound_designer.design_soundscape(
             moments=moments,
@@ -235,6 +231,17 @@ class EditorialIntelligencePipeline:
             broll_shots=broll_decisions,
             video_duration=target_duration,
             edit_intents=edit_intents,
+        )
+
+        # -------------------------------------------------------------
+        # STEP 8: PACING & COGNITIVE PROCESSING LOAD BALANCING
+        # -------------------------------------------------------------
+        broll_decisions, camera_moves, sfx_cues = self.pacing_model.audit_and_balance_load(
+            moments=moments,
+            broll_shots=broll_decisions,
+            captions=captions,
+            camera_moves=camera_moves,
+            sfx_cues=sfx_cues,
         )
         energy_curve = self.pacing_model.build_energy_curve(moments)
 

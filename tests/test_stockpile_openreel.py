@@ -355,68 +355,6 @@ def test_reference_editing_guideline_profile():
 
 
 
-def test_reference_edit_cadence_controls():
-    style = style_registry.get_style("cinematic_social_editorial")
-    assert style.micro_broll_min_duration == 0.45
-    assert style.micro_broll_max_duration == 0.85
-    assert style.hero_broll_min_duration == 3.0
-    assert style.hero_broll_target_ratio == 0.20
-    assert style.visual_burst_window_seconds == 3.5
-    assert style.visual_burst_min_cuts == 3
-    assert style.semantic_callout_max == 4
-    assert style.semantic_callout_min_duration == 0.7
-    assert style.semantic_callout_max_duration == 2.8
-
-
-def test_reference_edit_preserves_micro_broll_under_one_second():
-    from ai_broll_autopilot.campaigns import campaign_registry
-    from ai_broll_autopilot.services.director import Director
-
-    campaign = campaign_registry.get_campaign("default")
-    director = Director(api_key=None)
-    micro_shot = {
-        "shot_id": "broll_1",
-        "start_time": 1.0,
-        "end_time": 1.55,
-        "duration": 0.55,
-        "cadence_role": "micro",
-        "impact_score": 80,
-        "visualizability": 90,
-    }
-
-    cleaned, _ = director._audit_and_fill_timeline_distribution(
-        clean_shots=[micro_shot],
-        segments=[
-            {"start": 0.0, "end": 2.0, "text": "The location changes everything."},
-        ],
-        video_duration=5.0,
-        campaign=campaign,
-        niche=None,
-    )
-
-    assert cleaned
-    assert cleaned[0]["cadence_role"] == "micro"
-    assert 0.45 <= float(cleaned[0]["duration"]) <= 0.85
-
-
-def test_reference_super_director_allows_close_visual_burst():
-    from ai_broll_autopilot.services.broll_super_director import BrollSuperDirector
-
-    prompt = BrollSuperDirector._build_prompt(
-        transcript_text="[0.00-3.50] The closer you are to the source, the higher the value.",
-        video_duration=3.5,
-        niche="generic",
-        style="cinematic_social_editorial",
-        requested_shots=4,
-    )
-
-    assert "micro" in prompt
-    assert "standard" in prompt
-    assert "hero" in prompt
-    assert "3-5 closely related micro/standard shots" in prompt
-    assert "cadence_role" in prompt
-
-
 def test_reference_edit_campaign_override_and_timeline_coverage():
     from ai_broll_autopilot.campaigns import campaign_registry
     from ai_broll_autopilot.services.director import Director

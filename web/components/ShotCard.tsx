@@ -191,7 +191,7 @@ export const ShotCard: React.FC<ShotCardProps> = React.memo(
         {/* Dialogue Quote */}
         {shot.dialogue_quote && (
           <div className="text-xs text-zinc-300 italic border-l-2 border-indigo-500/60 pl-3 py-0.5 bg-indigo-950/20 rounded-r-lg">
-            &quot;{shot.dialogue_quote}&quot;
+            "{shot.dialogue_quote}"
           </div>
         )}
 
@@ -211,7 +211,7 @@ export const ShotCard: React.FC<ShotCardProps> = React.memo(
                 {Object.entries(shot.meme_captions).map(([k, v]) => (
                   <div key={k} className="flex items-start gap-2">
                     <span className="text-fuchsia-400 shrink-0 font-semibold">{k}:</span>
-                    <span className="text-zinc-300">&quot;{v}&quot;</span>
+                    <span className="text-zinc-300">"{v}"</span>
                   </div>
                 ))}
               </div>

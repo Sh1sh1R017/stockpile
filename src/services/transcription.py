@@ -20,6 +20,7 @@ class TranscriptionService:
         self.model_name = model_name
         self.model = None
         self._transcription_lock = asyncio.Lock()
+        self._load_model()
 
     def _load_model(self) -> None:
         try:

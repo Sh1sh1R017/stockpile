@@ -84,8 +84,8 @@ class TransitionEngine:
                             p = Path(item["path"])
                             if p.exists():
                                 return {"file": p.name, "path": str(p), "volume": stinger["volume"]}
-            except Exception as exc:
-                logger.debug("Suppressed optional failure: %s", exc)
+            except Exception:
+                pass
         return None
 
     def _ai_recommend_transitions(self, shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -23,11 +23,8 @@ class CampaignRegistry:
         self._aliases = {"capcut_cyber": "capcut_podcast_pro", "cyber_grid": "capcut_podcast_pro"}
 
     def register(self, campaign: CampaignConfig):
-        """Register a campaign preset; duplicate IDs are programming errors."""
-        campaign_id = str(campaign.id).strip().lower()
-        if campaign_id in self._campaigns:
-            raise ValueError(f"Duplicate campaign id: {campaign.id}")
-        self._campaigns[campaign_id] = campaign
+        """Register a campaign preset."""
+        self._campaigns[campaign.id] = campaign
         logger.info(f"Registered campaign preset: {campaign.id} ('{campaign.name}')")
 
     def get_campaign(self, campaign_id: Optional[str]) -> CampaignConfig:

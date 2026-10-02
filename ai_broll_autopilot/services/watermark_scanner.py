@@ -286,13 +286,13 @@ class WatermarkScanner:
                 try:
                     if f.exists():
                         f.unlink()
-                except Exception as exc:
-                    logger.debug("Suppressed optional failure: %s", exc)
+                except Exception:
+                    pass
             if sample_frames and sample_frames[0].parent.exists():
                 try:
                     sample_frames[0].parent.rmdir()
-                except Exception as exc:
-                    logger.debug("Suppressed optional failure: %s", exc)
+                except Exception:
+                    pass
 
 
 # Global singleton instance

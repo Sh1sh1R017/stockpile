@@ -18,12 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 SPLIT_SFX_DIR = BASE_DIR / "output" / "split_sfx"
 CATALOG_PATH = SPLIT_SFX_DIR / "sfx_catalog.json"
 
-SOCIAL_SFX_DIR = Path(
-    os.getenv(
-        "STOCKPILE_SOCIAL_SFX_DIR",
-        str(BASE_DIR / "ai_broll_autopilot" / "assets" / "sfx"),
-    )
-)
+SOCIAL_SFX_DIR = Path(r"D:\SUS AI ONLY\Social SFX Pack - Collection 1 (1)\Social SFX Pack - Collection 1")
 
 
 def clean_name(filename: str) -> str:
@@ -55,8 +50,7 @@ def build_unified_catalog() -> List[Dict[str, Any]]:
         except Exception as e:
             logger.error(f"Error loading existing catalog: {e}")
 
-    # 2. Index configurable social SFX source. The default points to the
-    # bundled SFX directory so a missing developer drive never breaks startup.
+    # 2. Index Social SFX Pack (96 files)
     social_count = 0
     if SOCIAL_SFX_DIR.exists():
         start_id = 100

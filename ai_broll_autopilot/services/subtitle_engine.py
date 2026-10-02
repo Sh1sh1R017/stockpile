@@ -5,7 +5,6 @@ and Clean White) using Advanced SubStation Alpha (.ass) format with sub-second w
 """
 
 import logging
-import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -22,15 +21,6 @@ def format_ass_timestamp(seconds: float) -> str:
         secs += 1
         csecs -= 100
     return f"{hrs}:{mins:02d}:{secs:02d}.{csecs:02d}"
-
-
-def _hex_to_ass(value: Optional[str], fallback: str) -> str:
-    """Convert a CSS #RRGGBB color into ASS &HAABBGGRR& notation."""
-    raw = str(value or "").strip()
-    if re.fullmatch(r"#?[0-9a-fA-F]{6}", raw):
-        rgb = raw.lstrip("#").upper()
-        return f"&H00{rgb[4:6]}{rgb[2:4]}{rgb[0:2]}&"
-    return fallback
 
 
 class SubtitleEngine:
@@ -166,8 +156,6 @@ class SubtitleEngine:
         suppress_hook: bool = False,
         text_emphasis_events: Optional[List[Dict[str, Any]]] = None,
         motion_profile: str = "word-pop",
-        custom_colors: Optional[Dict[str, str]] = None,
-        subtitle_y_percent: Optional[float] = None,
         behind_subject_filter: Optional[bool] = None,
         only_behind_subject: Optional[bool] = None,
     ) -> Path:
@@ -175,12 +163,7 @@ class SubtitleEngine:
         if only_behind_subject is not None and behind_subject_filter is None:
             behind_subject_filter = only_behind_subject
 
-        cfg = dict(self.PRESETS.get(style_preset.lower(), self.PRESETS["hormozi"]))
-        custom = custom_colors or {}
-        if custom:
-            cfg["inactive_color"] = _hex_to_ass(custom.get("main"), cfg["inactive_color"])
-            cfg["active_color"] = _hex_to_ass(custom.get("second"), cfg["active_color"])
-            cfg["accent_color"] = _hex_to_ass(custom.get("third"), cfg.get("accent_color", cfg["active_color"]))
+        cfg = self.PRESETS.get(style_preset.lower(), self.PRESETS["hormozi"])
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -212,20 +195,8 @@ class SubtitleEngine:
         else:
             margin_r = cfg.get("margin_r", 40)
 
-        # Alignment: 2 = bottom-center, 5 = middle-center, 8 = top-center.
-        # A custom percentage is authoritative over preset/campaign margins.
-        if subtitle_y_percent is not None:
-            y = max(0.0, min(100.0, float(subtitle_y_percent)))
-            if abs(y - 50.0) < 1e-6:
-                align = 5
-                margin_v = 0
-            elif y < 50.0:
-                align = 8
-                margin_v = round(self.height * (y / 100.0))
-            else:
-                align = 2
-                margin_v = round(self.height * (1.0 - y / 100.0))
-        elif custom_margin_v is not None:
+        # Alignment: 2 = bottom-center, 5 = middle-center, 8 = top-center
+        if custom_margin_v is not None:
             margin_v = custom_margin_v
             align = 2
         elif layout_mode == "before_after_cyber_grid" or position in ("after_card", "after_panel") or "margin_v" in cfg:

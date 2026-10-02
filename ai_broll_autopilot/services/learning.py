@@ -235,8 +235,8 @@ class FeedbackLearningEngine:
                 try:
                     if not re.search(pattern, transcript_lower):
                         continue
-                except Exception as exc:
-                    logger.debug("Suppressed optional failure: %s", exc)
+                except Exception:
+                    pass
 
             try:
                 prefs = json.loads(pref_json)

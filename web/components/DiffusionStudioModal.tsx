@@ -60,7 +60,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
     if (!jobId) return;
     try {
       await fetch(
-        `/api/jobs/${encodeURIComponent(jobId)}/editorial-feedback`,
+        `http://127.0.0.1:8000/api/jobs/${encodeURIComponent(jobId)}/editorial-feedback`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -86,7 +86,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
     setCurrentTime(0);
     setIsPlaying(false);
 
-    fetch(`/api/jobs/${encodeURIComponent(jobId)}/diffusion-project`)
+    fetch(`http://127.0.0.1:8000/api/jobs/${encodeURIComponent(jobId)}/diffusion-project`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load Diffusion Studio composition`);
         return res.json();
@@ -562,7 +562,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
                     </div>
 
                     <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800/80 font-mono text-[11px] text-zinc-200">
-                      &quot;{editorialSpec?.hook?.tightened_text || "The moment that changed everything..."}&quot;
+                      "{editorialSpec?.hook?.tightened_text || "The moment that changed everything..."}"
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 text-[10px]">
@@ -571,7 +571,7 @@ export const DiffusionStudioModal: React.FC<DiffusionStudioModalProps> = ({
                       </span>
                       {editorialSpec?.hook?.preamble_cut && (
                         <span className="bg-rose-950/60 text-rose-300 border border-rose-800/40 px-2 py-0.5 rounded font-mono">
-                          Trimmed: &quot;{editorialSpec.hook.preamble_cut}&quot;
+                          Trimmed: "{editorialSpec.hook.preamble_cut}"
                         </span>
                       )}
                     </div>

@@ -14,17 +14,14 @@ from ai_broll_autopilot.services.watermark_scanner import watermark_scanner
 
 logger = logging.getLogger(__name__)
 
-_UNSET_API_KEY = object()
-
 
 class Reviewer:
     """Independent reviewer verifying rendered B-roll output and requesting repairs."""
 
-    def __init__(self, api_key: Optional[str] = _UNSET_API_KEY, model_name: Optional[str] = None):
-        # Omitted api_key means "use configured key"; explicit None means offline.
-        self.api_key = Config.GEMINI_API_KEY if api_key is _UNSET_API_KEY else api_key
+    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
+        self.api_key = api_key or Config.GEMINI_API_KEY
         self.model_name = model_name or Config.GEMINI_MODEL
-        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.client = genai.Client(api_key=self.api_key)
 
     async def review_video(
         self,
@@ -75,7 +72,7 @@ PLAN SUMMARY:
 TASK:
 Verify the visual execution quality of this edited video.
 Inspect whether the B-roll cutaway placement, pacing, and visual storytelling are sound.
-Check that B-roll clips respect the approved 0.65-1.8 second interval contract and that streamer reaction clips fit the energy.
+Check that B-roll clips are short, punchy (2-3 seconds), and that streamer reaction clips fit the energy.
 
 OUTPUT FORMAT:
 Return JSON:
@@ -87,15 +84,6 @@ Return JSON:
 }}
 Note: Verdict must be "APPROVED" unless there are major critical flaws (like black screen or completely mismatched pacing).
 """
-
-        if self.client is None:
-            logger.info("AI Reviewer Gemini client unavailable; using deterministic fallback.")
-            return {
-                "verdict": "APPROVED",
-                "score": 8,
-                "feedback": "Auto-approved via fallback heuristic.",
-                "suggested_repairs": [],
-            }
 
         models_to_try = [self.model_name] + [m for m in Config.GEMINI_FALLBACK_MODELS if m != self.model_name]
         result = None
@@ -195,11 +183,9 @@ Note: Verdict must be "APPROVED" unless there are major critical flaws (like bla
                 # Remove dirty watermarked asset so clean stock footage or A-roll is preserved
                 shot.pop("asset_path", None)
                 shot["status"] = "pending"
-            elif shot.get("duration", 0) > 1.8 and shot.get("style") == "stockpile":
-                # Downstream review must not mutate approved timing. Flag the
-                # shot for upstream replanning instead.
-                shot["status"] = "needs_replan"
-                shot["review_issue"] = "B-roll interval exceeds 1.8s contract"
+            elif shot.get("duration", 0) > 3.0 and shot.get("style") == "stockpile":
+                shot["duration"] = 2.5
+                shot["end_time"] = round(shot["start_time"] + 2.5, 2)
 
         edit_plan["shots"] = shots
         return edit_plan

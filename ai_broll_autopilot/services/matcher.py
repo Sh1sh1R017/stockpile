@@ -13,7 +13,6 @@ from ai_broll_autopilot.services.collage_bridge import CollageBridge
 from ai_broll_autopilot.services.watermark_scanner import watermark_scanner
 from ai_broll_autopilot.services.pexels import pexels_service
 from ai_broll_autopilot.services.meme_engine import MemeEngine
-from ai_broll_autopilot.services.broll_library import extract_media_metadata
 
 # Import Stockpile services directly from src/
 sys.path.insert(0, str(Config.STOCKPILE_DIR))
@@ -61,32 +60,6 @@ class Matcher:
         logger.info(f"Successfully matched {len(resolved_shots)} of {len(shots)} shots in parallel")
         return plan
 
-    async def _asset_is_eligible(self, asset_path: str, target_duration: float, speed: float = 1.0) -> bool:
-        """Verify real media metadata before an asset enters the canonical plan."""
-        path = Path(asset_path)
-        if not path.exists():
-            return False
-        meta = await asyncio.to_thread(extract_media_metadata, path)
-        duration = float(meta.get("duration") or 0.0)
-        width = int(meta.get("width") or 0)
-        height = int(meta.get("height") or 0)
-        effective_duration = duration / max(0.1, float(speed or 1.0))
-        if duration <= 0.0:
-            logger.warning("Rejecting B-roll %s: unknown/invalid duration", path.name)
-            return False
-        if effective_duration + 0.05 < float(target_duration):
-            logger.warning("Rejecting B-roll %s: %.2fs effective media < %.2fs approved interval", path.name, effective_duration, target_duration)
-            return False
-        if min(width, height) < 720:
-            logger.warning("Rejecting B-roll %s: low resolution %sx%s", path.name, width, height)
-            return False
-        if Config.REJECT_WATERMARKS:
-            clean, reason, _ = await asyncio.to_thread(watermark_scanner.scan_video, path)
-            if not clean:
-                logger.warning("Rejecting B-roll %s: watermark scan failed (%s)", path.name, reason)
-                return False
-        return True
-
     async def _resolve_single_shot(
         self,
         shot: Dict[str, Any],
@@ -96,27 +69,9 @@ class Matcher:
     ) -> Optional[Dict[str, Any]]:
         """Resolve a single B-roll shot concurrently."""
         shot_id = shot.get("shot_id", "shot")
-        # Normalize the editorial intent once. Director currently emits
-        # search_prompt/micro_prompts, while newer plan producers may emit
-        # search_query/broll_search_queries. Never let the matcher erase it.
-        prompt = (
-            shot.get("search_prompt")
-            or shot.get("search_query")
-            or shot.get("visceral_human_metaphor")
-            or shot.get("emotional_core")
-            or shot.get("dialogue_trigger")
-            or shot.get("rationale")
-            or shot.get("dialogue_quote")
-        )
-        semantic_queries = (
-            shot.get("broll_search_queries")
-            or shot.get("search_queries")
-            or shot.get("micro_prompts")
-            or ([shot.get("search_query")] if shot.get("search_query") else [])
-        )
-        semantic_queries = [str(q).strip() for q in semantic_queries if str(q).strip()]
-        if prompt is not None:
-            prompt = str(prompt).strip()
+        prompt = shot.get("search_prompt") or shot.get("visceral_human_metaphor") or shot.get("emotional_core")
+        semantic_queries = shot.get("broll_search_queries") or shot.get("micro_prompts") or []
+        emotion = shot.get("emotion") or shot.get("emotional_core") or "neutral"
         tone = shot.get("tone_of_voice") or "neutral"
         dialogue = shot.get("dialogue_quote") or ""
         evaluation_context = (
@@ -127,37 +82,10 @@ class Matcher:
             f"Dialogue: {dialogue}"
         )
         style = shot.get("style", "stockpile")
-        target_duration = float(shot.get("duration", 2.5) or 2.5)
-        shot["search_query"] = semantic_queries[0] if semantic_queries else (prompt or "")
+        target_duration = shot.get("duration", 2.5)
 
         logger.info(f"Resolving B-roll for [{shot_id}] ({target_duration}s): '{prompt}' (allow_memes={allow_memes})")
         asset_path = None
-
-        # A canonical asset selected upstream is authoritative. Verify it instead
-        # of throwing it away and doing a second, potentially unrelated search.
-        preselected_path = shot.get("asset_path")
-        if preselected_path and Path(preselected_path).exists():
-            if await self._asset_is_eligible(
-                str(preselected_path),
-                target_duration,
-                float(shot.get("speed") or 1.0),
-            ):
-                resolved = str(Path(preselected_path).resolve())
-                meta = await asyncio.to_thread(extract_media_metadata, Path(resolved))
-                shot["asset_path"] = resolved
-                shot["status"] = "matched"
-                shot["source_duration"] = float(meta.get("duration") or 0.0)
-                shot["width"] = int(meta.get("width") or 0)
-                shot["height"] = int(meta.get("height") or 0)
-                logger.info("Preserved preselected B-roll [%s]: %s", shot_id, resolved)
-                return shot
-            logger.warning("Preselected B-roll [%s] failed media eligibility; reacquiring from canonical intent.", shot_id)
-            shot.pop("asset_path", None)
-
-        if not prompt and not semantic_queries:
-            logger.warning("No usable B-roll intent for [%s]; preserving A-roll.", shot_id)
-            shot["status"] = "unmatched"
-            return None
 
         # 0. Check if shot is intentionally designated as a meme cutaway (only if allowed by niche/campaign)
         if not allow_memes:
@@ -204,40 +132,19 @@ class Matcher:
         # 1. Local-First: Search local cataloged B-Roll library
         try:
             from ai_broll_autopilot.services.broll_library import broll_library
-            local_queries = semantic_queries[:4] if semantic_queries else ([prompt] if prompt else [])
-            local_matches = []
-            seen_local_paths = set()
-            for local_query in local_queries:
-                matches = broll_library.search_local(
-                    query=local_query,
-                    niche_id=niche_id,
-                    min_duration=1.0,
-                    limit=4,
-                )
-                for match in matches:
-                    fp = str(Path(match["file_path"]).resolve())
-                    if fp not in seen_local_paths:
-                        seen_local_paths.add(fp)
-                        local_matches.append(match)
-
-            for chosen in local_matches:
+            local_query = semantic_queries[0] if semantic_queries else prompt
+            local_matches = broll_library.search_local(
+                query=local_query,
+                niche_id=niche_id,
+                min_duration=1.0,
+                limit=3
+            )
+            if local_matches:
+                chosen = local_matches[0]
                 matched_fp = Path(chosen["file_path"])
-                if not matched_fp.exists():
-                    continue
-                candidate_path = str(matched_fp.resolve())
-                if await self._asset_is_eligible(
-                    candidate_path,
-                    target_duration,
-                    float(shot.get("speed") or 1.0),
-                ):
-                    logger.info(
-                        "Resolved [%s] from Local B-Roll Library: %s ('%s')",
-                        shot_id,
-                        matched_fp.name,
-                        chosen.get("title"),
-                    )
-                    asset_path = candidate_path
-                    break
+                if matched_fp.exists():
+                    logger.info(f"Resolved [{shot_id}] from Local B-Roll Library: {matched_fp.name} ('{chosen.get('title')}')")
+                    asset_path = str(matched_fp.resolve())
         except Exception as le:
             logger.debug(f"Local B-roll library search error for [{shot_id}]: {le}")
 
@@ -247,8 +154,6 @@ class Matcher:
             if cached and Path(cached["file_path"]).exists():
                 logger.info(f"Reusing cached B-roll asset for [{shot_id}]: {cached['file_path']}")
                 asset_path = cached["file_path"]
-                if not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
-                    asset_path = None
 
         # 3. Try Pexels royalty-free vertical footage if API key is provided
         if not asset_path and pexels_service.is_available():
@@ -258,8 +163,6 @@ class Matcher:
             asset_path = await pexels_service.search_and_download(
                 pexels_prompt, p_out, duration=target_duration, orientation="portrait"
             )
-            if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
-                asset_path = None
 
         # 4. If not cached or resolved from Pexels, acquire asset based on style
         if not asset_path:
@@ -269,8 +172,6 @@ class Matcher:
                 asset_path = await self._build_rapid_montage(
                     micro_prompts, target_duration, job_cache_dir, shot_id
                 )
-                if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
-                    asset_path = None
             else:
                 asset_path = await self._acquire_stockpile_clip(
                     prompt,
@@ -280,8 +181,6 @@ class Matcher:
                     search_queries=semantic_queries,
                     evaluation_context=evaluation_context,
                 )
-                if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
-                    asset_path = None
 
         # 5. If stockpile acquisition failed, try clean real-world Pexels stock footage
         if not asset_path or not Path(asset_path).exists():
@@ -291,8 +190,6 @@ class Matcher:
             asset_path = await pexels_service.search_and_download(
                 fallback_prompt, p_fallback, duration=target_duration, orientation="portrait"
             )
-            if asset_path and not await self._asset_is_eligible(asset_path, target_duration, float(shot.get("speed") or 1.0)):
-                asset_path = None
             if asset_path and Path(asset_path).exists():
                 logger.info(f"Resolved clean Pexels stock footage for [{shot_id}]: {Path(asset_path).name}")
             else:
@@ -300,26 +197,19 @@ class Matcher:
                 asset_path = None
 
         if asset_path and Path(asset_path).exists():
-            asset_path = str(Path(asset_path).resolve())
-            meta = await asyncio.to_thread(extract_media_metadata, Path(asset_path))
-            shot["asset_path"] = asset_path
+            shot["asset_path"] = str(Path(asset_path).resolve())
             shot["status"] = "matched"
-            shot["source_duration"] = float(meta.get("duration") or 0.0)
-            shot["width"] = int(meta.get("width") or 0)
-            shot["height"] = int(meta.get("height") or 0)
 
-            # Persist actual media metadata, never the requested editorial interval.
+            # Index asset in database and local catalog
             self.db.save_broll_asset(
                 asset_id=f"{shot_id}_{Path(asset_path).stem}",
-                file_path=asset_path,
+                file_path=str(Path(asset_path).resolve()),
                 title=Path(asset_path).name,
                 source=style,
                 prompt=prompt,
-                duration=shot["source_duration"],
+                duration=target_duration,
                 score=8,
                 niche_id=niche_id or "generic",
-                width=shot["width"],
-                height=shot["height"],
             )
             return shot
         else:
@@ -350,8 +240,8 @@ class Matcher:
                 logger.warning(f"Cached asset for '{p}' failed watermark scan ({reason}); purging dirty file and re-acquiring")
                 try:
                     Path(cached["file_path"]).unlink(missing_ok=True)
-                except Exception as exc:
-                    logger.debug("Suppressed optional failure: %s", exc)
+                except Exception:
+                    pass
             return await self._acquire_stockpile_clip(
                 p, target_dir, micro_id, max_clip_duration=clip_dur
             )
@@ -533,8 +423,8 @@ class Matcher:
                         logger.warning(f"[WATERMARK REJECTED] Candidate {attempt_idx+1} ({Path(downloaded).name}) REJECTED by WatermarkScanner: {reason}")
                         try:
                             Path(downloaded).unlink(missing_ok=True)
-                        except Exception as exc:
-                            logger.debug("Suppressed optional failure: %s", exc)
+                        except Exception:
+                            pass
                         continue  # Try next candidate!
 
                 logger.info(f"[VERIFIED CLEAN] 100% clean footage for [{shot_id}]: {Path(downloaded).name}")

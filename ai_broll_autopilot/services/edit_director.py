@@ -16,7 +16,6 @@ from google import genai
 from google.genai import types
 
 from ai_broll_autopilot.config import Config
-from ai_broll_autopilot.services.transcript_scope import scope_segments
 from ai_broll_autopilot.niches import niche_registry, NicheProfile
 from ai_broll_autopilot.styles import style_registry, StyleProfile
 from ai_broll_autopilot.services.clip_detector import ClipCandidate
@@ -170,8 +169,6 @@ class EditDirectorService:
             except Exception as e:
                 logger.warning(f"Could not initialize GenAI client: {e}")
 
-
-
     async def plan_edit(
         self,
         source_media: Dict[str, Any],
@@ -210,8 +207,19 @@ class EditDirectorService:
 
         clip_duration = max(1.0, clip_out - clip_in)
 
-        # 2. Scope transcript segments and word timestamps to the clip.
-        clip_segments = scope_segments(transcript_segments, clip_in, clip_out)
+        # 2. Filter Transcript Segments for this Clip Interval
+        clip_segments = []
+        for s in transcript_segments:
+            seg_start = s.get("start", 0.0)
+            seg_end = s.get("end", 0.0)
+            if seg_end > clip_in and seg_start < clip_out:
+                # Normalize segment relative to clip start (0.0s)
+                clip_segments.append({
+                    "start": max(0.0, round(seg_start - clip_in, 2)),
+                    "end": min(clip_duration, round(seg_end - clip_in, 2)),
+                    "text": s.get("text", "").strip(),
+                    "words": s.get("words", []),
+                })
 
         # 3. Resolve Niche and Style Profiles
         niche = niche_registry.get_profile(niche_id)
@@ -223,10 +231,7 @@ class EditDirectorService:
         # 4. Cuts-First Retention Analysis
         # -------------------------------------------------------------
         from ai_broll_autopilot.services.retention_engine import retention_engine
-        is_podcast = (
-            str(getattr(niche, "id", niche_id) or "").lower() == "clean_podcast"
-            or "podcast" in str(getattr(style, "id", style_id) or "").lower()
-        )
+        is_podcast = (niche_id == "clean_podcast" or "podcast" in style_id.lower())
         detected_cuts = retention_engine.analyze_and_detect_cuts(
             transcript_segments=clip_segments,
             video_duration=clip_duration,
@@ -256,10 +261,9 @@ class EditDirectorService:
         available_assets = []
         try:
             from ai_broll_autopilot.core.database import db
-            available_assets = db.list_broll_assets(niche_id=getattr(niche, "id", niche_id), limit=60)
-        except Exception as exc:
-            logger.warning("B-roll asset lookup failed; retaining A-roll: %s", exc)
-            available_assets = []
+            available_assets = db.list_broll_assets(niche_id=niche_id, limit=60)
+        except Exception:
+            pass
 
         spec, quality_report = editorial_pipeline.process(
             source_media=source_media,
@@ -288,12 +292,6 @@ class EditDirectorService:
                 "narrative_role": s.narrative_role.value,
                 "emotional_intent": s.emotional_intent,
                 "confidence": s.scores.confidence,
-                "final_score": s.scores.final_score,
-                "semantic_match": s.scores.semantic_match,
-                "narrative_match": s.scores.narrative_match,
-                "decision": s.scores.decision,
-                "rejection_reason": s.scores.rejection_reason,
-                "status": s.status,
                 "pacing_category": s.pacing_category.value,
                 "shot_type": s.shot_type.value,
                 "asset_path": s.asset_path,
@@ -384,11 +382,13 @@ class EditDirectorService:
         }
 
         # -------------------------------------------------------------
-        # 8. Post-Render Visual QA
+        # 8. Post-Render Visual QA Simulation
         # -------------------------------------------------------------
-        # Visual QA belongs after FFmpeg rendering. Planning-time QA on the raw
-        # source is both misleading and an unnecessary expensive probe.
-        qa_result = None
+        from ai_broll_autopilot.services.visual_qa import visual_qa
+        qa_result = visual_qa.verify_rendered_video(
+            video_path=source_media.get("path", ""),
+            target_duration=clip_duration,
+        )
 
         plan = EditPlan(
             plan_id=plan_id,
@@ -412,7 +412,7 @@ class EditDirectorService:
             cadence_profile=cadence_profile,
             editorial_spec=spec.to_dict(),
             quality_report=quality_report.to_dict(),
-            visual_qa=None,
+            visual_qa=qa_result.to_dict(),
             review_items=[
                 {"type": "cut", "count": len(cuts_data)},
                 {"type": "shot", "count": len(shots_data)},
@@ -460,7 +460,8 @@ AVOID: {', '.join(niche.avoid)}
 VISUAL STYLE: {style.name}
 DEFAULT B-ROLL PACING: {style.broll_cut_pacing} (~{default_shot_dur}s per shot)
 TOTAL CLIP DURATION: {clip_duration:.1f}s
-B-ROLL POLICY: use B-roll only when it materially reinforces the spoken idea; coverage is telemetry, never a quota.
+MAX B-ROLL COVERAGE: {max_broll_ratio*100:.0f}% (~{max_broll_seconds:.1f}s total B-roll)
+TARGET NUMBER OF B-ROLL SHOTS: {target_shots}
 STYLE GUIDELINES:
 {chr(10).join(f"- {g}" for g in style.editorial_guidelines)}
 
