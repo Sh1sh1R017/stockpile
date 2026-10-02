@@ -22,7 +22,6 @@ from google.genai import types
 load_dotenv()
 
 
-@pytest.mark.integration
 def test_gemini_audio_window():
     if os.getenv("STOCKPILE_RUN_LIVE_GEMINI_TEST") != "1":
         pytest.skip("Live Gemini audio test disabled; set STOCKPILE_RUN_LIVE_GEMINI_TEST=1")
