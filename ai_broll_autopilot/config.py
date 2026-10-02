@@ -53,6 +53,8 @@ class Config:
     NVENC_MODE: str = os.getenv("STOCKPILE_NVENC", "auto").strip().lower()
     NVENC_PRESET: str = os.getenv("STOCKPILE_NVENC_PRESET", "p4")
     NVENC_CQ: int = int(os.getenv("STOCKPILE_NVENC_CQ", str(VIDEO_CRF)))
+    # Skip expensive packet/atom inspection on the hot render path when enabled.
+    FAST_RENDER_VALIDATION: bool = os.getenv("STOCKPILE_FAST_VALIDATION", "1").strip().lower() not in {"0", "false", "off"}
 
     EDITOR_ENGINE: str = os.getenv("EDITOR_ENGINE", "openreel")
 
