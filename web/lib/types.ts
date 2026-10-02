@@ -143,6 +143,22 @@ export interface JobDetail extends JobSummary {
     last_render_revision?: number;
     edit_revision?: number;
     render_stale?: boolean;
+    hook_text?: string;
+    subtitles?: Array<{
+      word?: string;
+      text?: string;
+      start: number;
+      end: number;
+      highlight?: boolean;
+      emoji?: string;
+    }>;
+    zooms?: Array<{
+      start: number;
+      end: number;
+      scale?: number;
+      x?: number;
+      y?: number;
+    }>;
     subtitles_behind_subject?: boolean;
     short_edits?: Array<{
       job_id: string;
