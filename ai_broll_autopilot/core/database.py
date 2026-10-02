@@ -42,13 +42,19 @@ class Database:
                 drive_file_url TEXT,
                 retry_count INTEGER DEFAULT 0,
                 repair_count INTEGER DEFAULT 0,
-                campaign_id TEXT DEFAULT 'default'
+                campaign_id TEXT DEFAULT 'default',
+                user_topic_context TEXT
             )
             """)
 
             # Graceful migration for existing database instances
             try:
                 cursor.execute("ALTER TABLE jobs ADD COLUMN campaign_id TEXT DEFAULT 'default'")
+            except Exception:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN user_topic_context TEXT")
             except Exception:
                 pass
 
@@ -111,8 +117,9 @@ class Database:
                 job_id, source_file, source_filename, status, progress,
                 created_at, updated_at, error_message, transcript_text,
                 transcript_segments, edit_plan, review_data,
-                output_video_path, drive_file_url, retry_count, repair_count, campaign_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                output_video_path, drive_file_url, retry_count, repair_count, campaign_id,
+                user_topic_context
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(job_id) DO UPDATE SET
                 status=excluded.status,
                 progress=excluded.progress,
@@ -126,7 +133,8 @@ class Database:
                 drive_file_url=excluded.drive_file_url,
                 retry_count=excluded.retry_count,
                 repair_count=excluded.repair_count,
-                campaign_id=excluded.campaign_id
+                campaign_id=excluded.campaign_id,
+                user_topic_context=excluded.user_topic_context
             """, (
                 job.job_id,
                 job.source_file,
@@ -145,6 +153,7 @@ class Database:
                 job.retry_count,
                 job.repair_count,
                 job.campaign_id,
+                job.user_topic_context,
             ))
             conn.commit()
 
@@ -179,7 +188,7 @@ class Database:
             cols = """
                 job_id, source_file, source_filename, status, progress,
                 created_at, updated_at, error_message, output_video_path,
-                drive_file_url, campaign_id
+                drive_file_url, campaign_id, user_topic_context
             """
             if status:
                 cursor.execute(
@@ -206,6 +215,7 @@ class Database:
                     "output_video_path": r["output_video_path"],
                     "drive_file_url": r["drive_file_url"],
                     "campaign_id": r["campaign_id"] if "campaign_id" in r.keys() and r["campaign_id"] else "default",
+                    "user_topic_context": r["user_topic_context"] if "user_topic_context" in r.keys() else None,
                 })
             return summaries
 
@@ -401,4 +411,5 @@ class Database:
             retry_count=row["retry_count"],
             repair_count=row["repair_count"],
             campaign_id=row["campaign_id"] if "campaign_id" in row.keys() and row["campaign_id"] else "default",
+            user_topic_context=row["user_topic_context"] if "user_topic_context" in row.keys() else None,
         )

@@ -108,6 +108,7 @@ export default function StudioDashboard() {
   const [uploadTab, setUploadTab] = useState<"file" | "youtube">("file");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [userTopicContext, setUserTopicContext] = useState("");
   const [isImportingYouTube, setIsImportingYouTube] = useState(false);
   const [jobToDelete, setJobToDelete] = useState<{ id: string; name: string } | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState(false);
@@ -888,6 +889,7 @@ export default function StudioDashboard() {
         body: JSON.stringify({
           url: youtubeUrl.trim(),
           campaign_id: selectedCampaignId,
+          user_topic_context: userTopicContext.trim() || undefined,
         }),
       });
 
@@ -1038,6 +1040,9 @@ export default function StudioDashboard() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("campaign_id", selectedCampaignId);
+    if (userTopicContext.trim()) {
+      formData.append("user_topic_context", userTopicContext.trim());
+    }
 
     try {
       setUploadProgress(50);
@@ -1474,6 +1479,39 @@ export default function StudioDashboard() {
             </button>
           </div>
 
+          {/* User Topic & Context Input for Specific B-Roll Matching */}
+          <div className="max-w-2xl mx-auto bg-zinc-950/80 border border-zinc-800/90 rounded-2xl p-4 text-left space-y-2 shadow-sm">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>What is this clip specifically about? (Optional Context)</span>
+              </label>
+              <span className="text-[10px] text-zinc-500 font-mono">Tailors B-roll search queries</span>
+            </div>
+            <div className="relative">
+              <input
+                type="text"
+                value={userTopicContext}
+                onChange={(e) => setUserTopicContext(e.target.value)}
+                placeholder='e.g., "A podcast of basketball player talking about the New York Knicks" or "Startup founder pitching AI"'
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+              />
+              {userTopicContext && (
+                <button
+                  type="button"
+                  onClick={() => setUserTopicContext("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-1"
+                  title="Clear context"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              💡 Giving exact context ensures all stock footage & cutaways directly amplify the true subject matter rather than generic visuals.
+            </p>
+          </div>
+
           {uploadTab === "file" ? (
             <div
               onDragOver={(e) => {
@@ -1666,17 +1704,22 @@ export default function StudioDashboard() {
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-white">Clipper Video Studio</h3>
-                    <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
-                      {selectedJob.campaign_id || "Default"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-white">Clipper Video Studio</h3>
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                        {selectedJob.campaign_id || "Default"}
+                      </span>
+                      {(selectedJob.user_topic_context || selectedJob.edit_plan?.user_topic_context) && (
+                        <span className="text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full max-w-xs truncate" title={selectedJob.user_topic_context || selectedJob.edit_plan?.user_topic_context || ""}>
+                          🎯 {selectedJob.user_topic_context || selectedJob.edit_plan?.user_topic_context}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-zinc-400">
+                      AI-directed B-roll cuts • Kinetic captions • Campaign-optimized edit
+                    </p>
                   </div>
-                  <p className="text-[11px] text-zinc-400">
-                    AI-directed B-roll cuts • Kinetic captions • Campaign-optimized edit
-                  </p>
                 </div>
-              </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
                 {/* SDR2HDR Upscale & HDR10 Button */}

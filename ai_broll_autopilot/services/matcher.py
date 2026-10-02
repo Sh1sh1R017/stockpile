@@ -51,6 +51,8 @@ class Matcher:
         # Memes allowed only if both campaign AND niche profile permit meme cutaways
         allow_memes = bool(campaign.allow_ai_broll and (getattr(niche.editing, "meme_cutaways", False) if niche else False))
 
+        user_topic_context = plan.get("user_topic_context")
+
         # Shared set to track used asset IDs across all shots (prevents duplicates)
         used_ids: Set[str] = set()
         used_ids_lock = asyncio.Lock()
@@ -64,6 +66,7 @@ class Matcher:
                 niche_id=niche_id,
                 used_ids=used_ids,
                 used_ids_lock=used_ids_lock,
+                user_topic_context=user_topic_context,
             )
             if result is not None:
                 resolved_shots.append(result)
@@ -81,6 +84,7 @@ class Matcher:
         niche_id: Optional[str] = None,
         used_ids: Optional[Set[str]] = None,
         used_ids_lock: Optional[asyncio.Lock] = None,
+        user_topic_context: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Resolve a single B-roll shot. used_ids tracks globally-used asset IDs to prevent repeats."""
         if used_ids is None:
@@ -88,7 +92,28 @@ class Matcher:
 
         shot_id = shot.get("shot_id", "shot")
         prompt = shot.get("search_prompt") or shot.get("visceral_human_metaphor") or shot.get("emotional_core")
-        semantic_queries = shot.get("broll_search_queries") or shot.get("micro_prompts") or []
+        raw_queries = list(shot.get("broll_search_queries") or shot.get("micro_prompts") or [])
+        if prompt and prompt not in raw_queries:
+            raw_queries.insert(0, prompt)
+
+        semantic_queries = []
+        clean_ctx = user_topic_context.strip() if user_topic_context and user_topic_context.strip() else None
+        if clean_ctx:
+            # Shorten context to core 2-3 focus words if too long (e.g. "podcast basketball New York Knicks" -> "New York Knicks basketball")
+            import re
+            ctx_words = [w for w in re.findall(r"\b[a-zA-Z0-9]+\b", clean_ctx) if len(w) > 2 and w.lower() not in {"this", "clip", "about", "talking", "player", "podcast", "video"}]
+            condensed_ctx = " ".join(ctx_words[:3]) if ctx_words else clean_ctx
+
+            for q in raw_queries:
+                # Add topic-anchored query first
+                if condensed_ctx.lower() not in q.lower():
+                    semantic_queries.append(f"{condensed_ctx} {q}".strip())
+                semantic_queries.append(q)
+            # Add topic itself as fallback candidate
+            if condensed_ctx not in semantic_queries:
+                semantic_queries.append(condensed_ctx)
+        else:
+            semantic_queries = raw_queries or ([prompt] if prompt else [])
         emotion = shot.get("emotion") or shot.get("emotional_core") or "neutral"
         tone = shot.get("tone_of_voice") or "neutral"
         dialogue = shot.get("dialogue_quote") or ""

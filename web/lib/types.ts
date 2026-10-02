@@ -73,6 +73,7 @@ export interface JobSummary {
   emotional_summary?: string;
   drive_file_url?: string;
   campaign_id?: string;
+  user_topic_context?: string | null;
   review_data?: {
     verdict: string;
     score: number;
@@ -149,6 +150,7 @@ export interface JobDetail extends JobSummary {
     edit_revision?: number;
     render_stale?: boolean;
     hook_text?: string;
+    user_topic_context?: string | null;
     subtitles?: Array<{
       word?: string;
       text?: string;

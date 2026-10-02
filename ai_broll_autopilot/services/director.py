@@ -45,6 +45,7 @@ class Director:
         campaign_id: str = "default",
         curated_moment_id: Optional[str] = None,
         custom_hook: Optional[str] = None,
+        user_topic_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate a complete Visual Edit Plan respecting campaign-specific constraints and visual pacing."""
         from ai_broll_autopilot.campaigns import campaign_registry
@@ -173,11 +174,21 @@ class Director:
    - You may designate up to 1-2 shots as "style": "meme" if a wild claim, rage outburst, or high-energy reaction occurs.
    - For all other shots, use real stock footage ("style": "stockpile")."""
 
+        user_context_block = ""
+        if user_topic_context and user_topic_context.strip():
+            user_context_block = f"""
+USER-SPECIFIED TOPIC / VIDEO CONTEXT (HIGHEST PRIORITY):
+The user explicitly specified the exact topic/subject of this clip:
+"{user_topic_context.strip()}"
+All selected B-roll cutaways MUST be directly relevant to this specific topic!
+Never choose generic, sloppy, or unrelated footage. Every visual must specifically match this subject matter.
+"""
+
         director_prompt = f"""You are the Master AI Video Director for high-retention viral short-form videos (TikTok, Reels, YouTube Shorts).
 CAMPAIGN: {campaign.name}
 CONTENT DOMAIN: {niche_desc}
 RELEVANT VISUAL THEMES: {niche_keywords_hint}
-
+{user_context_block}
 MANDATORY DIRECTING OBJECTIVES:
 1. RHYTHMIC EDITING, NOT A MECHANICAL GRID:
    - Total Video Duration: {video_duration:.2f} seconds.
@@ -297,7 +308,8 @@ Return ONLY a valid JSON object matching this schema:
         if not plan_data or "shots" not in plan_data or not plan_data["shots"]:
             logger.warning(f"AI Director failed to produce valid plan for '{campaign.id}'. Falling back to heuristic plan.")
             return self._create_heuristic_plan(
-                segments, video_duration, campaign=campaign, custom_hook=chosen_hook or custom_hook, curated_moment_id=curated_moment_id
+                segments, video_duration, campaign=campaign, custom_hook=chosen_hook or custom_hook, curated_moment_id=curated_moment_id,
+                user_topic_context=user_topic_context
             )
 
         try:
@@ -451,6 +463,7 @@ Return ONLY a valid JSON object matching this schema:
                 "style_guidelines": list(getattr(style_profile, "editorial_guidelines", [])),
                 "shots": clean_shots,
                 "text_emphasis_graphics": emphasis_graphics,
+                "user_topic_context": user_topic_context.strip() if user_topic_context else None,
             }
 
             logger.info(f"AI Director planned {len(clean_shots)} B-roll cutaways covering {total_broll_time:.1f}s ({coverage_pct}% of {video_duration:.1f}s)")
@@ -459,7 +472,8 @@ Return ONLY a valid JSON object matching this schema:
         except Exception as e:
             logger.error(f"AI Director planning post-processing failed: {e}", exc_info=True)
             return self._create_heuristic_plan(
-                segments, video_duration, campaign=campaign, custom_hook=chosen_hook or custom_hook, curated_moment_id=curated_moment_id
+                segments, video_duration, campaign=campaign, custom_hook=chosen_hook or custom_hook, curated_moment_id=curated_moment_id,
+                user_topic_context=user_topic_context
             )
 
     def _create_heuristic_plan(
@@ -469,6 +483,7 @@ Return ONLY a valid JSON object matching this schema:
         campaign: Optional[Any] = None,
         custom_hook: Optional[str] = None,
         curated_moment_id: Optional[str] = None,
+        user_topic_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Deterministic fallback edit plan ensuring campaign constraints and contextual keywords."""
         shots = []
@@ -613,6 +628,7 @@ Return ONLY a valid JSON object matching this schema:
             "style_guidelines": list(getattr(style_profile, "editorial_guidelines", [])) if style_profile else [],
             "shots": shots,
             "text_emphasis_graphics": emphasis_graphics,
+            "user_topic_context": user_topic_context.strip() if user_topic_context else None,
         }
 
     def _detect_emphasis_graphics(

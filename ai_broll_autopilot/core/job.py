@@ -74,9 +74,10 @@ class Job:
     retry_count: int = 0
     repair_count: int = 0
     campaign_id: str = "default"
+    user_topic_context: Optional[str] = None
 
     @classmethod
-    def create(cls, source_file_path: str, campaign_id: str = "default") -> "Job":
+    def create(cls, source_file_path: str, campaign_id: str = "default", user_topic_context: Optional[str] = None) -> "Job":
         path = Path(source_file_path)
         job_id = generate_job_id(prefix=path.stem[:12])
 
@@ -87,6 +88,7 @@ class Job:
             status=JobState.QUEUED,
             progress=0.0,
             campaign_id=campaign_id or "default",
+            user_topic_context=user_topic_context.strip() if user_topic_context and user_topic_context.strip() else None,
         )
 
     def can_transition_to(self, target_state: JobState) -> bool:
@@ -121,4 +123,6 @@ class Job:
             "drive_file_url": self.drive_file_url,
             "retry_count": self.retry_count,
             "repair_count": self.repair_count,
+            "campaign_id": self.campaign_id,
+            "user_topic_context": self.user_topic_context,
         }

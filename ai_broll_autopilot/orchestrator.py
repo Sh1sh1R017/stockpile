@@ -77,9 +77,14 @@ class Orchestrator:
         except Exception:
             asyncio.run(self.enqueue_file(file_path))
 
-    async def enqueue_file(self, file_path: str, campaign_id: str = "default") -> str:
-        """Create and enqueue a new job from a file path."""
-        job = Job.create(file_path, campaign_id=campaign_id)
+    async def enqueue_file(
+        self,
+        file_path: str,
+        campaign_id: str = "default",
+        user_topic_context: Optional[str] = None
+    ) -> str:
+        """Create and enqueue a new job from a file path with optional user topic context."""
+        job = Job.create(file_path, campaign_id=campaign_id, user_topic_context=user_topic_context)
         await self.queue.enqueue(job)
         return job.job_id
 
@@ -308,7 +313,8 @@ class Orchestrator:
                 job.transcript_segments,
                 duration,
                 campaign_id=job.campaign_id,
-                curated_moment_id=moment_id_cand
+                curated_moment_id=moment_id_cand,
+                user_topic_context=job.user_topic_context
             )
 
             # Audio-aware B-roll Super Director: identify the most impactful

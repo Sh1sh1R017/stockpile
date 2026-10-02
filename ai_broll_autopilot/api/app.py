@@ -101,6 +101,7 @@ class DriveConfigUpdate(BaseModel):
 class YouTubeJobRequest(BaseModel):
     url: str = Field(..., description="YouTube video or Shorts URL to download and process")
     campaign_id: Optional[str] = Field("default", description="Target campaign preset ID (e.g. 'default')")
+    user_topic_context: Optional[str] = Field(None, description="Optional clip topic or context (e.g. 'A podcast of basketball player talking about the New York Knicks')")
 
 
 class MemeGenerateRequest(BaseModel):
@@ -235,6 +236,7 @@ async def list_jobs(limit: int = 50):
             "drive_file_url": s.get("drive_file_url"),
             "review_data": None,
             "campaign_id": s.get("campaign_id", "default"),
+            "user_topic_context": s.get("user_topic_context"),
         })
     return res
 
@@ -306,6 +308,7 @@ async def get_job_detail(job_id: str):
         "drive_file_url": job.drive_file_url,
         "survey_data": survey_data,
         "campaign_id": getattr(job, "campaign_id", "default"),
+        "user_topic_context": getattr(job, "user_topic_context", None),
     }
 
 
@@ -1224,6 +1227,7 @@ async def clear_all_jobs_endpoint():
 async def upload_video(
     file: UploadFile = File(...),
     campaign_id: Optional[str] = Form("default"),
+    user_topic_context: Optional[str] = Form(None),
 ):
     """Upload a raw video file, save to input/, and enqueue for autopilot processing."""
     if not file.filename:
@@ -1243,16 +1247,21 @@ async def upload_video(
     with open(target_file, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    logger.info(f"Uploaded file saved to: {target_file} (Campaign: {campaign_id})")
+    logger.info(f"Uploaded file saved to: {target_file} (Campaign: {campaign_id}, Topic: {user_topic_context})")
 
     # Enqueue job
-    job_id = await orchestrator.enqueue_file(str(target_file), campaign_id=campaign_id or "default")
+    job_id = await orchestrator.enqueue_file(
+        str(target_file),
+        campaign_id=campaign_id or "default",
+        user_topic_context=user_topic_context
+    )
 
     return {
         "status": "queued",
         "job_id": job_id,
         "filename": target_file.name,
         "campaign_id": campaign_id or "default",
+        "user_topic_context": user_topic_context,
         "message": f"Successfully uploaded and enqueued {target_file.name}",
     }
 
@@ -1294,13 +1303,18 @@ async def import_youtube_video(req: YouTubeJobRequest):
             raise HTTPException(status_code=500, detail="Failed to download YouTube video")
 
         logger.info(f"YouTube video downloaded to: {downloaded_file}")
-        job_id = await orchestrator.enqueue_file(str(downloaded_file), campaign_id=target_campaign)
+        job_id = await orchestrator.enqueue_file(
+            str(downloaded_file),
+            campaign_id=target_campaign,
+            user_topic_context=req.user_topic_context
+        )
 
         return {
             "status": "queued",
             "job_id": job_id,
             "filename": downloaded_file.name,
             "campaign_id": target_campaign,
+            "user_topic_context": req.user_topic_context,
             "message": f"Successfully imported and enqueued {downloaded_file.name}",
         }
     except Exception as e:
