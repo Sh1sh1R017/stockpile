@@ -9,22 +9,61 @@ echo       STOCKPILE SELF-HEALING LAUNCHER
 echo  ==========================================
 echo.
 
-REM ---- Python ------------------------------------------------------------
+REM ---- Python 3.13 -------------------------------------------------------
+REM Stockpile is kept on Python 3.13 for a stable FastAPI/Pydantic runtime.
 set "PY="
-where py >nul 2>&1 && set "PY=py -3"
-if not defined PY where python >nul 2>&1 && set "PY=python"
+where py >nul 2>&1
+if not errorlevel 1 (
+  py -3.13 -c "import sys" >nul 2>&1
+  if not errorlevel 1 set "PY=py -3.13"
+)
+
 if not defined PY (
-  echo [ERROR] Python 3 was not found.
+  echo [FIX] Python 3.13 is missing. Trying Windows Package Manager...
+  where winget >nul 2>&1
+  if not errorlevel 1 (
+    winget install --id Python.Python.3.13 -e --accept-source-agreements --accept-package-agreements
+  )
+)
+
+if not defined PY (
+  where py >nul 2>&1
+  if not errorlevel 1 (
+    py -3.13 -c "import sys" >nul 2>&1
+    if not errorlevel 1 set "PY=py -3.13"
+  )
+)
+
+if not defined PY (
+  where python >nul 2>&1
+  if not errorlevel 1 (
+    python -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3,13) else 1)" >nul 2>&1
+    if not errorlevel 1 set "PY=python"
+  )
+)
+
+if not defined PY (
   echo.
-  echo Install Python 3 from python.org, then run this launcher again.
+  echo [ERROR] Python 3.13 was not found.
+  echo Install Python 3.13 and run this launcher again.
   pause
   exit /b 1
 )
 echo [OK] Python found: %PY%
 
 REM ---- Virtual environment -----------------------------------------------
+REM Recreate an existing venv if it was created with Python 3.14 or another version.
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3,13) else 1)" >nul 2>&1
+  if errorlevel 1 (
+    echo [FIX] Existing virtual environment uses the wrong Python version.
+    echo [FIX] Recreating it with Python 3.13...
+    rmdir /s /q ".venv"
+  )
+)
+
 if not exist ".venv\Scripts\python.exe" (
-  echo [FIX] Creating virtual environment...
+  echo [FIX] Creating Python 3.13 virtual environment...
   %PY% -m venv .venv
   if errorlevel 1 goto :fail
 )
