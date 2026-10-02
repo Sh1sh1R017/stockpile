@@ -22,9 +22,12 @@ PROJECT_ROOT = next(
 _ENV_CANDIDATES = [PROJECT_ROOT / ".env", *_PROJECT_CANDIDATES]
 _ENV_FILE = next((p / ".env" for p in _ENV_CANDIDATES if (p / ".env").exists()), None)
 if _ENV_FILE:
-    load_dotenv(_ENV_FILE, override=False)
+    # The local .env is the source of truth for this checkout. In particular,
+    # replace a stale/empty process-level GEMINI_API_KEY so Windows environment
+    # variables cannot silently mask the key in the project's .env.
+    load_dotenv(_ENV_FILE, override=True)
 else:
-    load_dotenv(override=False)
+    load_dotenv(override=True)
 
 
 class Config:
