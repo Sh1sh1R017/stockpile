@@ -26,6 +26,7 @@ interface BrollSwapModalProps {
   handleSelectStockCandidate: (cand: StockVideoCandidate) => void;
   isUploadingCustom: boolean;
   handleCustomVideoUpload: (file: File) => void;
+  userTopicContext?: string | null;
 }
 
 export const BrollSwapModal: React.FC<BrollSwapModalProps> = ({
@@ -43,6 +44,7 @@ export const BrollSwapModal: React.FC<BrollSwapModalProps> = ({
   handleSelectStockCandidate,
   isUploadingCustom,
   handleCustomVideoUpload,
+  userTopicContext,
 }) => {
   const customVideoInputRef = useRef<HTMLInputElement>(null);
 
@@ -134,7 +136,21 @@ export const BrollSwapModal: React.FC<BrollSwapModalProps> = ({
               </div>
 
               {/* Quick Pill Suggestions */}
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {userTopicContext && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSwapSearchQuery(userTopicContext);
+                      handleSearchStock(userTopicContext);
+                    }}
+                    className="text-[10px] font-bold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/50 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 shadow-sm"
+                    title="Search specifically with the user clip topic"
+                  >
+                    <span>🎯</span>
+                    <span className="max-w-[200px] truncate">{userTopicContext}</span>
+                  </button>
+                )}
                 {[
                   "luxury watch",
                   "focus typing laptop",

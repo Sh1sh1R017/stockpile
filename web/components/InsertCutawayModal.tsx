@@ -18,6 +18,7 @@ interface InsertCutawayModalProps {
   setInsertCutawayMemeTemplate: (t: string) => void;
   isInsertingCutaway: boolean;
   handleConfirmInsertCutaway: () => void;
+  userTopicContext?: string | null;
 }
 
 export const InsertCutawayModal: React.FC<InsertCutawayModalProps> = ({
@@ -35,6 +36,7 @@ export const InsertCutawayModal: React.FC<InsertCutawayModalProps> = ({
   setInsertCutawayMemeTemplate,
   isInsertingCutaway,
   handleConfirmInsertCutaway,
+  userTopicContext,
 }) => {
   if (!isOpen) return null;
 
@@ -129,9 +131,21 @@ export const InsertCutawayModal: React.FC<InsertCutawayModalProps> = ({
           {/* Search prompt / meme fields */}
           {insertCutawayStyle === "stockpile" ? (
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
-                Visual Search Prompt
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                  Visual Search Prompt
+                </label>
+                {userTopicContext && (
+                  <button
+                    type="button"
+                    onClick={() => setInsertCutawayPrompt(userTopicContext)}
+                    className="text-[10px] text-indigo-300 hover:text-indigo-200 underline font-mono truncate max-w-[200px]"
+                    title={`Use clip topic: ${userTopicContext}`}
+                  >
+                    🎯 Use: {userTopicContext}
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 value={insertCutawayPrompt}

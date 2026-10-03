@@ -2199,6 +2199,7 @@ export default function StudioDashboard() {
         handleSelectStockCandidate={handleSelectStockCandidate}
         isUploadingCustom={isUploadingCustom}
         handleCustomVideoUpload={handleCustomVideoUpload}
+        userTopicContext={selectedJob?.user_topic_context || selectedJob?.edit_plan?.user_topic_context || userTopicContext}
       />
 
       <InsertCutawayModal
@@ -2216,6 +2217,7 @@ export default function StudioDashboard() {
         setInsertCutawayMemeTemplate={setInsertCutawayMemeTemplate}
         isInsertingCutaway={isInsertingCutaway}
         handleConfirmInsertCutaway={handleConfirmInsertCutaway}
+        userTopicContext={selectedJob?.user_topic_context || selectedJob?.edit_plan?.user_topic_context || userTopicContext}
       />
 
       <CuratedMomentsModal
