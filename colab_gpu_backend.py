@@ -99,7 +99,11 @@ server_proc = subprocess.Popen(
 print("   Waiting for backend", end="", flush=True)
 for _ in range(30):
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2)
+        urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/health", timeout=2)
+        print(" ✅", flush=True)
+        break
+    except urllib.error.HTTPError:
+        # Any HTTP response means the server is up (even 4xx)
         print(" ✅", flush=True)
         break
     except Exception:
